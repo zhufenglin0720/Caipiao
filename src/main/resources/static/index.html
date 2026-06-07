@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>彩票预测分析系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .header-left h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .header-left p {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .header-right {
+            text-align: right;
+            font-size: 12px;
+            opacity: 0.9;
+            white-space: nowrap;
+        }
+
+        .main-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .main-tab {
+            flex: 1;
+            padding: 15px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 16px;
+            font-weight: bold;
+            color: #6c757d;
+        }
+
+        .main-tab:hover {
+            background: #e9ecef;
+        }
+
+        .main-tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .content {
+            padding: 15px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .latest-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .latest-title {
+            font-size: 18px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+
+        .latest-numbers {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .number-ball {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: white;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .period-info {
+            margin-left: auto;
+            font-size: 14px;
+        }
+
+        .filter-section {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-btn {
+            padding: 8px 18px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 13px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .filter-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .auto-refresh {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .auto-refresh label {
+            font-size: 13px;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .auto-refresh input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .compare-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .compare-tab {
+            flex: 1;
+            min-width: 120px;
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            font-weight: bold;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .compare-tab:hover {
+            background: #e9ecef;
+        }
+
+        .compare-tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            min-width: 500px;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th {
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid #dee2e6;
+            font-size: 13px;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .fail {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .ball-small {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            border-radius: 50%;
+            background: #667eea;
+            color: white;
+            margin: 2px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .dingwei-text {
+            font-size: 12px;
+            line-height: 1.6;
+            color: #495057;
+            text-align: left;
+            word-break: break-all;
+        }
+
+        .dingwei-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+            flex-wrap: wrap;
+        }
+
+        .dingwei-label {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 40px;
+            font-size: 12px;
+        }
+
+        .dingwei-numbers {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+
+        .dingwei-ball {
+            display: inline-block;
+            width: 22px;
+            height: 22px;
+            line-height: 22px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 16px;
+            color: #6c757d;
+        }
+
+        .error-message {
+            text-align: center;
+            padding: 40px;
+            font-size: 16px;
+            color: #dc3545;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        /* 手机端专属优化 */
+        @media (max-width: 768px) {
+            body {
+                padding: 5px;
+            }
+
+            .container {
+                border-radius: 10px;
+            }
+
+            .header {
+                flex-direction: column;
+                text-align: center;
+                padding: 15px;
+            }
+
+            .header-left {
+                width: 100%;
+            }
+
+            .header-left h1 {
+                font-size: 20px;
+            }
+
+            .header-left p {
+                font-size: 12px;
+            }
+
+            .header-right {
+                text-align: center;
+                width: 100%;
+                font-size: 11px;
+            }
+
+            .main-tab {
+                font-size: 15px;
+                padding: 12px 8px;
+            }
+
+            .content {
+                padding: 10px;
+            }
+
+            .latest-section {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .latest-title {
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+
+            .latest-numbers {
+                gap: 10px;
+                justify-content: center;
+            }
+
+            .number-ball {
+                width: 45px;
+                height: 45px;
+                font-size: 20px;
+            }
+
+            .period-info {
+                width: 100%;
+                text-align: center;
+                margin-top: 10px;
+                font-size: 13px;
+            }
+
+            .filter-section {
+                gap: 6px;
+            }
+
+            .filter-btn {
+                padding: 6px 14px;
+                font-size: 12px;
+                flex: 1;
+                min-width: 70px;
+            }
+
+            .auto-refresh {
+                width: 100%;
+                justify-content: center;
+                margin-top: 8px;
+                margin-left: 0;
+            }
+
+            .compare-tabs {
+                gap: 6px;
+            }
+
+            .compare-tab {
+                padding: 8px 15px;
+                font-size: 13px;
+                min-width: 100px;
+            }
+
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+
+            .stat-card {
+                padding: 12px;
+            }
+
+            .stat-value {
+                font-size: 24px;
+            }
+
+            .stat-label {
+                font-size: 11px;
+            }
+
+            .ball-small {
+                width: 28px;
+                height: 28px;
+                line-height: 28px;
+                font-size: 13px;
+                margin: 1px;
+            }
+
+            th {
+                padding: 10px 5px;
+                font-size: 12px;
+            }
+
+            td {
+                padding: 8px 5px;
+                font-size: 12px;
+            }
+
+            .dingwei-text {
+                font-size: 11px;
+            }
+
+            .dingwei-label {
+                min-width: 35px;
+                font-size: 11px;
+            }
+
+            .dingwei-ball {
+                width: 20px;
+                height: 20px;
+                line-height: 20px;
+                font-size: 10px;
+            }
+
+            .dingwei-row {
+                margin-bottom: 3px;
+            }
+        }
+
+        /* 超小屏幕优化 */
+        @media (max-width: 480px) {
+            .header-left h1 {
+                font-size: 18px;
+            }
+
+            .header-left p {
+                font-size: 11px;
+            }
+
+            .number-ball {
+                width: 40px;
+                height: 40px;
+                font-size: 18px;
+            }
+
+            .filter-btn {
+                padding: 5px 12px;
+                font-size: 11px;
+            }
+
+            .compare-tab {
+                padding: 7px 12px;
+                font-size: 12px;
+            }
+
+            .stat-value {
+                font-size: 20px;
+            }
+
+            .ball-small {
+                width: 25px;
+                height: 25px;
+                line-height: 25px;
+                font-size: 12px;
+            }
+
+            .dingwei-label {
+                min-width: 32px;
+                font-size: 10px;
+            }
+
+            .dingwei-ball {
+                width: 18px;
+                height: 18px;
+                line-height: 18px;
+                font-size: 9px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="header-left">
+            <h1>🎯 彩票预测分析系统</h1>
+            <p>AI智能预测 · 数据分析 · 趋势追踪</p>
+        </div>
+        <div class="header-right">
+            <div id="last-update">加载中...</div>
+        </div>
+    </div>
+
+    <div class="main-tabs">
+        <div class="main-tab active" onclick="switchMainTab('3d')">3D彩票</div>
+        <div class="main-tab" onclick="switchMainTab('pl3')">排列三</div>
+    </div>
+
+    <div class="content">
+        <!-- 3D Tab -->
+        <div id="3d-content" class="tab-content active">
+            <div class="latest-section">
+                <div class="latest-title">📊 最新开奖</div>
+                <div class="latest-numbers" id="3d-latest">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+
+            <div class="stats" id="3d-stats"></div>
+
+            <div class="filter-section">
+                <button class="filter-btn active" onclick="setFilter('3d', 10)">近10期</button>
+                <button class="filter-btn" onclick="setFilter('3d', 30)">近30期</button>
+                <button class="filter-btn" onclick="setFilter('3d', 50)">近50期</button>
+                <div class="auto-refresh">
+                    <label for="auto-refresh-3d">自动刷新</label>
+                    <input type="checkbox" id="auto-refresh-3d" onchange="toggleAutoRefresh('3d')">
+                </div>
+            </div>
+
+            <div class="compare-tabs">
+                <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma')">三码定位</button>
+                <button class="compare-tab" onclick="switchCompareTab('3d', 'qima')">七码定位</button>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>AI预测</th>
+                        <th>实际开奖</th>
+                        <th>匹配结果</th>
+                    </tr>
+                    </thead>
+                    <tbody id="3d-table-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 排列三 Tab -->
+        <div id="pl3-content" class="tab-content">
+            <div class="latest-section">
+                <div class="latest-title">📊 最新开奖</div>
+                <div class="latest-numbers" id="pl3-latest">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+
+            <div class="stats" id="pl3-stats"></div>
+
+            <div class="filter-section">
+                <button class="filter-btn active" onclick="setFilter('pl3', 10)">近10期</button>
+                <button class="filter-btn" onclick="setFilter('pl3', 30)">近30期</button>
+                <button class="filter-btn" onclick="setFilter('pl3', 50)">近50期</button>
+                <div class="auto-refresh">
+                    <label for="auto-refresh-pl3">自动刷新</label>
+                    <input type="checkbox" id="auto-refresh-pl3" onchange="toggleAutoRefresh('pl3')">
+                </div>
+            </div>
+
+            <div class="compare-tabs">
+                <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma')">三码定位</button>
+                <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima')">七码定位</button>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead id="pl3-table-head">
+                    <tr>
+                        <th>三码预测</th>
+                        <th>七码预测</th>
+                        <th>实际开奖</th>
+                        <th>匹配结果</th>
+                    </tr>
+                    </thead>
+                    <tbody id="pl3-table-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentData = {
+        sd: [],
+        pl3: [],
+        sdCompare: [],
+        pl3Compare: []
+    };
+
+    let filters = {
+        '3d': 10,
+        'pl3': 10
+    };
+
+    let compareTabs = {
+        '3d': 'sanma',
+        'pl3': 'sanma'
+    };
+
+    let autoRefreshIntervals = {
+        '3d': null,
+        'pl3': null
+    };
+
+    function switchMainTab(type) {
+        document.querySelectorAll('.main-tab').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+        event.target.classList.add('active');
+        document.getElementById(type + '-content').classList.add('active');
+    }
+
+    function setFilter(type, count) {
+        filters[type] = count;
+        const container = event.target.parentElement;
+        const buttons = container.querySelectorAll('.filter-btn');
+        buttons.forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        renderTable(type);
+    }
+
+    function switchCompareTab(type, tab) {
+        compareTabs[type] = tab;
+        const container = event.target.parentElement;
+        const buttons = container.querySelectorAll('.compare-tab');
+        buttons.forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        renderTable(type);
+    }
+
+    function toggleAutoRefresh(type) {
+        const checkbox = document.getElementById('auto-refresh-' + type);
+
+        if (checkbox.checked) {
+            autoRefreshIntervals[type] = setInterval(() => {
+                loadData();
+            }, 30000);
+        } else {
+            if (autoRefreshIntervals[type]) {
+                clearInterval(autoRefreshIntervals[type]);
+                autoRefreshIntervals[type] = null;
+            }
+        }
+    }
+
+    function checkMatch(aiHm, realHm) {
+        if (!aiHm || !realHm) return false;
+        const aiNumbers = aiHm.split(',');
+        return aiNumbers.includes(realHm);
+    }
+
+    function checkDingWeiMatch(aiDingWeiHm, realHm) {
+        if (!aiDingWeiHm || !realHm || realHm.length !== 3) return false;
+
+        const baiweiMatch = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
+        const shiweiMatch = aiDingWeiHm.match(/十位[:：]([0-9,]+)/);
+        const geweiMatch = aiDingWeiHm.match(/个位[:：]([0-9,]+)/);
+
+        if (!baiweiMatch || !shiweiMatch || !geweiMatch) return false;
+
+        const baiwei = baiweiMatch[1].split(',');
+        const shiwei = shiweiMatch[1].split(',');
+        const gewei = geweiMatch[1].split(',');
+
+        return baiwei.includes(realHm[0]) && shiwei.includes(realHm[1]) && gewei.includes(realHm[2]);
+    }
+
+    function formatBalls(numbers) {
+        if (!numbers) return '-';
+        return numbers.split(',').map(num =>
+            `<span class="ball-small">${num.trim()}</span>`
+        ).join('');
+    }
+
+    function formatDingWei(text) {
+        if (!text) return '-';
+
+        const lines = text.split('\n').filter(line => line.trim());
+        let html = '<div class="dingwei-text">';
+
+        lines.forEach(line => {
+            const baiweiMatch = line.match(/百位[:：]([0-9,]+)/);
+            const shiweiMatch = line.match(/十位[:：]([0-9,]+)/);
+            const geweiMatch = line.match(/个位[:：]([0-9,]+)/);
+
+            if (baiweiMatch) {
+                html += '<div class="dingwei-row">';
+                html += '<span class="dingwei-label">百位:</span>';
+                html += '<div class="dingwei-numbers">';
+                baiweiMatch[1].split(',').forEach(num => {
+                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
+                });
+                html += '</div></div>';
+            }
+
+            if (shiweiMatch) {
+                html += '<div class="dingwei-row">';
+                html += '<span class="dingwei-label">十位:</span>';
+                html += '<div class="dingwei-numbers">';
+                shiweiMatch[1].split(',').forEach(num => {
+                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
+                });
+                html += '</div></div>';
+            }
+
+            if (geweiMatch) {
+                html += '<div class="dingwei-row">';
+                html += '<span class="dingwei-label">个位:</span>';
+                html += '<div class="dingwei-numbers">';
+                geweiMatch[1].split(',').forEach(num => {
+                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
+                });
+                html += '</div></div>';
+            }
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function renderLatest(type, latest) {
+        const elementId = type === '3d' ? '3d-latest' : 'pl3-latest';
+        const element = document.getElementById(elementId);
+
+        if (!latest) {
+            element.innerHTML = '<div class="loading">暂无数据</div>';
+            return;
+        }
+
+        element.innerHTML = `
+            <div class="number-ball">${latest.q1 || '-'}</div>
+            <div class="number-ball">${latest.q2 || '-'}</div>
+            <div class="number-ball">${latest.q3 || '-'}</div>
+            <div class="period-info">
+                <div>第 ${latest.qh || '-'} 期</div>
+            </div>
+        `;
+    }
+
+    function renderStats(type, compareData) {
+        const elementId = type === '3d' ? '3d-stats' : 'pl3-stats';
+        const element = document.getElementById(elementId);
+
+        let sanmaSuccess = 0;
+        let qimaSuccess = 0;
+        let total = compareData.length;
+        let sanmaTotal = compareData.filter(item => item.aiHm).length;
+        let qimaTotal = compareData.filter(item => item.aiDingWeiHm).length;
+
+        compareData.forEach(item => {
+            if (checkMatch(item.aiHm, item.realHm)) sanmaSuccess++;
+            if (checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) qimaSuccess++;
+        });
+
+        const sanmaRate = total > 0 ? ((sanmaSuccess / sanmaTotal) * 100).toFixed(1) : 0;
+        const qimaRate = total > 0 ? ((qimaSuccess / qimaTotal) * 100).toFixed(1) : 0;
+
+        element.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value">${total}</div>
+                <div class="stat-label">总期数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${sanmaSuccess}</div>
+                <div class="stat-label">三码命中</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${sanmaRate}%</div>
+                <div class="stat-label">三码命中率</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${qimaSuccess}</div>
+                <div class="stat-label">七码命中</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${qimaRate}%</div>
+                <div class="stat-label">七码命中率</div>
+            </div>
+        `;
+    }
+
+    function renderTable(type) {
+        const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
+        const filterCount = filters[type];
+        const compareType = compareTabs[type];
+
+        const filteredData = data.slice(-filterCount).reverse();
+
+        renderStats(type, filteredData);
+        // 更新表头
+        updateTableHeader(type, compareType);
+
+        const tbody = document.getElementById(type + '-table-body');
+        tbody.innerHTML = '';
+
+        if (filteredData.length === 0) {
+            const colSpan = getColSpan(type, compareType);
+            tbody.innerHTML = `<tr><td colspan="${colSpan}" class="loading">暂无数据</td></tr>`;
+            return;
+        }
+
+        filteredData.forEach(item => {
+            let isMatch = false;
+            let matchText = '';
+
+            if (compareType === 'sanma') {
+                isMatch = checkMatch(item.aiHm, item.realHm);
+                matchText = isMatch ? '✓ 命中' : '✗ 未命中';
+            } else {
+                isMatch = checkDingWeiMatch(item.aiDingWeiHm, item.realHm);
+                matchText = isMatch ? '✓ 命中' : '✗ 未命中';
+            }
+
+            const row = document.createElement('tr');
+
+            if (type === '3d') {
+                row.innerHTML = `
+                    <td>${compareType === 'sanma' ? formatBalls(item.aiHm) : formatDingWei(item.aiDingWeiHm)}</td>
+                    <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
+                    <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
+                `;
+            } else {
+                if (compareType === 'sanma') {
+                    row.innerHTML = `
+                        <td>${formatBalls(item.aiHm)}</td>
+                        <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
+                        <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
+                    `;
+                } else {
+                    row.innerHTML = `
+                        <td>${formatDingWei(item.aiDingWeiHm)}</td>
+                        <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
+                        <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
+                    `;
+                }
+            }
+
+            tbody.appendChild(row);
+        });
+    }
+
+    function updateTableHeader(type, compareType) {
+        if (type === 'pl3') {
+            const thead = document.getElementById('pl3-table-head');
+            if (compareType === 'sanma') {
+                thead.innerHTML = `
+                    <tr>
+                        <th>三码预测</th>
+                        <th>实际开奖</th>
+                        <th>匹配结果</th>
+                    </tr>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <tr>
+                        <th>七码预测</th>
+                        <th>实际开奖</th>
+                        <th>匹配结果</th>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+    function getColSpan(type, compareType) {
+        if (type === '3d') {
+            return 3;
+        } else {
+            return 3;
+        }
+    }
+
+    function updateLastUpdateTime() {
+        const now = new Date();
+        const timeStr = now.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        document.getElementById('last-update').textContent = '最后更新: ' + timeStr;
+    }
+
+    async function loadData() {
+        try {
+            const response = await fetch('/data');
+
+            if (!response.ok) {
+                throw new Error('网络响应异常: ' + response.status);
+            }
+
+            currentData = await response.json();
+
+            if (currentData.sd && currentData.sd.length > 0) {
+                renderLatest('3d', currentData.sd[currentData.sd.length - 1]);
+            } else {
+                renderLatest('3d', null);
+            }
+
+            if (currentData.pl3 && currentData.pl3.length > 0) {
+                renderLatest('pl3', currentData.pl3[currentData.pl3.length - 1]);
+            } else {
+                renderLatest('pl3', null);
+            }
+
+            renderTable('3d');
+            renderTable('pl3');
+
+            updateLastUpdateTime();
+
+        } catch (error) {
+            console.error('加载数据失败:', error);
+            document.getElementById('3d-table-body').innerHTML =
+                '<tr><td colspan="3" class="error-message">数据加载失败，请检查网络连接或刷新页面重试</td></tr>';
+            document.getElementById('pl3-table-body').innerHTML =
+                '<tr><td colspan="4" class="error-message">数据加载失败，请检查网络连接或刷新页面重试</td></tr>';
+        }
+    }
+
+    window.onload = function() {
+        loadData();
+    };
+
+    window.onbeforeunload = function() {
+        if (autoRefreshIntervals['3d']) {
+            clearInterval(autoRefreshIntervals['3d']);
+        }
+        if (autoRefreshIntervals['pl3']) {
+            clearInterval(autoRefreshIntervals['pl3']);
+        }
+    };
+</script>
+</body>
+</html>

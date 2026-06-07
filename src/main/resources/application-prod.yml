@@ -1,0 +1,9 @@
+file:
+  location:
+    3d: /jdk/app/caipiao/file/3D.xlsx
+    compare3D: /jdk/app/caipiao/file/3D对比.xlsx
+    pl3: /jdk/app/caipiao/file/排列三.xlsx
+    comparePl3: /jdk/app/caipiao/file/排列三对比.xlsx
+spring:
+  mail:
+    to: 1162220289@qq.com,18118235@qq.com,13269695159@163.com
