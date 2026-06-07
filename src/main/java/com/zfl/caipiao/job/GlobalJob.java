@@ -163,22 +163,6 @@ public class GlobalJob {
         sendEmailCode("今日3D及排三预测", msg[0]);
     }
 
-    @Scheduled(cron = "0 0 19 * * ?")
-    public void applyTask1() throws MessagingException, InterruptedException {
-        String pl3Answer = AiUtils.getPl3DingWeiAiV2();
-        if(StrUtil.isNotBlank(pl3Answer) && pl3Answer.contains("百位:") && pl3Answer.contains("十位:") && pl3Answer.contains("个位:")){
-            String bwAnswer = pl3Answer.substring(3, 16);
-            String swAnswer = pl3Answer.substring(20, 33);
-            String gwAnswer = pl3Answer.substring(37, 50);
-            sendEmailCode("排列3定位7码推荐-新提示词", EmailConstant.DingWeiAskContent
-                    .replace("{type}", "排列三")
-                    .replace("{bw}", bwAnswer)
-                    .replace("{sw}", swAnswer)
-                    .replace("{gw}", gwAnswer)
-            );
-        }
-    }
-
     @Scheduled(cron = "0 30 22 * * ?")
     public void setDataTask() throws Exception {
         List<Hm> sdCache = HmCache.getSdCache();

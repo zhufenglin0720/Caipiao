@@ -53,15 +53,11 @@ public class AiUtils {
     }
 
     public static String get3dDingWeiAi(){
-        return predictLottery(HmCache::getSdCache, HmCache::getSdCompareCache, DingWeiAskContent.V2, false);
+        return predictLottery(HmCache::getSdCache, HmCache::getSdCompareCache, DingWeiAskContent.V1, false);
     }
 
     public static String getPl3DingWeiAi(){
         return predictLottery(HmCache::getPl3Cache, HmCache::getPl3CompareCache, DingWeiAskContent.V1,false);
-    }
-
-    public static String getPl3DingWeiAiV2(){
-        return predictLottery(HmCache::getPl3Cache, HmCache::getPl3CompareCache, DingWeiAskContent.V2,false);
     }
 
     private static String predictLottery(DataProvider dataProvider, CompareDataProvider compareProvider, String systemMsgTemplate,
@@ -84,9 +80,10 @@ public class AiUtils {
             }else{
                 HmCache.CompareDto compareDto = compareDtoList.get(compareDtoList.size() - 1);
                 systemMsg = systemMsgTemplate
-                        .replace("{list}", historyData.subList(historyData.size() - HISTORY_DATA_SIZE, historyData.size()).toString())
-                        .replace("{lastYc}", compareDto.getAiDingWeiHm())
-                        .replace("{realHm}", compareDto.getRealHm());
+                        .replace("{list}", historyData.subList(historyData.size() - HISTORY_DATA_SIZE, historyData.size()).toString());
+                if(compareDto != null && StrUtil.isNotBlank(compareDto.getAiDingWeiHm()) && StrUtil.isNotBlank(compareDto.getRealHm())){
+                    systemMsg = systemMsg.replace("{lastYc}", compareDto.getAiDingWeiHm()).replace("{realHm}", compareDto.getRealHm());
+                }
             }
             HttpEntity<String> entity = buildRequestEntity(systemMsg, userMsg);
             log.info("开始调用AI预测接口");
