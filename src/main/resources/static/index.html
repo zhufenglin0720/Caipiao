@@ -313,6 +313,15 @@
         .table-container.table-fixed {
             flex: 1;
             min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-container.table-fixed th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #1a2030;
         }
 
         .error-message { color: var(--fail); }
@@ -444,21 +453,27 @@
         .panel-scroll {
             flex: 1;
             min-height: 0;
-            overflow: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
 
         .panel-scroll .tracker-result-block {
-            flex: 1;
-            min-height: 0;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
         }
 
+        .panel-scroll .tracker-result-header {
+            flex-shrink: 0;
+        }
+
         .panel-scroll .table-container.table-fixed {
-            flex: 1;
+            flex: none;
+            overflow: visible;
+            min-height: auto;
         }
 
         /* History trend badges */
