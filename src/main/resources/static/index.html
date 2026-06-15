@@ -4,564 +4,710 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>彩票预测分析系统</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg-deep: #0f1419;
+            --bg-card: rgba(255, 255, 255, 0.04);
+            --bg-card-hover: rgba(255, 255, 255, 0.07);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f0f4f8;
+            --text-secondary: #94a3b8;
+            --accent: #f59e0b;
+            --accent-light: #fbbf24;
+            --accent-glow: rgba(245, 158, 11, 0.25);
+            --success: #34d399;
+            --fail: #f87171;
+            --purple: #818cf8;
+            --purple-dark: #6366f1;
+            --radius: 14px;
+            --radius-sm: 8px;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+            --page-pad: 10px;
+            --row-h: 52px;
         }
 
-        body {
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 10px;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        html, body {
+            height: 100%;
             overflow: hidden;
         }
 
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-deep);
+            background-image:
+                radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99, 102, 241, 0.18), transparent),
+                radial-gradient(ellipse 50% 40% at 100% 100%, rgba(245, 158, 11, 0.08), transparent);
+            color: var(--text-primary);
+            padding: var(--page-pad);
+            line-height: 1.45;
+        }
+
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - var(--page-pad) * 2);
+        }
+
+        /* Header */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
+            gap: 12px;
+            padding: 12px 18px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin-bottom: 10px;
+            flex-shrink: 0;
         }
 
         .header-left h1 {
-            font-size: 24px;
-            margin-bottom: 5px;
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-light), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .header-left p {
-            font-size: 13px;
-            opacity: 0.9;
-        }
+        .header-left p { display: none; }
 
         .header-right {
-            text-align: right;
             font-size: 12px;
-            opacity: 0.9;
+            color: var(--text-secondary);
             white-space: nowrap;
         }
 
         .main-tabs {
             display: flex;
-            background: #f8f9fa;
-            border-bottom: 2px solid #dee2e6;
+            gap: 6px;
+            margin-bottom: 10px;
+            padding: 5px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            flex-shrink: 0;
         }
 
         .main-tab {
             flex: 1;
-            padding: 15px 10px;
+            padding: 10px 14px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
-            font-size: 16px;
-            font-weight: bold;
-            color: #6c757d;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+            border: none;
+            background: transparent;
         }
 
-        .main-tab:hover {
-            background: #e9ecef;
-        }
-
+        .main-tab:hover { color: var(--text-primary); background: var(--bg-card-hover); }
         .main-tab.active {
-            background: white;
-            color: #667eea;
-            border-bottom: 3px solid #667eea;
-        }
-
-        .content {
-            padding: 15px;
+            background: linear-gradient(135deg, var(--purple-dark), var(--purple));
+            color: white;
         }
 
         .tab-content {
             display: none;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .tab-content.active { display: flex; }
+
+        /* 子 Tab + 最新开奖 同一行 */
+        .tab-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
         }
 
-        .tab-content.active {
-            display: block;
+        .sub-tabs {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            flex: 1;
         }
 
-        .latest-section {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
+        .sub-tab {
+            padding: 8px 16px;
+            border-radius: 18px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            transition: all 0.2s ease;
         }
 
-        .latest-title {
-            font-size: 18px;
-            margin-bottom: 15px;
-            font-weight: bold;
+        .latest-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 14px;
+            background: rgba(99, 102, 241, 0.12);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            flex-shrink: 0;
+        }
+
+        .latest-bar-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
         }
 
         .latest-numbers {
             display: flex;
-            gap: 15px;
+            gap: 8px;
             align-items: center;
-            flex-wrap: wrap;
         }
 
         .number-ball {
-            width: 50px;
-            height: 50px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
-            background: white;
-            color: #667eea;
+            background: linear-gradient(145deg, var(--accent-light), var(--accent));
+            color: #1a1a2e;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
-            font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            font-size: 20px;
+            font-weight: 700;
+            box-shadow: 0 3px 10px var(--accent-glow);
         }
 
         .period-info {
-            margin-left: auto;
-            font-size: 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            margin-left: 2px;
         }
 
-        .filter-section {
-            margin-bottom: 15px;
-            display: flex;
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
             gap: 8px;
-            flex-wrap: wrap;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 6px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--accent-light);
+            line-height: 1.2;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .panel-toolbar {
+            display: flex;
             align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            flex-shrink: 0;
         }
 
         .filter-btn {
-            padding: 8px 18px;
-            border: 2px solid #667eea;
-            background: white;
-            color: #667eea;
-            border-radius: 20px;
+            padding: 7px 14px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border-radius: 16px;
             cursor: pointer;
-            transition: all 0.3s;
             font-size: 13px;
-            font-weight: bold;
-            white-space: nowrap;
-        }
-
-        .filter-btn:hover {
-            background: #667eea;
-            color: white;
-        }
-
-        .filter-btn.active {
-            background: #667eea;
-            color: white;
+            font-weight: 500;
+            transition: all 0.2s;
         }
 
         .auto-refresh {
             margin-left: auto;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
         }
 
-        .auto-refresh label {
+        .auto-refresh input { width: 15px; height: 15px; accent-color: var(--purple); cursor: pointer; }
+
+        .compare-tab {
+            padding: 7px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            cursor: pointer;
             font-size: 13px;
-            color: #6c757d;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: all 0.2s;
             white-space: nowrap;
         }
 
-        .auto-refresh input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
+        .toolbar-divider {
+            width: 1px;
+            height: 24px;
+            background: var(--border);
+            flex-shrink: 0;
+        }
+
+        /* 表格：10 期铺满模式 / 超出滚动模式 */
+        .table-container {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            flex: 1;
+            min-height: 0;
+        }
+
+        .table-container.fill-mode {
+            overflow: hidden;
+        }
+
+        .table-container.fill-mode tbody tr {
+            height: var(--row-h);
+        }
+
+        .table-container.fill-mode td {
+            vertical-align: middle;
+        }
+
+        .table-container.scroll-mode {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-container.scroll-mode tbody tr {
+            height: auto;
+        }
+
+        .table-container.table-fixed {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .error-message { color: var(--fail); }
+
+        .period-info span { color: var(--accent-light); }
+
+        .section-panel {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .section-panel.active { display: flex; }
+
+        .sub-tab:hover { border-color: var(--purple); color: var(--text-primary); }
+        .sub-tab.active {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: var(--purple);
+            color: var(--purple);
+        }
+
+        .filter-section {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 0;
+        }
+
+        .filter-btn:hover { border-color: var(--purple); color: var(--text-primary); }
+        .filter-btn.active {
+            background: var(--purple);
+            border-color: var(--purple);
+            color: white;
         }
 
         .compare-tabs {
             display: flex;
             gap: 8px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
+            margin-bottom: 0;
         }
 
-        .compare-tab {
-            flex: 1;
-            min-width: 120px;
-            padding: 10px 20px;
-            background: #f8f9fa;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-size: 14px;
-            font-weight: bold;
-            color: #6c757d;
-            text-align: center;
-        }
-
-        .compare-tab:hover {
-            background: #e9ecef;
-        }
-
+        .compare-tab:hover { border-color: var(--purple); }
         .compare-tab.active {
-            background: #667eea;
-            color: white;
+            background: rgba(99, 102, 241, 0.2);
+            border-color: var(--purple);
+            color: var(--purple);
         }
 
-        .table-container {
-            overflow-x: auto;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            -webkit-overflow-scrolling: touch;
+        th {
+            padding: 10px 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--text-secondary);
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--border);
+            background: #1a2030;
         }
+
+        .table-container.scroll-mode th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        td {
+            padding: 0 10px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .ball-small {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, var(--purple), var(--purple-dark));
+            color: white;
+            margin: 2px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .dingwei-text { font-size: 13px; text-align: left; }
+        .dingwei-row { display: flex; align-items: center; margin-bottom: 3px; flex-wrap: wrap; }
+        .dingwei-label { font-weight: 600; color: var(--purple); min-width: 42px; font-size: 12px; }
+        .dingwei-ball {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, var(--purple), var(--purple-dark));
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        tbody tr { transition: background 0.15s; }
+        tbody tr:hover { background: var(--bg-card-hover); }
+        tbody tr:last-child td { border-bottom: none; }
+
+        .success { color: var(--success); font-weight: 600; }
+        .fail { color: var(--fail); font-weight: 600; }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            background: white;
             min-width: 500px;
         }
 
-        thead {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .ball-small.highlight {
+            background: linear-gradient(145deg, var(--accent-light), var(--accent));
+            color: #1a1a2e;
+            box-shadow: 0 0 12px var(--accent-glow);
         }
 
-        th {
-            padding: 12px 8px;
-            text-align: center;
-            font-weight: bold;
+        .dingwei-numbers { flex: 1; display: flex; flex-wrap: wrap; gap: 3px; }
+
+        thead { background: rgba(99, 102, 241, 0.15); }
+
+        .panel-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .panel-scroll .tracker-result-block {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-scroll .table-container.table-fixed {
+            flex: 1;
+        }
+
+        /* History trend badges */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-sum { background: rgba(245,158,11,0.15); color: var(--accent-light); }
+        .badge-ratio { background: rgba(99,102,241,0.15); color: var(--purple); }
+        .badge-span { background: rgba(52,211,153,0.15); color: var(--success); }
+
+        /* 七码命中位次统计 */
+        .qima-pos-panel {
+            flex-shrink: 0;
+            margin-bottom: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+        }
+
+        .qima-pos-summary {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
             font-size: 13px;
+        }
+
+        .qima-pos-summary-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .qima-pos-summary-item .pos-label {
+            font-weight: 600;
+            color: var(--purple);
             white-space: nowrap;
         }
 
-        td {
-            padding: 10px 8px;
-            text-align: center;
-            border-bottom: 1px solid #dee2e6;
+        .qima-pos-summary-item .pos-vals {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        .period-cell { font-weight: 600; color: var(--text-secondary); font-size: 12px; }
+
+        /* Number tracker panel */
+        .tracker-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            flex-shrink: 0;
+        }
+
+        .tracker-title {
             font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
         }
 
-        tbody tr:hover {
-            background: #f8f9fa;
+        .tracker-desc { display: none; }
+
+        .tracker-form {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 0;
         }
 
-        .success {
-            color: #28a745;
-            font-weight: bold;
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
-        .fail {
-            color: #dc3545;
-            font-weight: bold;
+        .form-group label {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
         }
 
-        .ball-small {
+        .form-group input, .form-group select {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.05);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            min-width: 90px;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--purple);
+        }
+
+        .form-group select option { background: #1e293b; }
+
+        .form-group input.track-number {
+            width: 90px;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 6px;
+            text-align: center;
+            font-family: 'Noto Sans SC', monospace;
+        }
+
+        .tracker-result-block {
+            flex-shrink: 0;
+        }
+
+        .tracker-result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+
+        .tracker-result-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .tracker-result-meta strong {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        .match-tag-exact {
             display: inline-block;
-            width: 30px;
-            height: 30px;
-            line-height: 30px;
-            border-radius: 50%;
-            background: #667eea;
-            color: white;
-            margin: 2px;
-            font-weight: bold;
-            font-size: 14px;
-        }
-
-        .dingwei-text {
+            padding: 3px 10px;
+            border-radius: 12px;
             font-size: 12px;
-            line-height: 1.6;
-            color: #495057;
-            text-align: left;
-            word-break: break-all;
+            font-weight: 600;
+            background: rgba(52, 211, 153, 0.15);
+            color: var(--success);
         }
 
-        .dingwei-row {
+        .match-tag-group {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(129, 140, 248, 0.15);
+            color: var(--purple);
+        }
+
+        .distance-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-light);
+        }
+
+        .distance-current {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--success);
+        }
+
+        .btn-primary {
+            padding: 7px 16px;
+            border: none;
+            border-radius: 6px;
+            background: linear-gradient(135deg, var(--purple-dark), var(--purple));
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .tracker-summary {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+            flex-shrink: 0;
+        }
+
+        .summary-item {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 4px;
+            text-align: center;
+        }
+
+        .summary-item .val { font-size: 16px; font-weight: 700; color: var(--accent-light); line-height: 1.2; }
+        .summary-item .lbl { font-size: 10px; color: var(--text-secondary); }
+
+        .loading, .error-message, .empty-hint {
+            text-align: center;
+            padding: 24px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 0;
             display: flex;
             align-items: center;
-            margin-bottom: 4px;
-            flex-wrap: wrap;
+            gap: 6px;
         }
 
-        .dingwei-label {
-            font-weight: bold;
-            color: #667eea;
-            min-width: 40px;
-            font-size: 12px;
+        .section-title::before {
+            content: '';
+            width: 3px;
+            height: 13px;
+            background: var(--accent);
+            border-radius: 2px;
         }
 
-        .dingwei-numbers {
-            flex: 1;
+        .history-toolbar {
             display: flex;
-            flex-wrap: wrap;
-            gap: 2px;
-        }
-
-        .dingwei-ball {
-            display: inline-block;
-            width: 22px;
-            height: 22px;
-            line-height: 22px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-align: center;
-            font-size: 11px;
-            font-weight: bold;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            font-size: 16px;
-            color: #6c757d;
-        }
-
-        .error-message {
-            text-align: center;
-            padding: 40px;
-            font-size: 16px;
-            color: #dc3545;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            align-items: center;
+            justify-content: space-between;
             gap: 10px;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
         }
 
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        .stat-value {
-            font-size: 28px;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-
-        /* 手机端专属优化 */
         @media (max-width: 768px) {
-            body {
-                padding: 5px;
-            }
-
-            .container {
-                border-radius: 10px;
-            }
-
-            .header {
-                flex-direction: column;
-                text-align: center;
-                padding: 15px;
-            }
-
-            .header-left {
-                width: 100%;
-            }
-
-            .header-left h1 {
-                font-size: 20px;
-            }
-
-            .header-left p {
-                font-size: 12px;
-            }
-
-            .header-right {
-                text-align: center;
-                width: 100%;
-                font-size: 11px;
-            }
-
-            .main-tab {
-                font-size: 15px;
-                padding: 12px 8px;
-            }
-
-            .content {
-                padding: 10px;
-            }
-
-            .latest-section {
-                padding: 15px;
-                margin-bottom: 15px;
-            }
-
-            .latest-title {
-                font-size: 16px;
-                margin-bottom: 12px;
-            }
-
-            .latest-numbers {
-                gap: 10px;
-                justify-content: center;
-            }
-
-            .number-ball {
-                width: 45px;
-                height: 45px;
-                font-size: 20px;
-            }
-
-            .period-info {
-                width: 100%;
-                text-align: center;
-                margin-top: 10px;
-                font-size: 13px;
-            }
-
-            .filter-section {
-                gap: 6px;
-            }
-
-            .filter-btn {
-                padding: 6px 14px;
-                font-size: 12px;
-                flex: 1;
-                min-width: 70px;
-            }
-
-            .auto-refresh {
-                width: 100%;
-                justify-content: center;
-                margin-top: 8px;
-                margin-left: 0;
-            }
-
-            .compare-tabs {
-                gap: 6px;
-            }
-
-            .compare-tab {
-                padding: 8px 15px;
-                font-size: 13px;
-                min-width: 100px;
-            }
-
-            .stats {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 8px;
-            }
-
-            .stat-card {
-                padding: 12px;
-            }
-
-            .stat-value {
-                font-size: 24px;
-            }
-
-            .stat-label {
-                font-size: 11px;
-            }
-
-            .ball-small {
-                width: 28px;
-                height: 28px;
-                line-height: 28px;
-                font-size: 13px;
-                margin: 1px;
-            }
-
-            th {
-                padding: 10px 5px;
-                font-size: 12px;
-            }
-
-            td {
-                padding: 8px 5px;
-                font-size: 12px;
-            }
-
-            .dingwei-text {
-                font-size: 11px;
-            }
-
-            .dingwei-label {
-                min-width: 35px;
-                font-size: 11px;
-            }
-
-            .dingwei-ball {
-                width: 20px;
-                height: 20px;
-                line-height: 20px;
-                font-size: 10px;
-            }
-
-            .dingwei-row {
-                margin-bottom: 3px;
-            }
-        }
-
-        /* 超小屏幕优化 */
-        @media (max-width: 480px) {
-            .header-left h1 {
-                font-size: 18px;
-            }
-
-            .header-left p {
-                font-size: 11px;
-            }
-
-            .number-ball {
-                width: 40px;
-                height: 40px;
-                font-size: 18px;
-            }
-
-            .filter-btn {
-                padding: 5px 12px;
-                font-size: 11px;
-            }
-
-            .compare-tab {
-                padding: 7px 12px;
-                font-size: 12px;
-            }
-
-            .stat-value {
-                font-size: 20px;
-            }
-
-            .ball-small {
-                width: 25px;
-                height: 25px;
-                line-height: 25px;
-                font-size: 12px;
-            }
-
-            .dingwei-label {
-                min-width: 32px;
-                font-size: 10px;
-            }
-
-            .dingwei-ball {
-                width: 18px;
-                height: 18px;
-                line-height: 18px;
-                font-size: 9px;
-            }
+            body { padding: 6px; --page-pad: 6px; }
+            .header { padding: 10px 14px; }
+            .header-left h1 { font-size: 17px; }
+            .tab-header { flex-direction: column; align-items: stretch; }
+            .latest-bar { justify-content: center; }
+            .stats { grid-template-columns: repeat(3, 1fr); }
+            .tracker-summary { grid-template-columns: repeat(3, 1fr); }
+            .panel-toolbar { flex-direction: column; align-items: stretch; }
+            .auto-refresh { margin-left: 0; }
+            .toolbar-divider { display: none; }
         }
     </style>
 </head>
@@ -569,456 +715,761 @@
 <div class="container">
     <div class="header">
         <div class="header-left">
-            <h1>🎯 彩票预测分析系统</h1>
-            <p>AI智能预测 · 数据分析 · 趋势追踪</p>
+            <h1>彩票预测分析系统</h1>
+            <p>AI 智能预测 · 历史走势 · 号码追踪</p>
         </div>
-        <div class="header-right">
-            <div id="last-update">加载中...</div>
-        </div>
+        <div class="header-right" id="last-update">加载中...</div>
     </div>
 
     <div class="main-tabs">
-        <div class="main-tab active" onclick="switchMainTab('3d')">3D彩票</div>
-        <div class="main-tab" onclick="switchMainTab('pl3')">排列三</div>
+        <button class="main-tab active" data-type="3d" onclick="switchMainTab('3d', this)">福彩 3D</button>
+        <button class="main-tab" data-type="pl3" onclick="switchMainTab('pl3', this)">排列三</button>
     </div>
 
-    <div class="content">
-        <!-- 3D Tab -->
-        <div id="3d-content" class="tab-content active">
-            <div class="latest-section">
-                <div class="latest-title">📊 最新开奖</div>
-                <div class="latest-numbers" id="3d-latest">
-                    <div class="loading">加载中...</div>
+    <!-- 3D -->
+    <div id="sd-content" class="tab-content active">
+        <div class="tab-header">
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchSection('3d', 'predict', this)">AI 预测</button>
+                <button class="sub-tab" onclick="switchSection('3d', 'history', this)">历史走势</button>
+                <button class="sub-tab" onclick="switchSection('3d', 'tracker', this)">号码追踪</button>
+            </div>
+            <div class="latest-bar">
+                <span class="latest-bar-label">最新</span>
+                <div class="latest-numbers" id="sd-latest"><div class="loading">…</div></div>
+            </div>
+        </div>
+
+        <!-- AI 预测 -->
+        <div id="sd-predict" class="section-panel active">
+            <div class="stats" id="sd-stats"></div>
+            <div class="panel-toolbar">
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setFilter('3d', 10, this)">近10期</button>
+                    <button class="filter-btn" onclick="setFilter('3d', 30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setFilter('3d', 50, this)">近50期</button>
+                    <div class="auto-refresh">
+                        <label for="auto-refresh-3d">自动刷新</label>
+                        <input type="checkbox" id="auto-refresh-3d" onchange="toggleAutoRefresh('3d')">
+                    </div>
+                </div>
+                <div class="toolbar-divider"></div>
+                <div class="compare-tabs">
+                    <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
                 </div>
             </div>
-
-            <div class="stats" id="3d-stats"></div>
-
-            <div class="filter-section">
-                <button class="filter-btn active" onclick="setFilter('3d', 10)">近10期</button>
-                <button class="filter-btn" onclick="setFilter('3d', 30)">近30期</button>
-                <button class="filter-btn" onclick="setFilter('3d', 50)">近50期</button>
-                <div class="auto-refresh">
-                    <label for="auto-refresh-3d">自动刷新</label>
-                    <input type="checkbox" id="auto-refresh-3d" onchange="toggleAutoRefresh('3d')">
-                </div>
+            <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
+                <div class="qima-pos-summary" id="sd-qima-pos-summary"></div>
             </div>
-
-            <div class="compare-tabs">
-                <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma')">三码定位</button>
-                <button class="compare-tab" onclick="switchCompareTab('3d', 'qima')">七码定位</button>
-            </div>
-
-            <div class="table-container">
+            <div class="table-container fill-mode" id="sd-predict-table">
                 <table>
-                    <thead>
-                    <tr>
-                        <th>AI预测</th>
-                        <th>实际开奖</th>
-                        <th>匹配结果</th>
-                    </tr>
-                    </thead>
-                    <tbody id="3d-table-body">
-                    </tbody>
+                    <thead><tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr></thead>
+                    <tbody id="sd-table-body"></tbody>
                 </table>
             </div>
         </div>
 
-        <!-- 排列三 Tab -->
-        <div id="pl3-content" class="tab-content">
-            <div class="latest-section">
-                <div class="latest-title">📊 最新开奖</div>
-                <div class="latest-numbers" id="pl3-latest">
-                    <div class="loading">加载中...</div>
+        <!-- 历史走势 -->
+        <div id="sd-history" class="section-panel">
+            <div class="history-toolbar">
+                <div class="section-title">历史走势</div>
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setHistoryFilter('3d', 30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('3d', 50, this)">近50期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('3d', 100, this)">近100期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('3d', 0, this)">全部</button>
                 </div>
             </div>
-
-            <div class="stats" id="pl3-stats"></div>
-
-            <div class="filter-section">
-                <button class="filter-btn active" onclick="setFilter('pl3', 10)">近10期</button>
-                <button class="filter-btn" onclick="setFilter('pl3', 30)">近30期</button>
-                <button class="filter-btn" onclick="setFilter('pl3', 50)">近50期</button>
-                <div class="auto-refresh">
-                    <label for="auto-refresh-pl3">自动刷新</label>
-                    <input type="checkbox" id="auto-refresh-pl3" onchange="toggleAutoRefresh('pl3')">
-                </div>
-            </div>
-
-            <div class="compare-tabs">
-                <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma')">三码定位</button>
-                <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima')">七码定位</button>
-            </div>
-
-            <div class="table-container">
+            <div class="table-container scroll-mode" id="sd-history-table">
                 <table>
-                    <thead id="pl3-table-head">
+                    <thead>
                     <tr>
-                        <th>三码预测</th>
-                        <th>七码预测</th>
-                        <th>实际开奖</th>
-                        <th>匹配结果</th>
+                        <th>期号</th>
+                        <th>开奖号码</th>
+                        <th>和值</th>
+                        <th>跨度</th>
+                        <th>大小比</th>
+                        <th>奇偶比</th>
                     </tr>
                     </thead>
-                    <tbody id="pl3-table-body">
-                    </tbody>
+                    <tbody id="sd-history-body"></tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- 号码追踪 -->
+        <div id="sd-tracker" class="section-panel">
+            <div class="tracker-panel">
+                <div class="tracker-form">
+                    <div class="form-group">
+                        <label>三位数</label>
+                        <input class="track-number" id="sd-track-number" type="text" maxlength="3" placeholder="123" inputmode="numeric">
+                    </div>
+                    <div class="form-group">
+                        <label>范围</label>
+                        <select id="sd-track-periods">
+                            <option value="30">近30期</option>
+                            <option value="50">近50期</option>
+                            <option value="100" selected>近100期</option>
+                            <option value="0">全部</option>
+                        </select>
+                    </div>
+                    <button class="btn-primary" onclick="runTracker('3d')">查询</button>
+                </div>
+                <div class="tracker-summary" id="sd-tracker-summary" style="display:none"></div>
+            </div>
+            <div class="panel-scroll">
+                <div class="tracker-result-block">
+                    <div class="tracker-result-header">
+                        <div class="section-title">直选 · 位置一致</div>
+                        <div class="tracker-result-meta" id="sd-exact-meta"></div>
+                    </div>
+                    <div class="table-container table-fixed">
+                        <table>
+                            <thead><tr><th>期号</th><th>开奖号码</th><th>距当期</th></tr></thead>
+                            <tbody id="sd-exact-body">
+                            <tr><td colspan="3" class="empty-hint">输入三位数后查询</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="tracker-result-block">
+                    <div class="tracker-result-header">
+                        <div class="section-title">组选 · 顺序不同</div>
+                        <div class="tracker-result-meta" id="sd-group-meta"></div>
+                    </div>
+                    <div class="table-container table-fixed">
+                        <table>
+                            <thead><tr><th>期号</th><th>开奖号码</th><th>距当期</th></tr></thead>
+                            <tbody id="sd-group-body">
+                            <tr><td colspan="3" class="empty-hint">输入三位数后查询</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 排列三 -->
+    <div id="pl3-content" class="tab-content">
+        <div class="tab-header">
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchSection('pl3', 'predict', this)">AI 预测</button>
+                <button class="sub-tab" onclick="switchSection('pl3', 'history', this)">历史走势</button>
+                <button class="sub-tab" onclick="switchSection('pl3', 'tracker', this)">号码追踪</button>
+            </div>
+            <div class="latest-bar">
+                <span class="latest-bar-label">最新</span>
+                <div class="latest-numbers" id="pl3-latest"><div class="loading">…</div></div>
+            </div>
+        </div>
+
+        <div id="pl3-predict" class="section-panel active">
+            <div class="stats" id="pl3-stats"></div>
+            <div class="panel-toolbar">
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setFilter('pl3', 10, this)">近10期</button>
+                    <button class="filter-btn" onclick="setFilter('pl3', 30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setFilter('pl3', 50, this)">近50期</button>
+                    <div class="auto-refresh">
+                        <label for="auto-refresh-pl3">自动刷新</label>
+                        <input type="checkbox" id="auto-refresh-pl3" onchange="toggleAutoRefresh('pl3')">
+                    </div>
+                </div>
+                <div class="toolbar-divider"></div>
+                <div class="compare-tabs">
+                    <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
+                </div>
+            </div>
+            <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
+                <div class="qima-pos-summary" id="pl3-qima-pos-summary"></div>
+            </div>
+            <div class="table-container fill-mode" id="pl3-predict-table">
+                <table>
+                    <thead id="pl3-table-head">
+                    <tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>
+                    </thead>
+                    <tbody id="pl3-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="pl3-history" class="section-panel">
+            <div class="history-toolbar">
+                <div class="section-title">历史走势</div>
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setHistoryFilter('pl3', 30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('pl3', 50, this)">近50期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('pl3', 100, this)">近100期</button>
+                    <button class="filter-btn" onclick="setHistoryFilter('pl3', 0, this)">全部</button>
+                </div>
+            </div>
+            <div class="table-container scroll-mode" id="pl3-history-table">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>期号</th>
+                        <th>开奖号码</th>
+                        <th>和值</th>
+                        <th>跨度</th>
+                        <th>大小比</th>
+                        <th>奇偶比</th>
+                    </tr>
+                    </thead>
+                    <tbody id="pl3-history-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="pl3-tracker" class="section-panel">
+            <div class="tracker-panel">
+                <div class="tracker-form">
+                    <div class="form-group">
+                        <label>三位数</label>
+                        <input class="track-number" id="pl3-track-number" type="text" maxlength="3" placeholder="123" inputmode="numeric">
+                    </div>
+                    <div class="form-group">
+                        <label>范围</label>
+                        <select id="pl3-track-periods">
+                            <option value="30">近30期</option>
+                            <option value="50">近50期</option>
+                            <option value="100" selected>近100期</option>
+                            <option value="0">全部</option>
+                        </select>
+                    </div>
+                    <button class="btn-primary" onclick="runTracker('pl3')">查询</button>
+                </div>
+                <div class="tracker-summary" id="pl3-tracker-summary" style="display:none"></div>
+            </div>
+            <div class="panel-scroll">
+                <div class="tracker-result-block">
+                    <div class="tracker-result-header">
+                        <div class="section-title">直选 · 位置一致</div>
+                        <div class="tracker-result-meta" id="pl3-exact-meta"></div>
+                    </div>
+                    <div class="table-container table-fixed">
+                        <table>
+                            <thead><tr><th>期号</th><th>开奖号码</th><th>距当期</th></tr></thead>
+                            <tbody id="pl3-exact-body">
+                            <tr><td colspan="3" class="empty-hint">输入三位数后查询</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="tracker-result-block">
+                    <div class="tracker-result-header">
+                        <div class="section-title">组选 · 顺序不同</div>
+                        <div class="tracker-result-meta" id="pl3-group-meta"></div>
+                    </div>
+                    <div class="table-container table-fixed">
+                        <table>
+                            <thead><tr><th>期号</th><th>开奖号码</th><th>距当期</th></tr></thead>
+                            <tbody id="pl3-group-body">
+                            <tr><td colspan="3" class="empty-hint">输入三位数后查询</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    let currentData = {
-        sd: [],
-        pl3: [],
-        sdCompare: [],
-        pl3Compare: []
-    };
+    let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [] };
+    let filters = { '3d': 10, 'pl3': 10 };
+    let historyFilters = { '3d': 30, 'pl3': 30 };
+    let compareTabs = { '3d': 'sanma', 'pl3': 'sanma' };
+    let sections = { '3d': 'predict', 'pl3': 'predict' };
+    let autoRefreshIntervals = { '3d': null, 'pl3': null };
 
-    let filters = {
-        '3d': 10,
-        'pl3': 10
-    };
-
-    let compareTabs = {
-        '3d': 'sanma',
-        'pl3': 'sanma'
-    };
-
-    let autoRefreshIntervals = {
-        '3d': null,
-        'pl3': null
-    };
-
-    function switchMainTab(type) {
-        document.querySelectorAll('.main-tab').forEach(tab => tab.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-
-        event.target.classList.add('active');
-        document.getElementById(type + '-content').classList.add('active');
+    /** 3d 对应 DOM 前缀 sd，避免 ID 以数字开头导致 querySelector 报错 */
+    function domPrefix(type) {
+        return type === '3d' ? 'sd' : 'pl3';
     }
 
-    function setFilter(type, count) {
+    function $(type, suffix) {
+        return document.getElementById(domPrefix(type) + '-' + suffix);
+    }
+
+    function toDrawStr(item) {
+        return String(item.q1 ?? '') + String(item.q2 ?? '') + String(item.q3 ?? '');
+    }
+
+    function sortedDigits(str) {
+        return str.split('').sort().join('');
+    }
+
+    function isExactMatch(drawStr, target) {
+        return drawStr === target;
+    }
+
+    function isGroupMatch(drawStr, target) {
+        return sortedDigits(drawStr) === sortedDigits(target) && drawStr !== target;
+    }
+
+    function formatDistance(distance) {
+        if (distance === 0) return '<span class="distance-badge distance-current">当期</span>';
+        return `<span class="distance-badge">${distance} 期前</span>`;
+    }
+
+    function renderTrackerTable(type, suffix, matches, target) {
+        const tbody = document.getElementById(domPrefix(type) + '-' + suffix + '-body');
+        tbody.innerHTML = '';
+        if (matches.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="empty-hint">查询范围内未出现</td></tr>';
+            return;
+        }
+        matches.forEach(({ item, distance }) => {
+            const drawStr = toDrawStr(item);
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="period-cell">${item.qh ?? '-'}</td>
+                <td>${formatBalls(drawStr.split('').join(','), null)}</td>
+                <td>${formatDistance(distance)}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderTrackerMeta(type, suffix, matches) {
+        const metaEl = document.getElementById(domPrefix(type) + '-' + suffix + '-meta');
+        if (matches.length === 0) {
+            metaEl.innerHTML = '共 <strong>0</strong> 次';
+            return;
+        }
+        const nearest = matches[0].distance;
+        const nearestText = nearest === 0 ? '当期' : nearest + ' 期前';
+        metaEl.innerHTML = `共 <strong>${matches.length}</strong> 次 · 最近 <strong>${nearestText}</strong>`;
+    }
+
+    function switchMainTab(type, el) {
+        document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        $(type, 'content').classList.add('active');
+        adjustAllTables();
+    }
+
+    function switchSection(type, section, el) {
+        sections[type] = section;
+        const container = el.parentElement;
+        container.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        const contentEl = $(type, 'content');
+        contentEl.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+        $(type, section).classList.add('active');
+        if (section === 'history') renderHistory(type);
+        adjustAllTables();
+    }
+
+    function adjustPredictTable(type) {
+        const container = document.getElementById(domPrefix(type) + '-predict-table');
+        if (!container || !$(type, 'predict').classList.contains('active')) return;
+
+        const useFill = filters[type] <= 10 && compareTabs[type] === 'sanma';
+        applyTableFill(container, useFill, 10);
+    }
+
+    function adjustHistoryTable(type) {
+        const container = document.getElementById(domPrefix(type) + '-history-table');
+        if (!container || !$(type, 'history').classList.contains('active')) return;
+
+        const count = historyFilters[type];
+        const useFill = count > 0 && count <= 10;
+        applyTableFill(container, useFill, count || 10);
+    }
+
+    function applyTableFill(container, useFill, rowCount) {
+        if (useFill) {
+            container.classList.add('fill-mode');
+            container.classList.remove('scroll-mode');
+            const theadH = container.querySelector('thead')?.offsetHeight || 42;
+            const bottomPad = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-pad')) || 10;
+            const available = window.innerHeight - container.getBoundingClientRect().top - bottomPad;
+            const rowH = Math.max(44, Math.floor((available - theadH) / rowCount));
+            container.style.setProperty('--row-h', rowH + 'px');
+        } else {
+            container.classList.remove('fill-mode');
+            container.classList.add('scroll-mode');
+            container.style.removeProperty('--row-h');
+        }
+    }
+
+    function adjustAllTables() {
+        requestAnimationFrame(() => {
+            ['3d', 'pl3'].forEach(type => {
+                adjustPredictTable(type);
+                adjustHistoryTable(type);
+            });
+        });
+    }
+
+    function setFilter(type, count, el) {
         filters[type] = count;
-        const container = event.target.parentElement;
-        const buttons = container.querySelectorAll('.filter-btn');
-        buttons.forEach(btn => btn.classList.remove('active'));
-        event.target.classList.add('active');
+        el.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
         renderTable(type);
     }
 
-    function switchCompareTab(type, tab) {
+    function setHistoryFilter(type, count, el) {
+        historyFilters[type] = count;
+        el.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        renderHistory(type);
+    }
+
+    function switchCompareTab(type, tab, el) {
         compareTabs[type] = tab;
-        const container = event.target.parentElement;
-        const buttons = container.querySelectorAll('.compare-tab');
-        buttons.forEach(btn => btn.classList.remove('active'));
-        event.target.classList.add('active');
+        el.parentElement.querySelectorAll('.compare-tab').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
         renderTable(type);
     }
 
     function toggleAutoRefresh(type) {
         const checkbox = document.getElementById('auto-refresh-' + type);
-
         if (checkbox.checked) {
-            autoRefreshIntervals[type] = setInterval(() => {
-                loadData();
-            }, 30000);
-        } else {
-            if (autoRefreshIntervals[type]) {
-                clearInterval(autoRefreshIntervals[type]);
-                autoRefreshIntervals[type] = null;
-            }
+            autoRefreshIntervals[type] = setInterval(loadData, 30000);
+        } else if (autoRefreshIntervals[type]) {
+            clearInterval(autoRefreshIntervals[type]);
+            autoRefreshIntervals[type] = null;
         }
+    }
+
+    function getHistoryData(type) {
+        const data = type === '3d' ? currentData.sd : currentData.pl3;
+        return Array.isArray(data) ? data : [];
+    }
+
+    function calcSum(q1, q2, q3) {
+        return parseInt(q1) + parseInt(q2) + parseInt(q3);
+    }
+
+    function calcBigSmallRatio(q1, q2, q3) {
+        const nums = [q1, q2, q3].map(Number);
+        const big = nums.filter(n => n >= 5).length;
+        const small = 3 - big;
+        return big + ':' + small;
+    }
+
+    function calcOddEvenRatio(q1, q2, q3) {
+        const nums = [q1, q2, q3].map(Number);
+        const odd = nums.filter(n => n % 2 === 1).length;
+        const even = 3 - odd;
+        return odd + ':' + even;
+    }
+
+    function calcSpan(q1, q2, q3) {
+        const nums = [q1, q2, q3].map(Number).filter(n => !isNaN(n));
+        if (nums.length !== 3) return '-';
+        return Math.max(...nums) - Math.min(...nums);
+    }
+
+    function parseDingWeiNumbers(aiDingWeiHm) {
+        const result = { bai: [], shi: [], ge: [] };
+        if (!aiDingWeiHm) return result;
+        const bai = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
+        const shi = aiDingWeiHm.match(/十位[:：]([0-9,]+)/);
+        const ge = aiDingWeiHm.match(/个位[:：]([0-9,]+)/);
+        if (bai) result.bai = bai[1].split(',').map(s => s.trim());
+        if (shi) result.shi = shi[1].split(',').map(s => s.trim());
+        if (ge) result.ge = ge[1].split(',').map(s => s.trim());
+        return result;
+    }
+
+    function getDigitPosition(digits, target) {
+        const idx = digits.indexOf(String(target));
+        return idx >= 0 ? idx + 1 : -1;
+    }
+
+    function getQimaMatchPositions(aiDingWeiHm, realHm) {
+        if (!checkDingWeiMatch(aiDingWeiHm, realHm)) return null;
+        const pos = parseDingWeiNumbers(aiDingWeiHm);
+        return {
+            bai: getDigitPosition(pos.bai, realHm[0]),
+            shi: getDigitPosition(pos.shi, realHm[1]),
+            ge: getDigitPosition(pos.ge, realHm[2])
+        };
+    }
+
+    function sortPosSet(set) {
+        return [...set].filter(n => n > 0).sort((a, b) => a - b).join(',') || '—';
+    }
+
+    function renderQimaPosStats(type, compareData) {
+        const panel = document.getElementById(domPrefix(type) + '-qima-pos');
+        const summaryEl = document.getElementById(domPrefix(type) + '-qima-pos-summary');
+        if (!panel) return;
+
+        if (compareTabs[type] !== 'qima') {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = 'block';
+
+        const hits = compareData.filter(item => checkDingWeiMatch(item.aiDingWeiHm, item.realHm));
+        const baiSet = new Set(), shiSet = new Set(), geSet = new Set();
+
+        hits.forEach(item => {
+            const p = getQimaMatchPositions(item.aiDingWeiHm, item.realHm);
+            baiSet.add(p.bai);
+            shiSet.add(p.shi);
+            geSet.add(p.ge);
+        });
+
+        if (hits.length === 0) {
+            summaryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:13px">当前范围内无七码命中记录</span>';
+            return;
+        }
+
+        summaryEl.innerHTML = `
+            <div class="qima-pos-summary-item"><span class="pos-label">百位</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">十位</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">个位</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>`;
     }
 
     function checkMatch(aiHm, realHm) {
         if (!aiHm || !realHm) return false;
-        const aiNumbers = aiHm.split(',');
-        return aiNumbers.includes(realHm);
+        return aiHm.split(',').includes(realHm);
     }
 
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
         if (!aiDingWeiHm || !realHm || realHm.length !== 3) return false;
-
         const baiweiMatch = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
         const shiweiMatch = aiDingWeiHm.match(/十位[:：]([0-9,]+)/);
         const geweiMatch = aiDingWeiHm.match(/个位[:：]([0-9,]+)/);
-
         if (!baiweiMatch || !shiweiMatch || !geweiMatch) return false;
-
-        const baiwei = baiweiMatch[1].split(',');
-        const shiwei = shiweiMatch[1].split(',');
-        const gewei = geweiMatch[1].split(',');
-
-        return baiwei.includes(realHm[0]) && shiwei.includes(realHm[1]) && gewei.includes(realHm[2]);
+        return baiweiMatch[1].split(',').includes(realHm[0])
+            && shiweiMatch[1].split(',').includes(realHm[1])
+            && geweiMatch[1].split(',').includes(realHm[2]);
     }
 
-    function formatBalls(numbers) {
+    function formatBalls(numbers, highlight) {
         if (!numbers) return '-';
-        return numbers.split(',').map(num =>
-            `<span class="ball-small">${num.trim()}</span>`
-        ).join('');
+        return numbers.split(',').map(num => {
+            const trimmed = num.trim();
+            const cls = highlight && trimmed === highlight ? 'ball-small highlight' : 'ball-small';
+            return `<span class="${cls}">${trimmed}</span>`;
+        }).join('');
     }
 
     function formatDingWei(text) {
         if (!text) return '-';
-
-        const lines = text.split('\n').filter(line => line.trim());
+        const lines = text.split('\n').filter(l => l.trim());
         let html = '<div class="dingwei-text">';
-
         lines.forEach(line => {
-            const baiweiMatch = line.match(/百位[:：]([0-9,]+)/);
-            const shiweiMatch = line.match(/十位[:：]([0-9,]+)/);
-            const geweiMatch = line.match(/个位[:：]([0-9,]+)/);
-
-            if (baiweiMatch) {
-                html += '<div class="dingwei-row">';
-                html += '<span class="dingwei-label">百位:</span>';
-                html += '<div class="dingwei-numbers">';
-                baiweiMatch[1].split(',').forEach(num => {
-                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
-                });
-                html += '</div></div>';
-            }
-
-            if (shiweiMatch) {
-                html += '<div class="dingwei-row">';
-                html += '<span class="dingwei-label">十位:</span>';
-                html += '<div class="dingwei-numbers">';
-                shiweiMatch[1].split(',').forEach(num => {
-                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
-                });
-                html += '</div></div>';
-            }
-
-            if (geweiMatch) {
-                html += '<div class="dingwei-row">';
-                html += '<span class="dingwei-label">个位:</span>';
-                html += '<div class="dingwei-numbers">';
-                geweiMatch[1].split(',').forEach(num => {
-                    html += `<span class="dingwei-ball">${num.trim()}</span>`;
-                });
-                html += '</div></div>';
-            }
+            [['百位', /百位[:：]([0-9,]+)/], ['十位', /十位[:：]([0-9,]+)/], ['个位', /个位[:：]([0-9,]+)/]].forEach(([label, regex]) => {
+                const m = line.match(regex);
+                if (m) {
+                    html += `<div class="dingwei-row"><span class="dingwei-label">${label}:</span><div class="dingwei-numbers">`;
+                    m[1].split(',').forEach(num => { html += `<span class="dingwei-ball">${num.trim()}</span>`; });
+                    html += '</div></div>';
+                }
+            });
         });
-
-        html += '</div>';
-        return html;
+        return html + '</div>';
     }
 
     function renderLatest(type, latest) {
-        const elementId = type === '3d' ? '3d-latest' : 'pl3-latest';
-        const element = document.getElementById(elementId);
-
-        if (!latest) {
-            element.innerHTML = '<div class="loading">暂无数据</div>';
-            return;
-        }
-
-        element.innerHTML = `
-            <div class="number-ball">${latest.q1 || '-'}</div>
-            <div class="number-ball">${latest.q2 || '-'}</div>
-            <div class="number-ball">${latest.q3 || '-'}</div>
-            <div class="period-info">
-                <div>第 ${latest.qh || '-'} 期</div>
-            </div>
+        const el = $(type, 'latest');
+        if (!latest) { el.innerHTML = '<span class="period-info">暂无</span>'; return; }
+        el.innerHTML = `
+            <div class="number-ball">${latest.q1 ?? '-'}</div>
+            <div class="number-ball">${latest.q2 ?? '-'}</div>
+            <div class="number-ball">${latest.q3 ?? '-'}</div>
+            <div class="period-info">第<span>${latest.qh ?? '-'}</span>期</div>
         `;
     }
 
     function renderStats(type, compareData) {
-        const elementId = type === '3d' ? '3d-stats' : 'pl3-stats';
-        const element = document.getElementById(elementId);
-
-        let sanmaSuccess = 0;
-        let qimaSuccess = 0;
-        let total = compareData.length;
-        let sanmaTotal = compareData.filter(item => item.aiHm).length;
-        let qimaTotal = compareData.filter(item => item.aiDingWeiHm).length;
-
+        const el = $(type, 'stats');
+        let sanmaSuccess = 0, qimaSuccess = 0;
+        const total = compareData.length;
+        const sanmaTotal = compareData.filter(i => i.aiHm).length;
+        const qimaTotal = compareData.filter(i => i.aiDingWeiHm).length;
         compareData.forEach(item => {
             if (checkMatch(item.aiHm, item.realHm)) sanmaSuccess++;
             if (checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) qimaSuccess++;
         });
-
-        const sanmaRate = total > 0 ? ((sanmaSuccess / sanmaTotal) * 100).toFixed(1) : 0;
-        const qimaRate = total > 0 ? ((qimaSuccess / qimaTotal) * 100).toFixed(1) : 0;
-
-        element.innerHTML = `
-            <div class="stat-card">
-                <div class="stat-value">${total}</div>
-                <div class="stat-label">总期数</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${sanmaSuccess}</div>
-                <div class="stat-label">三码命中</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${sanmaRate}%</div>
-                <div class="stat-label">三码命中率</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${qimaSuccess}</div>
-                <div class="stat-label">七码命中</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${qimaRate}%</div>
-                <div class="stat-label">七码命中率</div>
-            </div>
+        const sanmaRate = sanmaTotal > 0 ? ((sanmaSuccess / sanmaTotal) * 100).toFixed(1) : 0;
+        const qimaRate = qimaTotal > 0 ? ((qimaSuccess / qimaTotal) * 100).toFixed(1) : 0;
+        el.innerHTML = `
+            <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
+            <div class="stat-card"><div class="stat-value">${sanmaSuccess}</div><div class="stat-label">三码命中</div></div>
+            <div class="stat-card"><div class="stat-value">${sanmaRate}%</div><div class="stat-label">三码命中率</div></div>
+            <div class="stat-card"><div class="stat-value">${qimaSuccess}</div><div class="stat-label">七码命中</div></div>
+            <div class="stat-card"><div class="stat-value">${qimaRate}%</div><div class="stat-label">七码命中率</div></div>
         `;
     }
 
     function renderTable(type) {
         const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
-        const filterCount = filters[type];
+        const filteredData = data.slice(-filters[type]).reverse();
         const compareType = compareTabs[type];
-
-        const filteredData = data.slice(-filterCount).reverse();
-
         renderStats(type, filteredData);
-        // 更新表头
-        updateTableHeader(type, compareType);
-
-        const tbody = document.getElementById(type + '-table-body');
+        renderQimaPosStats(type, filteredData);
+        if (type === 'pl3') {
+            const thead = document.getElementById('pl3-table-head');
+            thead.innerHTML = compareType === 'sanma'
+                ? '<tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>'
+                : '<tr><th>七码预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
+        }
+        const tbody = $(type, 'table-body');
         tbody.innerHTML = '';
-
         if (filteredData.length === 0) {
-            const colSpan = getColSpan(type, compareType);
-            tbody.innerHTML = `<tr><td colspan="${colSpan}" class="loading">暂无数据</td></tr>`;
+            tbody.innerHTML = '<tr><td colspan="3" class="loading">暂无数据</td></tr>';
+            renderQimaPosStats(type, filteredData);
+            adjustPredictTable(type);
             return;
         }
-
         filteredData.forEach(item => {
-            let isMatch = false;
-            let matchText = '';
-
-            if (compareType === 'sanma') {
-                isMatch = checkMatch(item.aiHm, item.realHm);
-                matchText = isMatch ? '✓ 命中' : '✗ 未命中';
-            } else {
-                isMatch = checkDingWeiMatch(item.aiDingWeiHm, item.realHm);
-                matchText = isMatch ? '✓ 命中' : '✗ 未命中';
-            }
-
+            const isMatch = compareType === 'sanma'
+                ? checkMatch(item.aiHm, item.realHm)
+                : checkDingWeiMatch(item.aiDingWeiHm, item.realHm);
+            const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
             const row = document.createElement('tr');
-
+            const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
             if (type === '3d') {
                 row.innerHTML = `
                     <td>${compareType === 'sanma' ? formatBalls(item.aiHm) : formatDingWei(item.aiDingWeiHm)}</td>
-                    <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
-                    <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
-                `;
+                    <td>${realBalls}</td>
+                    <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
             } else {
-                if (compareType === 'sanma') {
-                    row.innerHTML = `
-                        <td>${formatBalls(item.aiHm)}</td>
-                        <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
-                        <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
-                    `;
-                } else {
-                    row.innerHTML = `
-                        <td>${formatDingWei(item.aiDingWeiHm)}</td>
-                        <td>${item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-'}</td>
-                        <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>
-                    `;
-                }
+                row.innerHTML = `
+                    <td>${compareType === 'sanma' ? formatBalls(item.aiHm) : formatDingWei(item.aiDingWeiHm)}</td>
+                    <td>${realBalls}</td>
+                    <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
             }
-
             tbody.appendChild(row);
         });
+        adjustPredictTable(type);
     }
 
-    function updateTableHeader(type, compareType) {
-        if (type === 'pl3') {
-            const thead = document.getElementById('pl3-table-head');
-            if (compareType === 'sanma') {
-                thead.innerHTML = `
-                    <tr>
-                        <th>三码预测</th>
-                        <th>实际开奖</th>
-                        <th>匹配结果</th>
-                    </tr>
-                `;
-            } else {
-                thead.innerHTML = `
-                    <tr>
-                        <th>七码预测</th>
-                        <th>实际开奖</th>
-                        <th>匹配结果</th>
-                    </tr>
-                `;
+    function renderHistory(type) {
+        const data = getHistoryData(type);
+        const count = historyFilters[type];
+        const filtered = count === 0 ? [...data] : data.slice(-count);
+        const rows = [...filtered].reverse();
+        const tbody = $(type, 'history-body');
+        tbody.innerHTML = '';
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">暂无数据</td></tr>';
+            adjustHistoryTable(type);
+            return;
+        }
+        rows.forEach(item => {
+            const q1 = String(item.q1 ?? '');
+            const q2 = String(item.q2 ?? '');
+            const q3 = String(item.q3 ?? '');
+            const sum = calcSum(q1, q2, q3);
+            const span = calcSpan(q1, q2, q3);
+            const bs = calcBigSmallRatio(q1, q2, q3);
+            const oe = calcOddEvenRatio(q1, q2, q3);
+            const balls = formatBalls([q1, q2, q3].join(','));
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="period-cell">${item.qh ?? '-'}</td>
+                <td>${balls}</td>
+                <td><span class="badge badge-sum">${isNaN(sum) ? '-' : sum}</span></td>
+                <td><span class="badge badge-span">${span}</span></td>
+                <td><span class="badge badge-ratio">${bs}</span></td>
+                <td><span class="badge badge-ratio">${oe}</span></td>`;
+            tbody.appendChild(row);
+        });
+        adjustHistoryTable(type);
+    }
+
+    function runTracker(type) {
+        const input = $(type, 'track-number').value.trim();
+        if (!/^\d{3}$/.test(input)) {
+            alert('请输入完整的三位数（000-999）');
+            return;
+        }
+        const periods = parseInt($(type, 'track-periods').value, 10);
+        const data = getHistoryData(type);
+        if (data.length === 0) {
+            alert('暂无开奖历史数据');
+            return;
+        }
+
+        const startIndex = periods === 0 ? 0 : Math.max(0, data.length - periods);
+        const exactMatches = [];
+        const groupMatches = [];
+
+        for (let i = data.length - 1; i >= startIndex; i--) {
+            const item = data[i];
+            const drawStr = toDrawStr(item);
+            if (drawStr.length !== 3) continue;
+            const distance = data.length - 1 - i;
+            if (isExactMatch(drawStr, input)) {
+                exactMatches.push({ item, distance });
+            } else if (isGroupMatch(drawStr, input)) {
+                groupMatches.push({ item, distance });
             }
         }
-    }
 
-    function getColSpan(type, compareType) {
-        if (type === '3d') {
-            return 3;
-        } else {
-            return 3;
-        }
+        renderTrackerTable(type, 'exact', exactMatches, input);
+        renderTrackerTable(type, 'group', groupMatches, input);
+        renderTrackerMeta(type, 'exact', exactMatches);
+        renderTrackerMeta(type, 'group', groupMatches);
+
+        const summaryEl = $(type, 'tracker-summary');
+        summaryEl.style.display = 'grid';
+        const exactNearest = exactMatches.length ? (exactMatches[0].distance === 0 ? '当期' : exactMatches[0].distance + ' 期前') : '—';
+        const groupNearest = groupMatches.length ? (groupMatches[0].distance === 0 ? '当期' : groupMatches[0].distance + ' 期前') : '—';
+        summaryEl.innerHTML = `
+            <div class="summary-item"><div class="val">${input}</div><div class="lbl">查询号码</div></div>
+            <div class="summary-item"><div class="val">${exactMatches.length}</div><div class="lbl">直选出现次数</div></div>
+            <div class="summary-item"><div class="val">${exactNearest}</div><div class="lbl">直选最近距当期</div></div>
+            <div class="summary-item"><div class="val">${groupMatches.length}</div><div class="lbl">组选出现次数</div></div>
+            <div class="summary-item"><div class="val">${groupNearest}</div><div class="lbl">组选最近距当期</div></div>
+        `;
     }
 
     function updateLastUpdateTime() {
         const now = new Date();
-        const timeStr = now.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        document.getElementById('last-update').textContent = '最后更新: ' + timeStr;
+        document.getElementById('last-update').textContent =
+            '最后更新: ' + now.toLocaleString('zh-CN', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
     }
 
     async function loadData() {
         try {
             const response = await fetch('/data');
-
-            if (!response.ok) {
-                throw new Error('网络响应异常: ' + response.status);
-            }
-
+            if (!response.ok) throw new Error('网络响应异常: ' + response.status);
             currentData = await response.json();
 
-            if (currentData.sd && currentData.sd.length > 0) {
-                renderLatest('3d', currentData.sd[currentData.sd.length - 1]);
-            } else {
-                renderLatest('3d', null);
-            }
-
-            if (currentData.pl3 && currentData.pl3.length > 0) {
-                renderLatest('pl3', currentData.pl3[currentData.pl3.length - 1]);
-            } else {
-                renderLatest('pl3', null);
-            }
-
+            renderLatest('3d', currentData.sd?.length ? currentData.sd[currentData.sd.length - 1] : null);
+            renderLatest('pl3', currentData.pl3?.length ? currentData.pl3[currentData.pl3.length - 1] : null);
             renderTable('3d');
             renderTable('pl3');
-
+            if (sections['3d'] === 'history') renderHistory('3d');
+            if (sections['pl3'] === 'history') renderHistory('pl3');
             updateLastUpdateTime();
-
+            adjustAllTables();
         } catch (error) {
             console.error('加载数据失败:', error);
-            document.getElementById('3d-table-body').innerHTML =
-                '<tr><td colspan="3" class="error-message">数据加载失败，请检查网络连接或刷新页面重试</td></tr>';
+            document.getElementById('sd-table-body').innerHTML =
+                '<tr><td colspan="3" class="error-message">数据加载失败，请刷新重试</td></tr>';
             document.getElementById('pl3-table-body').innerHTML =
-                '<tr><td colspan="4" class="error-message">数据加载失败，请检查网络连接或刷新页面重试</td></tr>';
+                '<tr><td colspan="3" class="error-message">数据加载失败，请刷新重试</td></tr>';
         }
     }
 
     window.onload = function() {
         loadData();
+        window.addEventListener('resize', () => adjustAllTables());
     };
 
     window.onbeforeunload = function() {
-        if (autoRefreshIntervals['3d']) {
-            clearInterval(autoRefreshIntervals['3d']);
-        }
-        if (autoRefreshIntervals['pl3']) {
-            clearInterval(autoRefreshIntervals['pl3']);
-        }
+        ['3d', 'pl3'].forEach(type => {
+            if (autoRefreshIntervals[type]) clearInterval(autoRefreshIntervals[type]);
+        });
     };
 </script>
 </body>
