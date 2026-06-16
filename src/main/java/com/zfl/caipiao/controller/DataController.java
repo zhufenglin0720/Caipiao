@@ -28,6 +28,7 @@ public class DataController {
         result.put("pl3", pl3Cache);
         result.put("sdCompare", sdCompareCache.stream().map(dto -> {
             Map<String, String> map = new HashMap<>();
+            map.put("qh", dto.getQh());
             map.put("aiHm", dto.getAiHm());
             map.put("aiDingWeiHm", dto.getAiDingWeiHm());
             map.put("realHm", dto.getRealHm());
@@ -35,6 +36,7 @@ public class DataController {
         }).collect(Collectors.toList()));
         result.put("pl3Compare", pl3CompareCache.stream().map(dto -> {
             Map<String, String> map = new HashMap<>();
+            map.put("qh", dto.getQh());
             map.put("aiHm", dto.getAiHm());
             map.put("aiDingWeiHm", dto.getAiDingWeiHm());
             map.put("realHm", dto.getRealHm());

@@ -425,6 +425,7 @@
             color: white;
             font-size: 12px;
             font-weight: 600;
+            position: relative;
         }
 
         tbody tr { transition: background 0.15s; }
@@ -521,6 +522,68 @@
         .qima-pos-summary-item .pos-vals {
             color: var(--accent-light);
             font-weight: 600;
+        }
+
+        .qima-pos-detail {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .qima-pos-detail-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .qima-pos-detail-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .qima-pos-detail-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            padding: 3px 0;
+        }
+
+        .qima-idx-text {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        .qima-idx-text.miss {
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .dingwei-ball.highlight {
+            background: linear-gradient(145deg, var(--accent-light), var(--accent));
+            color: #1a1a2e;
+            box-shadow: 0 0 8px var(--accent-glow);
+            position: relative;
+        }
+
+        .dingwei-ball .pos-idx {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            min-width: 14px;
+            height: 14px;
+            padding: 0 3px;
+            border-radius: 7px;
+            background: var(--success);
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 14px;
+            text-align: center;
         }
 
         .period-cell { font-weight: 600; color: var(--text-secondary); font-size: 12px; }
@@ -776,10 +839,14 @@
             </div>
             <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="sd-qima-pos-summary"></div>
+                <div class="qima-pos-detail" id="sd-qima-pos-detail" style="display:none">
+                    <div class="qima-pos-detail-title">每期命中明细</div>
+                    <div class="qima-pos-detail-list" id="sd-qima-pos-detail-list"></div>
+                </div>
             </div>
             <div class="table-container fill-mode" id="sd-predict-table">
                 <table>
-                    <thead><tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr></thead>
+                    <thead id="sd-table-head"><tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr></thead>
                     <tbody id="sd-table-body"></tbody>
                 </table>
             </div>
@@ -901,6 +968,10 @@
             </div>
             <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="pl3-qima-pos-summary"></div>
+                <div class="qima-pos-detail" id="pl3-qima-pos-detail" style="display:none">
+                    <div class="qima-pos-detail-title">每期命中明细</div>
+                    <div class="qima-pos-detail-list" id="pl3-qima-pos-detail-list"></div>
+                </div>
             </div>
             <div class="table-container fill-mode" id="pl3-predict-table">
                 <table>
@@ -1213,9 +1284,46 @@
         return [...set].filter(n => n > 0).sort((a, b) => a - b).join(',') || '—';
     }
 
+    function getCompareQh(type, item) {
+        if (item.qh) return item.qh;
+        if (!item.realHm) return '待开奖';
+        const found = getHistoryData(type).find(h => toDrawStr(h) === item.realHm);
+        return found ? found.qh : '-';
+    }
+
+    function formatQimaIndexText(positions) {
+        if (!positions) return '—';
+        return `百第${positions.bai}位 · 十第${positions.shi}位 · 个第${positions.ge}位`;
+    }
+
+    function formatQimaIndexShort(positions) {
+        if (!positions) return '';
+        return `百${positions.bai}/十${positions.shi}/个${positions.ge}`;
+    }
+
+    function updatePredictTableHead(type, compareType) {
+        const thead = document.getElementById(domPrefix(type) + '-table-head');
+        if (!thead) return;
+        if (compareType === 'qima') {
+            thead.innerHTML = '<tr><th>期号</th><th>七码预测</th><th>实际开奖</th><th>命中索引</th></tr>';
+            return;
+        }
+        if (type === '3d') {
+            thead.innerHTML = '<tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
+        } else {
+            thead.innerHTML = '<tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
+        }
+    }
+
+    function predictTableColspan(type, compareType) {
+        return compareType === 'qima' ? 4 : 3;
+    }
+
     function renderQimaPosStats(type, compareData) {
         const panel = document.getElementById(domPrefix(type) + '-qima-pos');
         const summaryEl = document.getElementById(domPrefix(type) + '-qima-pos-summary');
+        const detailPanel = document.getElementById(domPrefix(type) + '-qima-pos-detail');
+        const detailListEl = document.getElementById(domPrefix(type) + '-qima-pos-detail-list');
         if (!panel) return;
 
         if (compareTabs[type] !== 'qima') {
@@ -1236,14 +1344,23 @@
 
         if (hits.length === 0) {
             summaryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:13px">当前范围内无七码命中记录</span>';
-            return;
+        } else {
+            summaryEl.innerHTML = `
+            <div class="qima-pos-summary-item"><span class="pos-label">百位索引</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">十位索引</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">个位索引</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
+            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>`;
         }
 
-        summaryEl.innerHTML = `
-            <div class="qima-pos-summary-item"><span class="pos-label">百位</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">十位</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">个位</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>`;
+        detailPanel.style.display = hits.length > 0 ? 'block' : 'none';
+        detailListEl.innerHTML = hits.map(item => {
+            const qh = getCompareQh(type, item);
+            const positions = getQimaMatchPositions(item.aiDingWeiHm, item.realHm);
+            return `<div class="qima-pos-detail-item">
+                <span class="period-cell">${qh}</span>
+                <span class="qima-idx-text">${formatQimaIndexText(positions)}</span>
+            </div>`;
+        }).join('');
     }
 
     function checkMatch(aiHm, realHm) {
@@ -1271,19 +1388,29 @@
         }).join('');
     }
 
-    function formatDingWei(text) {
+    function formatDingWei(text, realHm) {
         if (!text) return '-';
-        const lines = text.split('\n').filter(l => l.trim());
+        const positions = realHm && checkDingWeiMatch(text, realHm)
+            ? getQimaMatchPositions(text, realHm) : null;
+        const rows = [
+            ['百位', /百位[:：]([0-9,]+)/, positions?.bai],
+            ['十位', /十位[:：]([0-9,]+)/, positions?.shi],
+            ['个位', /个位[:：]([0-9,]+)/, positions?.ge]
+        ];
         let html = '<div class="dingwei-text">';
-        lines.forEach(line => {
-            [['百位', /百位[:：]([0-9,]+)/], ['十位', /十位[:：]([0-9,]+)/], ['个位', /个位[:：]([0-9,]+)/]].forEach(([label, regex]) => {
-                const m = line.match(regex);
-                if (m) {
-                    html += `<div class="dingwei-row"><span class="dingwei-label">${label}:</span><div class="dingwei-numbers">`;
-                    m[1].split(',').forEach(num => { html += `<span class="dingwei-ball">${num.trim()}</span>`; });
-                    html += '</div></div>';
-                }
-            });
+        rows.forEach(([label, regex, hitIdx]) => {
+            const m = text.match(regex);
+            if (m) {
+                html += `<div class="dingwei-row"><span class="dingwei-label">${label}:</span><div class="dingwei-numbers">`;
+                m[1].split(',').forEach((num, i) => {
+                    const trimmed = num.trim();
+                    const idx = i + 1;
+                    const isHit = hitIdx === idx;
+                    const cls = isHit ? 'dingwei-ball highlight' : 'dingwei-ball';
+                    html += `<span class="${cls}">${trimmed}${isHit ? `<sup class="pos-idx">${idx}</sup>` : ''}</span>`;
+                });
+                html += '</div></div>';
+            }
         });
         return html + '</div>';
     }
@@ -1324,19 +1451,14 @@
         const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
         const filteredData = data.slice(-filters[type]).reverse();
         const compareType = compareTabs[type];
+        const colspan = predictTableColspan(type, compareType);
         renderStats(type, filteredData);
         renderQimaPosStats(type, filteredData);
-        if (type === 'pl3') {
-            const thead = document.getElementById('pl3-table-head');
-            thead.innerHTML = compareType === 'sanma'
-                ? '<tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>'
-                : '<tr><th>七码预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
-        }
+        updatePredictTableHead(type, compareType);
         const tbody = $(type, 'table-body');
         tbody.innerHTML = '';
         if (filteredData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="loading">暂无数据</td></tr>';
-            renderQimaPosStats(type, filteredData);
+            tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading">暂无数据</td></tr>`;
             adjustPredictTable(type);
             return;
         }
@@ -1344,17 +1466,36 @@
             const isMatch = compareType === 'sanma'
                 ? checkMatch(item.aiHm, item.realHm)
                 : checkDingWeiMatch(item.aiDingWeiHm, item.realHm);
-            const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
-            const row = document.createElement('tr');
+            const positions = compareType === 'qima'
+                ? getQimaMatchPositions(item.aiDingWeiHm, item.realHm) : null;
             const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
-            if (type === '3d') {
+            const row = document.createElement('tr');
+
+            if (compareType === 'qima') {
+                const qh = getCompareQh(type, item);
+                let matchCell;
+                if (positions) {
+                    matchCell = `<span class="success">✓ ${formatQimaIndexShort(positions)}</span>`;
+                } else if (!item.realHm) {
+                    matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
+                } else {
+                    matchCell = '<span class="fail">✗ 未命中</span>';
+                }
                 row.innerHTML = `
-                    <td>${compareType === 'sanma' ? formatBalls(item.aiHm) : formatDingWei(item.aiDingWeiHm)}</td>
+                    <td class="period-cell">${qh}</td>
+                    <td>${formatDingWei(item.aiDingWeiHm, item.realHm)}</td>
+                    <td>${realBalls}</td>
+                    <td>${matchCell}</td>`;
+            } else if (type === '3d') {
+                const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
+                row.innerHTML = `
+                    <td>${formatBalls(item.aiHm)}</td>
                     <td>${realBalls}</td>
                     <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
             } else {
+                const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
                 row.innerHTML = `
-                    <td>${compareType === 'sanma' ? formatBalls(item.aiHm) : formatDingWei(item.aiDingWeiHm)}</td>
+                    <td>${formatBalls(item.aiHm)}</td>
                     <td>${realBalls}</td>
                     <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
             }

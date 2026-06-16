@@ -80,6 +80,8 @@ public class HmCache {
     @Accessors(chain = true)
     public static class CompareDto{
 
+        private String qh;
+
         private String aiHm;
 
         private String aiDingWeiHm;

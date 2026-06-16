@@ -43,6 +43,7 @@ public class AppStarter implements ApplicationRunner {
         List<CompareVO> sdCompareList = EasyExcel.read(fileLocationCompare3d).head(CompareVO.class)
                 .sheet().doReadSync();
         HmCache.setSdCompareCache(sdCompareList.stream().map(compareVO -> new HmCache.CompareDto()
+                .setQh(compareVO.getQh())
                 .setAiHm(compareVO.getAiHm())
                 .setRealHm(compareVO.getRealHm())
                 .setAiDingWeiHm(compareVO.getDingWeiQm())
@@ -53,6 +54,7 @@ public class AppStarter implements ApplicationRunner {
         List<CompareVO> pl3CompareList = EasyExcel.read(fileLocationComparePl3).head(CompareVO.class)
                 .sheet().doReadSync();
         HmCache.setPl3CompareCache(pl3CompareList.stream().map(compareVO -> new HmCache.CompareDto()
+                .setQh(compareVO.getQh())
                 .setAiHm(compareVO.getAiHm())
                 .setRealHm(compareVO.getRealHm())
                 .setAiDingWeiHm(compareVO.getDingWeiQm())

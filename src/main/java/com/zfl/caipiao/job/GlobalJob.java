@@ -273,6 +273,7 @@ public class GlobalJob {
                     sdCompareCache.remove(compareDto);
                 }else{
                     compareDto.setRealHm(kaiJiangHm.toString());
+                    compareDto.setQh(kaiJiangHm.getQh());
                 }
             }
         }else{
@@ -283,16 +284,17 @@ public class GlobalJob {
                     pl3CompareCache.remove(compareDto);
                 }else{
                     compareDto.setRealHm(kaiJiangHm.toString());
+                    compareDto.setQh(kaiJiangHm.getQh());
                 }
             }
         }
 
         //录入本地预测结果
         if(is3D){
-            List<CompareVO> insertList = HmCache.getSdCompareCache().stream().map(compareDto -> CompareVO.builder().aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
+            List<CompareVO> insertList = HmCache.getSdCompareCache().stream().map(compareDto -> CompareVO.builder().qh(compareDto.getQh()).aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
             EasyExcel.write(fileLocationCompare3d, CompareVO.class).sheet("3D比对结果").doWrite(insertList);
         }else{
-            List<CompareVO> insertList = HmCache.getPl3CompareCache().stream().map(compareDto -> CompareVO.builder().aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
+            List<CompareVO> insertList = HmCache.getPl3CompareCache().stream().map(compareDto -> CompareVO.builder().qh(compareDto.getQh()).aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
             EasyExcel.write(fileLocationComparePl3, CompareVO.class).sheet("排列三比对结果").doWrite(insertList);
         }
     }
