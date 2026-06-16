@@ -15,9 +15,9 @@ public class TestController {
 
     @GetMapping("/applyTask")
     public void applyTask() throws Exception {
-//        globalJob.applyTask();
+        globalJob.applyTask();
 
-        globalJob.applyDingWeiTask();
+//        globalJob.applyDingWeiTask();
 
 //        globalJob.setDataTask();
     }
