@@ -132,7 +132,9 @@ public class AiUtils {
                             Map.of("role", ROLE_USER, CONTENT_KEY, userMsg)
                         ),
             "max_tokens", MAX_TOKENS,
-            "thinking", Map.of("type", "enabled")
+            "max_output_tokens", MAX_TOKENS,
+            "thinking", Map.of("type", "enabled"),
+            "reasoning", Map.of("effort", "high")
         );
         
         String req = JSON.toJSONString(requestMap);
