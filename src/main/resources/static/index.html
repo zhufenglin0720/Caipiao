@@ -295,6 +295,7 @@
 
         .table-container.fill-mode tbody tr {
             height: var(--row-h);
+            max-height: var(--row-h);
         }
 
         .table-container.fill-mode td {
@@ -957,7 +958,11 @@
                 touch-action: pan-x pan-y;
             }
 
-            .table-container.scroll-mode,
+            .table-container.scroll-mode {
+                overflow-x: auto;
+                overflow-y: auto;
+            }
+
             .table-container.fill-mode {
                 overflow-x: auto;
                 overflow-y: hidden;
@@ -1407,12 +1412,25 @@
 
     function applyTableFill(container, useFill, rowCount, minRowH = 44) {
         if (useFill && !isMobileView()) {
+            const theadH = container.querySelector('thead')?.offsetHeight || 42;
+            const available = container.clientHeight;
+
+            if (available <= theadH) {
+                if (!container.offsetParent) return;
+                requestAnimationFrame(() => applyTableFill(container, useFill, rowCount, minRowH));
+                return;
+            }
+
+            const rowH = Math.floor((available - theadH) / rowCount);
+            if (rowH < minRowH) {
+                container.classList.remove('fill-mode');
+                container.classList.add('scroll-mode');
+                container.style.removeProperty('--row-h');
+                return;
+            }
+
             container.classList.add('fill-mode');
             container.classList.remove('scroll-mode');
-            const theadH = container.querySelector('thead')?.offsetHeight || 42;
-            const bottomPad = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-pad')) || 10;
-            const available = window.innerHeight - container.getBoundingClientRect().top - bottomPad;
-            const rowH = Math.max(minRowH, Math.floor((available - theadH) / rowCount));
             container.style.setProperty('--row-h', rowH + 'px');
         } else {
             container.classList.remove('fill-mode');
