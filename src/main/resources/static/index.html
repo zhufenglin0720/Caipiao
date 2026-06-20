@@ -505,6 +505,7 @@
             gap: 20px;
             flex-wrap: wrap;
             font-size: 13px;
+            align-items: center;
         }
 
         .qima-pos-summary-item {
@@ -524,33 +525,185 @@
             font-weight: 600;
         }
 
-        .qima-pos-detail {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-        }
-
-        .qima-pos-detail-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            margin-bottom: 6px;
-        }
-
-        .qima-pos-detail-list {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            max-height: 120px;
-            overflow-y: auto;
-        }
-
-        .qima-pos-detail-item {
+        .qima-pos-summary-actions {
+            margin-left: auto;
             display: flex;
             align-items: center;
-            gap: 10px;
+        }
+
+        .qima-detail-btn {
+            padding: 5px 12px;
+            border: 1px solid var(--purple);
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--purple);
+            border-radius: 14px;
+            cursor: pointer;
             font-size: 12px;
-            padding: 3px 0;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .qima-detail-btn:hover {
+            background: rgba(99, 102, 241, 0.22);
+        }
+
+        .qima-hit-btn {
+            margin-left: 6px;
+            padding: 2px 8px;
+            border: 1px solid rgba(52, 211, 153, 0.5);
+            background: rgba(52, 211, 153, 0.1);
+            color: var(--success);
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-align: middle;
+        }
+
+        .qima-hit-btn:hover {
+            background: rgba(52, 211, 153, 0.2);
+        }
+
+        .table-container.qima-mode tbody tr {
+            height: auto;
+        }
+
+        .table-container.qima-mode td {
+            vertical-align: middle;
+            padding: 4px 8px;
+        }
+
+        .table-container.qima-mode td.qima-predict-cell {
+            text-align: center;
+        }
+
+        .table-container.qima-mode .dingwei-text {
+            display: inline-block;
+            text-align: center;
+            font-size: 12px;
+        }
+
+        .table-container.qima-mode .dingwei-row {
+            justify-content: center;
+            margin-bottom: 1px;
+        }
+
+        .table-container.qima-mode .dingwei-label {
+            min-width: 36px;
+            font-size: 11px;
+        }
+
+        .table-container.qima-mode .dingwei-ball {
+            width: 22px;
+            height: 22px;
+            font-size: 11px;
+        }
+
+        .table-container.qima-mode .dingwei-numbers {
+            flex: none;
+            justify-content: center;
+            gap: 2px;
+        }
+
+        .seq-cell {
+            font-weight: 700;
+            color: var(--accent-light);
+            font-size: 14px;
+            width: 48px;
+        }
+
+        .qima-popup-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.65);
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .qima-popup-overlay.active {
+            display: flex;
+        }
+
+        .qima-popup {
+            background: #1a2030;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            width: min(420px, 100%);
+            max-height: min(70vh, 520px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .qima-popup-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .qima-popup-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .qima-popup-close {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .qima-popup-close:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text-primary);
+        }
+
+        .qima-popup-body {
+            padding: 14px 16px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .qima-popup-index {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--accent-light);
+            margin-bottom: 12px;
+        }
+
+        .qima-popup-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .qima-popup-list-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+        }
+
+        .qima-popup-list-item .seq-cell {
+            min-width: 28px;
         }
 
         .qima-idx-text {
@@ -776,16 +929,92 @@
         }
 
         @media (max-width: 768px) {
+            html, body {
+                height: auto;
+                min-height: 100%;
+                overflow-x: hidden;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .container {
+                height: auto;
+                min-height: 100vh;
+                min-height: 100dvh;
+            }
+
+            .tab-content.active,
+            .section-panel.active {
+                flex: none;
+                min-height: auto;
+            }
+
+            .table-container {
+                flex: none;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                touch-action: pan-x pan-y;
+            }
+
+            .table-container.scroll-mode,
+            .table-container.fill-mode {
+                overflow-x: auto;
+                overflow-y: hidden;
+            }
+
+            .table-container.fill-mode tbody tr {
+                height: auto;
+            }
+
+            .panel-scroll {
+                flex: none;
+                overflow: visible;
+                min-height: auto;
+            }
+
+            .panel-scroll .table-container.table-fixed {
+                overflow-x: auto;
+                overflow-y: hidden;
+                max-height: none;
+            }
+
             body { padding: 6px; --page-pad: 6px; }
-            .header { padding: 10px 14px; }
+            .header { padding: 10px 14px; flex-wrap: wrap; gap: 6px; }
             .header-left h1 { font-size: 17px; }
-            .tab-header { flex-direction: column; align-items: stretch; }
-            .latest-bar { justify-content: center; }
-            .stats { grid-template-columns: repeat(3, 1fr); }
-            .tracker-summary { grid-template-columns: repeat(3, 1fr); }
-            .panel-toolbar { flex-direction: column; align-items: stretch; }
+            .header-right { font-size: 11px; white-space: normal; }
+            .main-tabs { margin-bottom: 8px; }
+            .main-tab { padding: 9px 10px; font-size: 13px; }
+            .tab-header { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+            .sub-tabs {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 2px;
+            }
+            .sub-tab { flex-shrink: 0; padding: 7px 14px; font-size: 12px; }
+            .latest-bar { justify-content: center; padding: 5px 10px; }
+            .number-ball { width: 34px; height: 34px; font-size: 17px; }
+            .stats { grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
+            .stat-card { padding: 8px 4px; }
+            .stat-value { font-size: 18px; }
+            .stat-label { font-size: 10px; }
+            .tracker-summary { grid-template-columns: repeat(2, 1fr); }
+            .panel-toolbar { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+            .filter-section { gap: 6px; }
+            .filter-btn { padding: 6px 12px; font-size: 12px; }
             .auto-refresh { margin-left: 0; }
             .toolbar-divider { display: none; }
+            .compare-tabs { width: 100%; }
+            .compare-tab { flex: 1; text-align: center; padding: 7px 10px; font-size: 12px; }
+            .qima-pos-panel { padding: 8px 10px; margin-bottom: 6px; }
+            .qima-pos-summary { gap: 8px 12px; }
+            .qima-pos-summary-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+            table { min-width: 460px; }
+            th, td { padding: 8px 6px; font-size: 12px; }
+            .ball-small { width: 28px; height: 28px; font-size: 12px; }
+            .history-toolbar { margin-bottom: 8px; }
+            .tracker-form .btn-primary { width: 100%; }
         }
     </style>
 </head>
@@ -839,10 +1068,6 @@
             </div>
             <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="sd-qima-pos-summary"></div>
-                <div class="qima-pos-detail" id="sd-qima-pos-detail" style="display:none">
-                    <div class="qima-pos-detail-title">每期命中明细</div>
-                    <div class="qima-pos-detail-list" id="sd-qima-pos-detail-list"></div>
-                </div>
             </div>
             <div class="table-container fill-mode" id="sd-predict-table">
                 <table>
@@ -968,10 +1193,6 @@
             </div>
             <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="pl3-qima-pos-summary"></div>
-                <div class="qima-pos-detail" id="pl3-qima-pos-detail" style="display:none">
-                    <div class="qima-pos-detail-title">每期命中明细</div>
-                    <div class="qima-pos-detail-list" id="pl3-qima-pos-detail-list"></div>
-                </div>
             </div>
             <div class="table-container fill-mode" id="pl3-predict-table">
                 <table>
@@ -1064,6 +1285,16 @@
     </div>
 </div>
 
+<div class="qima-popup-overlay" id="qima-popup-overlay" onclick="if(event.target===this)closeQimaPopup()">
+    <div class="qima-popup" role="dialog" aria-modal="true">
+        <div class="qima-popup-header">
+            <span class="qima-popup-title" id="qima-popup-title">命中索引</span>
+            <button type="button" class="qima-popup-close" onclick="closeQimaPopup()" aria-label="关闭">&times;</button>
+        </div>
+        <div class="qima-popup-body" id="qima-popup-body"></div>
+    </div>
+</div>
+
 <script>
     let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [] };
     let filters = { '3d': 10, 'pl3': 10 };
@@ -1151,12 +1382,18 @@
         adjustAllTables();
     }
 
+    function isMobileView() {
+        return window.matchMedia('(max-width: 768px)').matches;
+    }
+
     function adjustPredictTable(type) {
         const container = document.getElementById(domPrefix(type) + '-predict-table');
         if (!container || !$(type, 'predict').classList.contains('active')) return;
 
-        const useFill = filters[type] <= 10 && compareTabs[type] === 'sanma';
-        applyTableFill(container, useFill, 10);
+        const isQima = compareTabs[type] === 'qima';
+        container.classList.toggle('qima-mode', isQima);
+        const useFill = filters[type] <= 10 && !isQima && !isMobileView();
+        applyTableFill(container, useFill, filters[type]);
     }
 
     function adjustHistoryTable(type) {
@@ -1164,18 +1401,18 @@
         if (!container || !$(type, 'history').classList.contains('active')) return;
 
         const count = historyFilters[type];
-        const useFill = count > 0 && count <= 10;
+        const useFill = count > 0 && count <= 10 && !isMobileView();
         applyTableFill(container, useFill, count || 10);
     }
 
-    function applyTableFill(container, useFill, rowCount) {
-        if (useFill) {
+    function applyTableFill(container, useFill, rowCount, minRowH = 44) {
+        if (useFill && !isMobileView()) {
             container.classList.add('fill-mode');
             container.classList.remove('scroll-mode');
             const theadH = container.querySelector('thead')?.offsetHeight || 42;
             const bottomPad = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-pad')) || 10;
             const available = window.innerHeight - container.getBoundingClientRect().top - bottomPad;
-            const rowH = Math.max(44, Math.floor((available - theadH) / rowCount));
+            const rowH = Math.max(minRowH, Math.floor((available - theadH) / rowCount));
             container.style.setProperty('--row-h', rowH + 'px');
         } else {
             container.classList.remove('fill-mode');
@@ -1305,7 +1542,7 @@
         const thead = document.getElementById(domPrefix(type) + '-table-head');
         if (!thead) return;
         if (compareType === 'qima') {
-            thead.innerHTML = '<tr><th>期号</th><th>七码预测</th><th>实际开奖</th><th>命中索引</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -1319,11 +1556,36 @@
         return compareType === 'qima' ? 4 : 3;
     }
 
+    function openQimaPopup(title, bodyHtml) {
+        document.getElementById('qima-popup-title').textContent = title;
+        document.getElementById('qima-popup-body').innerHTML = bodyHtml;
+        document.getElementById('qima-popup-overlay').classList.add('active');
+    }
+
+    function closeQimaPopup() {
+        document.getElementById('qima-popup-overlay').classList.remove('active');
+    }
+
+    function showQimaIndexPopup(seq, positions, aiDingWeiHm, realHm) {
+        openQimaPopup('序号 ' + seq + ' · 命中索引', `
+            <div class="qima-popup-index">${formatQimaIndexText(positions)}</div>
+            ${formatDingWei(aiDingWeiHm, realHm)}
+        `);
+    }
+
+    function showQimaHitsPopup(hits) {
+        if (!hits.length) return;
+        const listHtml = hits.map(({ seq, positions }) => `
+            <div class="qima-popup-list-item">
+                <span class="seq-cell">${seq}</span>
+                <span class="qima-idx-text">${formatQimaIndexText(positions)}</span>
+            </div>`).join('');
+        openQimaPopup('命中索引明细', `<div class="qima-popup-list">${listHtml}</div>`);
+    }
+
     function renderQimaPosStats(type, compareData) {
         const panel = document.getElementById(domPrefix(type) + '-qima-pos');
         const summaryEl = document.getElementById(domPrefix(type) + '-qima-pos-summary');
-        const detailPanel = document.getElementById(domPrefix(type) + '-qima-pos-detail');
-        const detailListEl = document.getElementById(domPrefix(type) + '-qima-pos-detail-list');
         if (!panel) return;
 
         if (compareTabs[type] !== 'qima') {
@@ -1332,35 +1594,37 @@
         }
         panel.style.display = 'block';
 
-        const hits = compareData.filter(item => checkDingWeiMatch(item.aiDingWeiHm, item.realHm));
-        const baiSet = new Set(), shiSet = new Set(), geSet = new Set();
+        const hits = [];
+        compareData.forEach((item, idx) => {
+            if (!checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) return;
+            hits.push({
+                seq: idx + 1,
+                positions: getQimaMatchPositions(item.aiDingWeiHm, item.realHm)
+            });
+        });
 
-        hits.forEach(item => {
-            const p = getQimaMatchPositions(item.aiDingWeiHm, item.realHm);
-            baiSet.add(p.bai);
-            shiSet.add(p.shi);
-            geSet.add(p.ge);
+        const baiSet = new Set(), shiSet = new Set(), geSet = new Set();
+        hits.forEach(({ positions }) => {
+            baiSet.add(positions.bai);
+            shiSet.add(positions.shi);
+            geSet.add(positions.ge);
         });
 
         if (hits.length === 0) {
             summaryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:13px">当前范围内无七码命中记录</span>';
-        } else {
-            summaryEl.innerHTML = `
+            return;
+        }
+
+        summaryEl.innerHTML = `
             <div class="qima-pos-summary-item"><span class="pos-label">百位索引</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
             <div class="qima-pos-summary-item"><span class="pos-label">十位索引</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
             <div class="qima-pos-summary-item"><span class="pos-label">个位索引</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>`;
-        }
-
-        detailPanel.style.display = hits.length > 0 ? 'block' : 'none';
-        detailListEl.innerHTML = hits.map(item => {
-            const qh = getCompareQh(type, item);
-            const positions = getQimaMatchPositions(item.aiDingWeiHm, item.realHm);
-            return `<div class="qima-pos-detail-item">
-                <span class="period-cell">${qh}</span>
-                <span class="qima-idx-text">${formatQimaIndexText(positions)}</span>
+            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>
+            <div class="qima-pos-summary-actions">
+                <button type="button" class="qima-detail-btn" id="${domPrefix(type)}-qima-detail-btn">查看命中明细</button>
             </div>`;
-        }).join('');
+
+        document.getElementById(domPrefix(type) + '-qima-detail-btn').onclick = () => showQimaHitsPopup(hits);
     }
 
     function checkMatch(aiHm, realHm) {
@@ -1462,7 +1726,8 @@
             adjustPredictTable(type);
             return;
         }
-        filteredData.forEach(item => {
+        filteredData.forEach((item, idx) => {
+            const seq = idx + 1;
             const isMatch = compareType === 'sanma'
                 ? checkMatch(item.aiHm, item.realHm)
                 : checkDingWeiMatch(item.aiDingWeiHm, item.realHm);
@@ -1472,20 +1737,24 @@
             const row = document.createElement('tr');
 
             if (compareType === 'qima') {
-                const qh = getCompareQh(type, item);
                 let matchCell;
                 if (positions) {
-                    matchCell = `<span class="success">✓ ${formatQimaIndexShort(positions)}</span>`;
+                    matchCell = `<span class="success">✓ 命中</span>
+                        <button type="button" class="qima-hit-btn">查看索引</button>`;
                 } else if (!item.realHm) {
                     matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
                 } else {
                     matchCell = '<span class="fail">✗ 未命中</span>';
                 }
                 row.innerHTML = `
-                    <td class="period-cell">${qh}</td>
-                    <td>${formatDingWei(item.aiDingWeiHm, item.realHm)}</td>
+                    <td class="seq-cell">${seq}</td>
+                    <td class="qima-predict-cell">${formatDingWei(item.aiDingWeiHm, item.realHm)}</td>
                     <td>${realBalls}</td>
                     <td>${matchCell}</td>`;
+                if (positions) {
+                    const btn = row.querySelector('.qima-hit-btn');
+                    btn.onclick = () => showQimaIndexPopup(seq, positions, item.aiDingWeiHm, item.realHm);
+                }
             } else if (type === '3d') {
                 const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
                 row.innerHTML = `
