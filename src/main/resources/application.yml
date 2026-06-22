@@ -17,7 +17,9 @@ file:
   location:
     3d: D:\彩票\3D.xlsx
     compare3D: D:\彩票\3D对比.xlsx
+    compare3DDadi: D:\彩票\3D大底对比.xlsx
     pl3: D:\彩票\排列三.xlsx
     comparePl3: D:\彩票\排列三对比.xlsx
+    comparePl3Dadi: D:\彩票\排列三大底对比.xlsx
 server:
   port: 10088

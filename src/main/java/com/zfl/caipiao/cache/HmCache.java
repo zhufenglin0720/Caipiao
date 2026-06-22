@@ -22,6 +22,10 @@ public class HmCache {
 
     private static final List<CompareDto> PL3_COMPARE_CACHE = new ArrayList<>();
 
+    private static final List<DadiCompareDto> SD_DADI_COMPARE_CACHE = new ArrayList<>();
+
+    private static final List<DadiCompareDto> PL3_DADI_COMPARE_CACHE = new ArrayList<>();
+
     public static List<Hm> getSdCache() {
         return SD_CACHE;
     }
@@ -38,6 +42,14 @@ public class HmCache {
         return PL3_COMPARE_CACHE;
     }
 
+    public static List<DadiCompareDto> getSdDadiCompareCache() {
+        return SD_DADI_COMPARE_CACHE;
+    }
+
+    public static List<DadiCompareDto> getPl3DadiCompareCache() {
+        return PL3_DADI_COMPARE_CACHE;
+    }
+
     public static void addSdCompareCache(CompareDto compareDto) {
         if(SD_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE){
             SD_COMPARE_CACHE.remove(0);
@@ -50,6 +62,20 @@ public class HmCache {
             PL3_COMPARE_CACHE.remove(0);
         }
         PL3_COMPARE_CACHE.add(compareDto);
+    }
+
+    public static void addSdDadiCompareCache(DadiCompareDto dadiCompareDto) {
+        if (SD_DADI_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE) {
+            SD_DADI_COMPARE_CACHE.remove(0);
+        }
+        SD_DADI_COMPARE_CACHE.add(dadiCompareDto);
+    }
+
+    public static void addPl3DadiCompareCache(DadiCompareDto dadiCompareDto) {
+        if (PL3_DADI_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE) {
+            PL3_DADI_COMPARE_CACHE.remove(0);
+        }
+        PL3_DADI_COMPARE_CACHE.add(dadiCompareDto);
     }
 
     public static void addSdCache(Hm hm) {
@@ -76,6 +102,16 @@ public class HmCache {
         PL3_COMPARE_CACHE.addAll(compareDtos);
     }
 
+    public static void setSdDadiCompareCache(List<DadiCompareDto> dadiCompareDtos) {
+        SD_DADI_COMPARE_CACHE.clear();
+        SD_DADI_COMPARE_CACHE.addAll(dadiCompareDtos);
+    }
+
+    public static void setPl3DadiCompareCache(List<DadiCompareDto> dadiCompareDtos) {
+        PL3_DADI_COMPARE_CACHE.clear();
+        PL3_DADI_COMPARE_CACHE.addAll(dadiCompareDtos);
+    }
+
     @Data
     @Accessors(chain = true)
     public static class CompareDto{
@@ -85,6 +121,18 @@ public class HmCache {
         private String aiHm;
 
         private String aiDingWeiHm;
+
+        private String realHm;
+
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class DadiCompareDto {
+
+        private String qh;
+
+        private String aiDadiHm;
 
         private String realHm;
 

@@ -4,6 +4,8 @@ import com.alibaba.excel.EasyExcel;
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
+import com.zfl.caipiao.service.DadiService;
+import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -25,6 +27,13 @@ public class AppStarter implements ApplicationRunner {
     private String fileLocationCompare3d;
     @Value("${file.location.comparePl3}")
     private String fileLocationComparePl3;
+    @Value("${file.location.compare3DDadi}")
+    private String fileLocationCompare3dDadi;
+    @Value("${file.location.comparePl3Dadi}")
+    private String fileLocationComparePl3Dadi;
+
+    @Resource
+    private DadiService dadiService;
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
@@ -60,6 +69,12 @@ public class AppStarter implements ApplicationRunner {
                 .setAiDingWeiHm(compareVO.getDingWeiQm())
         ).toList());
         System.out.println("pl3CompareCache:" + HmCache.getPl3CompareCache());
+
+        dadiService.loadFromExcel(true, fileLocationCompare3dDadi);
+        System.out.println("3dDadiCompareCache:" + HmCache.getSdDadiCompareCache().size());
+
+        dadiService.loadFromExcel(false, fileLocationComparePl3Dadi);
+        System.out.println("pl3DadiCompareCache:" + HmCache.getPl3DadiCompareCache().size());
     }
 
 }

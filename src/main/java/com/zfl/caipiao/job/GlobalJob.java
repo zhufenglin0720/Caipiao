@@ -9,6 +9,7 @@ import com.zfl.caipiao.constant.EmailConstant;
 import com.zfl.caipiao.constant.Url;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
+import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.utils.AiUtils;
 import com.zfl.caipiao.utils.DateUtils;
 import com.zfl.caipiao.utils.ThreadUtils;
@@ -35,6 +36,8 @@ public class GlobalJob {
 
     @Resource
     private JavaMailSender javaMailSender;
+    @Resource
+    private DadiService dadiService;
     @Value("${spring.mail.username}")
     private String from;
     @Value("${spring.mail.to}")
@@ -262,6 +265,8 @@ public class GlobalJob {
             String sheetName = is3D ? "3D" : "排列三";
             List<Hm> list = is3D ? HmCache.getSdCache() : HmCache.getPl3Cache();
             EasyExcel.write(filePath, Hm.class).sheet(sheetName).doWrite(list);
+            // 大底独立回填：仅当最新一条 realHm 为空时写入开奖号
+            dadiService.updateRealHm(is3D, kaiJiangHm.toString());
         }
 
         //设置下比较缓存的真实值
