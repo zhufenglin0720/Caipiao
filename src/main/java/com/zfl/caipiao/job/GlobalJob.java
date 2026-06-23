@@ -166,7 +166,7 @@ public class GlobalJob {
         sendEmailCode("今日3D及排三预测", msg[0]);
     }
 
-    @Scheduled(cron = "0 30 22 * * ?")
+    @Scheduled(cron = "0 50 21 * * ?")
     public void setDataTask() throws Exception {
         List<Hm> sdCache = HmCache.getSdCache();
         Hm sdHm = sdCache.get(sdCache.size() - 1);
