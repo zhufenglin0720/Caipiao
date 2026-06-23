@@ -1544,7 +1544,7 @@
         <div class="qima-popup-body">
             <div class="dadi-model-select">
                 <button type="button" class="dadi-model-option active" data-model="cursor" onclick="selectDadiModel('cursor', this)">Cursor</button>
-                <button type="button" class="dadi-model-option" data-model="sonnet" onclick="selectDadiModel('sonnet', this)">Sonnet</button>
+                <button type="button" class="dadi-model-option" data-model="deepseek" onclick="selectDadiModel('deepseek', this)">DeepSeek</button>
             </div>
             <textarea class="dadi-entry-textarea" id="dadi-entry-textarea"
                       placeholder="每行一注，或用逗号/空格分隔，例如：&#10;123&#10;456&#10;789&#10;...共500注"
@@ -1973,7 +1973,7 @@
             return;
         }
         if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>Cursor</th><th>Sonnet</th><th>实际开奖</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>Cursor</th><th>DeepSeek</th><th>实际开奖</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -2132,21 +2132,21 @@
 
         if (tab === 'dadi') {
             const total = compareData.length;
-            let cursorSuccess = 0, sonnetSuccess = 0;
+            let cursorSuccess = 0, deepseekSuccess = 0;
             const cursorTotal = compareData.filter(i => i.cursorDadiHm).length;
-            const sonnetTotal = compareData.filter(i => i.sonnetDadiHm).length;
+            const deepseekTotal = compareData.filter(i => i.deepseekDadiHm).length;
             compareData.forEach(item => {
                 if (checkDadiMatch(item.cursorDadiHm, item.realHm)) cursorSuccess++;
-                if (checkDadiMatch(item.sonnetDadiHm, item.realHm)) sonnetSuccess++;
+                if (checkDadiMatch(item.deepseekDadiHm, item.realHm)) deepseekSuccess++;
             });
             const cursorRate = cursorTotal > 0 ? ((cursorSuccess / cursorTotal) * 100).toFixed(1) : 0;
-            const sonnetRate = sonnetTotal > 0 ? ((sonnetSuccess / sonnetTotal) * 100).toFixed(1) : 0;
+            const deepseekRate = deepseekTotal > 0 ? ((deepseekSuccess / deepseekTotal) * 100).toFixed(1) : 0;
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
                 <div class="stat-card"><div class="stat-value">${cursorSuccess}/${cursorTotal}</div><div class="stat-label">Cursor命中(命中期数/录入期数)</div></div>
                 <div class="stat-card"><div class="stat-value">${cursorRate}%</div><div class="stat-label">Cursor命中率</div></div>
-                <div class="stat-card"><div class="stat-value">${sonnetSuccess}/${sonnetTotal}</div><div class="stat-label">Sonnet命中(命中期数/录入期数)</div></div>
-                <div class="stat-card"><div class="stat-value">${sonnetRate}%</div><div class="stat-label">Sonnet命中率</div></div>`;
+                <div class="stat-card"><div class="stat-value">${deepseekSuccess}/${deepseekTotal}</div><div class="stat-label">DeepSeek命中(命中期数/录入期数)</div></div>
+                <div class="stat-card"><div class="stat-value">${deepseekRate}%</div><div class="stat-label">DeepSeek命中率</div></div>`;
             return;
         }
 
@@ -2193,11 +2193,11 @@
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
                     <td>${formatDadiModelCell('Cursor', item.cursorDadiHm, item.realHm)}</td>
-                    <td>${formatDadiModelCell('Sonnet', item.sonnetDadiHm, item.realHm)}</td>
+                    <td>${formatDadiModelCell('DeepSeek', item.deepseekDadiHm, item.realHm)}</td>
                     <td>${realBalls}</td>`;
                 row.querySelectorAll('.dadi-view-btn').forEach((viewBtn, btnIdx) => {
-                    const modelKey = btnIdx === 0 ? 'cursorDadiHm' : 'sonnetDadiHm';
-                    const modelLabel = btnIdx === 0 ? 'Cursor' : 'Sonnet';
+                    const modelKey = btnIdx === 0 ? 'cursorDadiHm' : 'deepseekDadiHm';
+                    const modelLabel = btnIdx === 0 ? 'Cursor' : 'DeepSeek';
                     const dadiHm = item[modelKey];
                     if (dadiHm) {
                         const numbers = dadiHm.split(',');

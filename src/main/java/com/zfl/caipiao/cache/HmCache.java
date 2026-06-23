@@ -134,7 +134,7 @@ public class HmCache {
 
         private String cursorDadiHm;
 
-        private String sonnetDadiHm;
+        private String deepseekDadiHm;
 
         private String realHm;
 

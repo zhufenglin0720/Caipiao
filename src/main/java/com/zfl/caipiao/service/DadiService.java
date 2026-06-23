@@ -23,7 +23,7 @@ public class DadiService {
 
     private static final int DADI_SIZE = 500;
 
-    private static final Set<String> VALID_MODELS = Set.of("cursor", "sonnet");
+    private static final Set<String> VALID_MODELS = Set.of("cursor", "deepseek");
 
     @Value("${file.location.compare3DDadi}")
     private String fileLocationCompare3dDadi;
@@ -43,7 +43,7 @@ public class DadiService {
 
     public void saveDadi(boolean is3D, String model, String numbersText) {
         if (!VALID_MODELS.contains(model)) {
-            throw new IllegalArgumentException("模型无效，请使用 cursor 或 sonnet");
+            throw new IllegalArgumentException("模型无效，请使用 cursor 或 deepseek");
         }
         List<String> numbers = parseNumbers(numbersText);
         if (numbers.size() != DADI_SIZE) {
@@ -76,7 +76,7 @@ public class DadiService {
         if ("cursor".equals(model)) {
             dto.setCursorDadiHm(dadiHm);
         } else {
-            dto.setSonnetDadiHm(dadiHm);
+            dto.setDeepseekDadiHm(dadiHm);
         }
     }
 
@@ -91,14 +91,11 @@ public class DadiService {
             return;
         }
         List<HmCache.DadiCompareDto> dtos = list.stream()
-                .map(vo -> {
-                    String cursorHm = vo.getCursorDadiHm();
-                    return new HmCache.DadiCompareDto()
-                            .setQh(vo.getQh())
-                            .setCursorDadiHm(cursorHm)
-                            .setSonnetDadiHm(vo.getSonnetDadiHm())
-                            .setRealHm(vo.getRealHm());
-                })
+                .map(vo -> new HmCache.DadiCompareDto()
+                        .setQh(vo.getQh())
+                        .setCursorDadiHm(vo.getCursorDadiHm())
+                        .setDeepseekDadiHm(vo.getDeepseekDadiHm())
+                        .setRealHm(vo.getRealHm()))
                 .toList();
         if (is3D) {
             HmCache.setSdDadiCompareCache(dtos);
@@ -115,7 +112,7 @@ public class DadiService {
                 .map(dto -> DadiCompareVO.builder()
                         .qh(dto.getQh())
                         .cursorDadiHm(dto.getCursorDadiHm())
-                        .sonnetDadiHm(dto.getSonnetDadiHm())
+                        .deepseekDadiHm(dto.getDeepseekDadiHm())
                         .realHm(dto.getRealHm())
                         .build())
                 .toList();
@@ -136,7 +133,7 @@ public class DadiService {
     }
 
     private boolean hasAnyDadiHm(HmCache.DadiCompareDto dto) {
-        return StrUtil.isNotBlank(dto.getCursorDadiHm()) || StrUtil.isNotBlank(dto.getSonnetDadiHm());
+        return StrUtil.isNotBlank(dto.getCursorDadiHm()) || StrUtil.isNotBlank(dto.getDeepseekDadiHm());
     }
 
 }

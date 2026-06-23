@@ -21,8 +21,8 @@ public class DadiCompareVO {
     @ExcelProperty("Cursor500注大底")
     private String cursorDadiHm;
 
-    @ExcelProperty("Sonnet500注大底")
-    private String sonnetDadiHm;
+    @ExcelProperty("DeepSeek500注大底")
+    private String deepseekDadiHm;
 
     @ExcelProperty("真实号码")
     private String realHm;
