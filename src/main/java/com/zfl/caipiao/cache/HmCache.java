@@ -132,7 +132,9 @@ public class HmCache {
 
         private String qh;
 
-        private String aiDadiHm;
+        private String cursorDadiHm;
+
+        private String sonnetDadiHm;
 
         private String realHm;
 

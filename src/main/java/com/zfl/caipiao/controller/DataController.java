@@ -47,8 +47,9 @@ public class DataController {
     public Map<String, Object> saveDadi(@RequestBody Map<String, String> body) {
         Map<String, Object> result = new HashMap<>();
         String type = body.get("type");
+        String model = body.get("model");
         String numbers = body.get("numbers");
-        if (type == null || numbers == null) {
+        if (type == null || model == null || numbers == null) {
             result.put("success", false);
             result.put("message", "参数不完整");
             return result;
@@ -60,7 +61,7 @@ public class DataController {
             return result;
         }
         try {
-            dadiService.saveDadi(is3D, numbers);
+            dadiService.saveDadi(is3D, model.toLowerCase(), numbers);
             result.put("success", true);
             result.put("message", "500注大底录入成功");
         } catch (IllegalArgumentException e) {
@@ -88,7 +89,8 @@ public class DataController {
         return list.stream().map(dto -> {
             Map<String, String> map = new HashMap<>();
             map.put("qh", dto.getQh());
-            map.put("aiDadiHm", dto.getAiDadiHm());
+            map.put("cursorDadiHm", dto.getCursorDadiHm());
+            map.put("sonnetDadiHm", dto.getSonnetDadiHm());
             map.put("realHm", dto.getRealHm());
             return map;
         }).collect(Collectors.toList());

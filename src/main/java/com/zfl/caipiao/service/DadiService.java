@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -21,6 +22,8 @@ import java.util.stream.Collectors;
 public class DadiService {
 
     private static final int DADI_SIZE = 500;
+
+    private static final Set<String> VALID_MODELS = Set.of("cursor", "sonnet");
 
     @Value("${file.location.compare3DDadi}")
     private String fileLocationCompare3dDadi;
@@ -38,35 +41,43 @@ public class DadiService {
                 .collect(Collectors.toList());
     }
 
-    public void saveDadi(boolean is3D, String numbersText) {
+    public void saveDadi(boolean is3D, String model, String numbersText) {
+        if (!VALID_MODELS.contains(model)) {
+            throw new IllegalArgumentException("模型无效，请使用 cursor 或 sonnet");
+        }
         List<String> numbers = parseNumbers(numbersText);
         if (numbers.size() != DADI_SIZE) {
             throw new IllegalArgumentException("请输入恰好500注三位数号码，当前有效号码数：" + numbers.size());
         }
-        String aiDadiHm = String.join(",", numbers);
-        // 录入时不设置期号和实际开奖号，等 22:30 定时任务自动回填
-        HmCache.DadiCompareDto dto = new HmCache.DadiCompareDto()
-                .setAiDadiHm(aiDadiHm)
-                .setQh(null)
-                .setRealHm(null);
+        String dadiHm = String.join(",", numbers);
 
         List<HmCache.DadiCompareDto> cache = is3D ? HmCache.getSdDadiCompareCache() : HmCache.getPl3DadiCompareCache();
         if (CollUtil.isNotEmpty(cache)) {
             HmCache.DadiCompareDto latest = cache.get(cache.size() - 1);
             if (StrUtil.isBlank(latest.getRealHm())) {
-                latest.setAiDadiHm(aiDadiHm);
-                latest.setQh(null);
-                latest.setRealHm(null);
+                setModelDadiHm(latest, model, dadiHm);
                 writeExcel(is3D);
                 return;
             }
         }
+        HmCache.DadiCompareDto dto = new HmCache.DadiCompareDto()
+                .setQh(null)
+                .setRealHm(null);
+        setModelDadiHm(dto, model, dadiHm);
         if (is3D) {
             HmCache.addSdDadiCompareCache(dto);
         } else {
             HmCache.addPl3DadiCompareCache(dto);
         }
         writeExcel(is3D);
+    }
+
+    private void setModelDadiHm(HmCache.DadiCompareDto dto, String model, String dadiHm) {
+        if ("cursor".equals(model)) {
+            dto.setCursorDadiHm(dadiHm);
+        } else {
+            dto.setSonnetDadiHm(dadiHm);
+        }
     }
 
     public void loadFromExcel(boolean is3D, String filePath) {
@@ -80,10 +91,14 @@ public class DadiService {
             return;
         }
         List<HmCache.DadiCompareDto> dtos = list.stream()
-                .map(vo -> new HmCache.DadiCompareDto()
-                        .setQh(vo.getQh())
-                        .setAiDadiHm(vo.getAiDadiHm())
-                        .setRealHm(vo.getRealHm()))
+                .map(vo -> {
+                    String cursorHm = vo.getCursorDadiHm();
+                    return new HmCache.DadiCompareDto()
+                            .setQh(vo.getQh())
+                            .setCursorDadiHm(cursorHm)
+                            .setSonnetDadiHm(vo.getSonnetDadiHm())
+                            .setRealHm(vo.getRealHm());
+                })
                 .toList();
         if (is3D) {
             HmCache.setSdDadiCompareCache(dtos);
@@ -99,7 +114,8 @@ public class DadiService {
         List<DadiCompareVO> insertList = cache.stream()
                 .map(dto -> DadiCompareVO.builder()
                         .qh(dto.getQh())
-                        .aiDadiHm(dto.getAiDadiHm())
+                        .cursorDadiHm(dto.getCursorDadiHm())
+                        .sonnetDadiHm(dto.getSonnetDadiHm())
                         .realHm(dto.getRealHm())
                         .build())
                 .toList();
@@ -113,11 +129,14 @@ public class DadiService {
             return;
         }
         HmCache.DadiCompareDto latest = cache.get(cache.size() - 1);
-        // 仅最新一条且 realHm 为空时才回填，已有开奖号则跳过
-        if (StrUtil.isBlank(latest.getRealHm()) && StrUtil.isNotBlank(latest.getAiDadiHm())) {
+        if (StrUtil.isBlank(latest.getRealHm()) && hasAnyDadiHm(latest)) {
             latest.setRealHm(realHm);
             writeExcel(is3D);
         }
+    }
+
+    private boolean hasAnyDadiHm(HmCache.DadiCompareDto dto) {
+        return StrUtil.isNotBlank(dto.getCursorDadiHm()) || StrUtil.isNotBlank(dto.getSonnetDadiHm());
     }
 
 }

@@ -18,8 +18,11 @@ public class DadiCompareVO {
     @ExcelProperty("期号")
     private String qh;
 
-    @ExcelProperty("500注大底")
-    private String aiDadiHm;
+    @ExcelProperty("Cursor500注大底")
+    private String cursorDadiHm;
+
+    @ExcelProperty("Sonnet500注大底")
+    private String sonnetDadiHm;
 
     @ExcelProperty("真实号码")
     private String realHm;
