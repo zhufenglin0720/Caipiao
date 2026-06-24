@@ -652,6 +652,35 @@
             flex-shrink: 0;
         }
 
+        .qima-popup-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dadi-copy-btn {
+            padding: 4px 12px;
+            border: 1px solid rgba(245, 158, 11, 0.5);
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--accent-light);
+            border-radius: 14px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .dadi-copy-btn:hover {
+            background: rgba(245, 158, 11, 0.22);
+        }
+
+        .dadi-copy-btn.copied {
+            border-color: var(--success);
+            background: rgba(52, 211, 153, 0.15);
+            color: var(--success);
+        }
+
         .qima-popup-title {
             font-size: 15px;
             font-weight: 700;
@@ -911,7 +940,8 @@
         .dadi-numbers-grid {
             display: flex;
             flex-wrap: wrap;
-            gap: 4px;
+            gap: 10px 8px;
+            padding: 6px 2px 2px 6px;
         }
 
         .qima-popup.dadi-view-popup {
@@ -922,26 +952,93 @@
         .qima-popup.dadi-view-popup .qima-popup-body {
             flex: 1;
             min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #dadi-popup-grid {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .dadi-view-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+
+        .dadi-search-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .dadi-search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .dadi-search-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
         }
 
         .dadi-num-item {
+            position: relative;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 36px;
-            height: 28px;
-            padding: 0 4px;
+            min-width: 40px;
+            height: 30px;
+            padding: 0 6px;
+            margin-top: 4px;
+            margin-left: 4px;
             border-radius: 6px;
             background: rgba(255, 255, 255, 0.06);
             font-size: 12px;
             font-weight: 600;
             color: var(--text-primary);
+            overflow: visible;
+        }
+
+        .dadi-num-seq {
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 3px;
+            border-radius: 8px;
+            background: var(--purple);
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 16px;
+            text-align: center;
+            z-index: 2;
+            pointer-events: none;
         }
 
         .dadi-num-item.hit {
             background: linear-gradient(145deg, var(--accent-light), var(--accent));
             color: #1a1a2e;
             box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        .dadi-num-item.hit .dadi-num-seq {
+            background: #1a1a2e;
+            color: var(--accent-light);
         }
 
         .table-container.dadi-mode tbody tr {
@@ -1529,7 +1626,10 @@
     <div class="qima-popup" role="dialog" aria-modal="true">
         <div class="qima-popup-header">
             <span class="qima-popup-title" id="qima-popup-title">命中索引</span>
-            <button type="button" class="qima-popup-close" onclick="closeQimaPopup()" aria-label="关闭">&times;</button>
+            <div class="qima-popup-header-actions">
+                <button type="button" class="dadi-copy-btn" id="qima-popup-copy-btn" onclick="copyDadiPopupNumbers()" hidden>一键复制</button>
+                <button type="button" class="qima-popup-close" onclick="closeQimaPopup()" aria-label="关闭">&times;</button>
+            </div>
         </div>
         <div class="qima-popup-body" id="qima-popup-body"></div>
     </div>
@@ -1844,14 +1944,14 @@
         return getDadiHitPosition(aiDadiHm, realHm) > 0;
     }
 
-    function formatDadiPreview(aiDadiHm, realHm) {
+    function formatDadiPreview(aiDadiHm, realHm, model) {
         if (!aiDadiHm) return '';
         const numbers = aiDadiHm.split(',');
         const sample = numbers.slice(0, 3).join(' ');
         return `<div class="dadi-preview">
             <span class="dadi-preview-count">共 ${numbers.length} 注</span>
             <span class="dadi-preview-sample">${sample}${numbers.length > 3 ? ' …' : ''}</span>
-            <button type="button" class="dadi-view-btn">查看全部</button>
+            <button type="button" class="dadi-view-btn" data-model="${model}">查看全部</button>
         </div>`;
     }
 
@@ -1869,8 +1969,8 @@
         return '<span class="dadi-model-status miss">未命中</span>';
     }
 
-    function formatDadiModelCell(modelLabel, dadiHm, realHm) {
-        const preview = dadiHm ? formatDadiPreview(dadiHm, realHm) : '';
+    function formatDadiModelCell(modelLabel, dadiHm, realHm, model) {
+        const preview = dadiHm ? formatDadiPreview(dadiHm, realHm, model) : '';
         const status = formatDadiModelStatus(dadiHm, realHm);
         return `<div class="dadi-model-cell">
             <span class="dadi-model-label">${modelLabel}</span>
@@ -1879,15 +1979,84 @@
         </div>`;
     }
 
-    function showDadiNumbersPopup(numbers, realHm, seq, modelLabel) {
+    function renderDadiNumItem(num, idx, hitPos) {
+        const isHit = hitPos === idx;
+        return `<span class="dadi-num-item${isHit ? ' hit' : ''}" data-num="${num}" data-idx="${idx}"><sup class="dadi-num-seq">${idx}</sup>${num}</span>`;
+    }
+
+    function renderDadiPopupGrid(numbers, realHm, keyword) {
         const hitPos = realHm ? numbers.indexOf(realHm) + 1 : 0;
+        const kw = (keyword || '').trim();
+        const items = numbers.map((num, i) => ({ num, idx: i + 1 }))
+            .filter(({ num }) => !kw || num.includes(kw));
+        return items.map(({ num, idx }) => renderDadiNumItem(num, idx, hitPos)).join('');
+    }
+
+    let dadiPopupCopyText = '';
+    let dadiPopupState = { numbers: [], realHm: '' };
+
+    function filterDadiPopupGrid() {
+        const input = document.getElementById('dadi-popup-search');
+        const grid = document.getElementById('dadi-popup-grid');
+        if (!input || !grid) return;
+        const kw = input.value.trim();
+        const { numbers, realHm } = dadiPopupState;
+        grid.innerHTML = renderDadiPopupGrid(numbers, realHm, kw);
+        const countEl = document.getElementById('dadi-popup-search-count');
+        if (countEl) {
+            const total = numbers.length;
+            const visible = kw ? numbers.filter(n => n.includes(kw)).length : total;
+            countEl.textContent = kw ? `显示 ${visible} / ${total} 注` : `共 ${total} 注`;
+        }
+    }
+
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    }
+
+    async function copyDadiPopupNumbers() {
+        if (!dadiPopupCopyText) return;
+        const btn = document.getElementById('qima-popup-copy-btn');
+        try {
+            await copyTextToClipboard(dadiPopupCopyText);
+            btn.textContent = '已复制';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = '一键复制';
+                btn.classList.remove('copied');
+            }, 1500);
+        } catch (e) {
+            btn.textContent = '复制失败';
+            setTimeout(() => { btn.textContent = '一键复制'; }, 1500);
+        }
+    }
+
+    function showDadiNumbersPopup(numbers, realHm, seq, modelLabel) {
+        dadiPopupState = { numbers, realHm };
         const title = seq ? `序号 ${seq} · ${modelLabel} · 500注大底` : `${modelLabel} · 500注大底`;
-        const gridHtml = numbers.map((num, i) => {
-            const idx = i + 1;
-            const isHit = hitPos === idx;
-            return `<span class="dadi-num-item${isHit ? ' hit' : ''}">${num}</span>`;
-        }).join('');
-        openQimaPopup(title, `<div class="dadi-numbers-grid">${gridHtml}</div>`, { dadiView: true });
+        const bodyHtml = `
+            <div class="dadi-view-toolbar">
+                <input type="text" id="dadi-popup-search" class="dadi-search-input"
+                       placeholder="搜索号码，如 123" inputmode="numeric"
+                       oninput="filterDadiPopupGrid()">
+                <span class="dadi-search-count" id="dadi-popup-search-count">共 ${numbers.length} 注</span>
+            </div>
+            <div class="dadi-numbers-grid" id="dadi-popup-grid">${renderDadiPopupGrid(numbers, realHm)}</div>`;
+        openQimaPopup(title, bodyHtml, {
+            dadiView: true,
+            copyText: numbers.join('\n')
+        });
     }
 
     function selectDadiModel(model, btn) {
@@ -1991,7 +2160,18 @@
 
     function openQimaPopup(title, bodyHtml, options) {
         const popup = document.querySelector('#qima-popup-overlay .qima-popup');
-        popup.classList.toggle('dadi-view-popup', !!(options && options.dadiView));
+        const copyBtn = document.getElementById('qima-popup-copy-btn');
+        const isDadiView = !!(options && options.dadiView);
+        popup.classList.toggle('dadi-view-popup', isDadiView);
+        if (isDadiView && options.copyText) {
+            dadiPopupCopyText = options.copyText;
+            copyBtn.hidden = false;
+            copyBtn.textContent = '一键复制';
+            copyBtn.classList.remove('copied');
+        } else {
+            dadiPopupCopyText = '';
+            copyBtn.hidden = true;
+        }
         document.getElementById('qima-popup-title').textContent = title;
         document.getElementById('qima-popup-body').innerHTML = bodyHtml;
         document.getElementById('qima-popup-overlay').classList.add('active');
@@ -1999,6 +2179,9 @@
 
     function closeQimaPopup() {
         document.querySelector('#qima-popup-overlay .qima-popup').classList.remove('dadi-view-popup');
+        document.getElementById('qima-popup-copy-btn').hidden = true;
+        dadiPopupCopyText = '';
+        dadiPopupState = { numbers: [], realHm: '' };
         document.getElementById('qima-popup-overlay').classList.remove('active');
     }
 
@@ -2192,12 +2375,13 @@
             if (compareType === 'dadi') {
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
-                    <td>${formatDadiModelCell('Cursor', item.cursorDadiHm, item.realHm)}</td>
-                    <td>${formatDadiModelCell('DeepSeek', item.deepseekDadiHm, item.realHm)}</td>
+                    <td>${formatDadiModelCell('Cursor', item.cursorDadiHm, item.realHm, 'cursor')}</td>
+                    <td>${formatDadiModelCell('DeepSeek', item.deepseekDadiHm, item.realHm, 'deepseek')}</td>
                     <td>${realBalls}</td>`;
-                row.querySelectorAll('.dadi-view-btn').forEach((viewBtn, btnIdx) => {
-                    const modelKey = btnIdx === 0 ? 'cursorDadiHm' : 'deepseekDadiHm';
-                    const modelLabel = btnIdx === 0 ? 'Cursor' : 'DeepSeek';
+                row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
+                    const model = viewBtn.dataset.model;
+                    const modelKey = model === 'cursor' ? 'cursorDadiHm' : 'deepseekDadiHm';
+                    const modelLabel = model === 'cursor' ? 'Cursor' : 'DeepSeek';
                     const dadiHm = item[modelKey];
                     if (dadiHm) {
                         const numbers = dadiHm.split(',');
