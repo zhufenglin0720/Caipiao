@@ -63,7 +63,7 @@ public class DataController {
         try {
             dadiService.saveDadi(is3D, model.toLowerCase(), numbers);
             result.put("success", true);
-            result.put("message", "500注大底录入成功");
+            result.put("message", "大底录入成功");
         } catch (IllegalArgumentException e) {
             result.put("success", false);
             result.put("message", e.getMessage());
@@ -103,7 +103,7 @@ public class DataController {
         try {
             dadiService.updateDadi(is3D, index, model.toLowerCase(), numbers);
             result.put("success", true);
-            result.put("message", "500注大底修改成功");
+            result.put("message", "大底修改成功");
         } catch (IllegalArgumentException e) {
             result.put("success", false);
             result.put("message", e.getMessage());
@@ -131,6 +131,7 @@ public class DataController {
             map.put("qh", dto.getQh());
             map.put("cursorDadiHm", dto.getCursorDadiHm());
             map.put("deepseekDadiHm", dto.getDeepseekDadiHm());
+            map.put("customDadiHm", dto.getCustomDadiHm());
             map.put("realHm", dto.getRealHm());
             return map;
         }).collect(Collectors.toList());

@@ -21,9 +21,9 @@ import java.util.stream.Collectors;
 @Service
 public class DadiService {
 
-    private static final int DADI_SIZE = 500;
+    private static final int DADI_MAX_SIZE = 500;
 
-    private static final Set<String> VALID_MODELS = Set.of("cursor", "deepseek");
+    private static final Set<String> VALID_MODELS = Set.of("cursor", "deepseek", "custom");
 
     @Value("${file.location.compare3DDadi}")
     private String fileLocationCompare3dDadi;
@@ -43,12 +43,10 @@ public class DadiService {
 
     public void updateDadi(boolean is3D, int index, String model, String numbersText) {
         if (!VALID_MODELS.contains(model)) {
-            throw new IllegalArgumentException("模型无效，请使用 cursor 或 deepseek");
+            throw new IllegalArgumentException("模型无效，请使用 cursor、deepseek 或 custom");
         }
         List<String> numbers = parseNumbers(numbersText);
-        if (numbers.size() != DADI_SIZE) {
-            throw new IllegalArgumentException("请输入恰好500注三位数号码，当前有效号码数：" + numbers.size());
-        }
+        validateDadiNumbers(numbers);
         List<HmCache.DadiCompareDto> cache = is3D ? HmCache.getSdDadiCompareCache() : HmCache.getPl3DadiCompareCache();
         if (index < 0 || index >= cache.size()) {
             throw new IllegalArgumentException("记录不存在或索引无效");
@@ -59,12 +57,10 @@ public class DadiService {
 
     public void saveDadi(boolean is3D, String model, String numbersText) {
         if (!VALID_MODELS.contains(model)) {
-            throw new IllegalArgumentException("模型无效，请使用 cursor 或 deepseek");
+            throw new IllegalArgumentException("模型无效，请使用 cursor、deepseek 或 custom");
         }
         List<String> numbers = parseNumbers(numbersText);
-        if (numbers.size() != DADI_SIZE) {
-            throw new IllegalArgumentException("请输入恰好500注三位数号码，当前有效号码数：" + numbers.size());
-        }
+        validateDadiNumbers(numbers);
         String dadiHm = String.join(",", numbers);
 
         List<HmCache.DadiCompareDto> cache = is3D ? HmCache.getSdDadiCompareCache() : HmCache.getPl3DadiCompareCache();
@@ -88,11 +84,21 @@ public class DadiService {
         writeExcel(is3D);
     }
 
+    private void validateDadiNumbers(List<String> numbers) {
+        if (numbers.isEmpty()) {
+            throw new IllegalArgumentException("请至少录入1注三位数号码");
+        }
+        if (numbers.size() > DADI_MAX_SIZE) {
+            throw new IllegalArgumentException("最多录入500注三位数号码，当前有效号码数：" + numbers.size());
+        }
+    }
+
     private void setModelDadiHm(HmCache.DadiCompareDto dto, String model, String dadiHm) {
-        if ("cursor".equals(model)) {
-            dto.setCursorDadiHm(dadiHm);
-        } else {
-            dto.setDeepseekDadiHm(dadiHm);
+        switch (model) {
+            case "cursor" -> dto.setCursorDadiHm(dadiHm);
+            case "deepseek" -> dto.setDeepseekDadiHm(dadiHm);
+            case "custom" -> dto.setCustomDadiHm(dadiHm);
+            default -> throw new IllegalArgumentException("未知模型：" + model);
         }
     }
 
@@ -111,6 +117,7 @@ public class DadiService {
                         .setQh(vo.getQh())
                         .setCursorDadiHm(vo.getCursorDadiHm())
                         .setDeepseekDadiHm(vo.getDeepseekDadiHm())
+                        .setCustomDadiHm(vo.getCustomDadiHm())
                         .setRealHm(vo.getRealHm()))
                 .toList();
         if (is3D) {
@@ -129,6 +136,7 @@ public class DadiService {
                         .qh(dto.getQh())
                         .cursorDadiHm(dto.getCursorDadiHm())
                         .deepseekDadiHm(dto.getDeepseekDadiHm())
+                        .customDadiHm(dto.getCustomDadiHm())
                         .realHm(dto.getRealHm())
                         .build())
                 .toList();
@@ -149,7 +157,9 @@ public class DadiService {
     }
 
     private boolean hasAnyDadiHm(HmCache.DadiCompareDto dto) {
-        return StrUtil.isNotBlank(dto.getCursorDadiHm()) || StrUtil.isNotBlank(dto.getDeepseekDadiHm());
+        return StrUtil.isNotBlank(dto.getCursorDadiHm())
+                || StrUtil.isNotBlank(dto.getDeepseekDadiHm())
+                || StrUtil.isNotBlank(dto.getCustomDadiHm());
     }
 
 }

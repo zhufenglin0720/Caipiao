@@ -24,6 +24,9 @@ public class DadiCompareVO {
     @ExcelProperty("DeepSeek500注大底")
     private String deepseekDadiHm;
 
+    @ExcelProperty("自定义")
+    private String customDadiHm;
+
     @ExcelProperty("真实号码")
     private String realHm;
 
