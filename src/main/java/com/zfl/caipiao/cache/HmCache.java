@@ -12,7 +12,7 @@ import java.util.List;
  */
 public class HmCache {
 
-    private static final Integer COMPARE_SAVE_SIZE = 50;
+    private static final Integer COMPARE_SAVE_SIZE = 200;
 
     private static final List<Hm> SD_CACHE = new ArrayList<>();
 
