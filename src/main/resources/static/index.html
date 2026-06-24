@@ -799,6 +799,28 @@
             background: rgba(245, 158, 11, 0.2);
         }
 
+        .dadi-edit-btn {
+            padding: 2px 8px;
+            border: 1px solid rgba(99, 102, 241, 0.5);
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--purple);
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .dadi-edit-btn:hover {
+            background: rgba(99, 102, 241, 0.2);
+        }
+
+        .dadi-preview-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
         .dadi-hit-pos {
             font-weight: 700;
             color: var(--success);
@@ -1642,7 +1664,7 @@
             <button type="button" class="qima-popup-close" onclick="closeDadiEntryModal()" aria-label="关闭">&times;</button>
         </div>
         <div class="qima-popup-body">
-            <div class="dadi-model-select">
+            <div class="dadi-model-select" id="dadi-model-select">
                 <button type="button" class="dadi-model-option active" data-model="cursor" onclick="selectDadiModel('cursor', this)">Cursor</button>
                 <button type="button" class="dadi-model-option" data-model="deepseek" onclick="selectDadiModel('deepseek', this)">DeepSeek</button>
             </div>
@@ -1665,6 +1687,9 @@
     let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [], sdDadiCompare: [], pl3DadiCompare: [] };
     let dadiEntryType = '3d';
     let dadiEntryModel = 'cursor';
+    let dadiEntryMode = 'create';
+    let dadiEntryIndex = -1;
+    let dadiEntrySeq = 0;
     let filters = { '3d': 10, 'pl3': 10 };
     let historyFilters = { '3d': 30, 'pl3': 30 };
     let compareTabs = { '3d': 'sanma', 'pl3': 'sanma' };
@@ -1951,7 +1976,10 @@
         return `<div class="dadi-preview">
             <span class="dadi-preview-count">共 ${numbers.length} 注</span>
             <span class="dadi-preview-sample">${sample}${numbers.length > 3 ? ' …' : ''}</span>
-            <button type="button" class="dadi-view-btn" data-model="${model}">查看全部</button>
+            <div class="dadi-preview-actions">
+                <button type="button" class="dadi-view-btn" data-model="${model}">查看全部</button>
+                <button type="button" class="dadi-edit-btn" data-model="${model}">修改</button>
+            </div>
         </div>`;
     }
 
@@ -2066,7 +2094,21 @@
         });
     }
 
+    function resetDadiEntryModal() {
+        dadiEntryMode = 'create';
+        dadiEntryIndex = -1;
+        dadiEntrySeq = 0;
+        document.getElementById('dadi-model-select').style.display = '';
+        document.querySelectorAll('.dadi-model-option').forEach(el => {
+            el.disabled = false;
+            el.style.opacity = '';
+            el.style.cursor = '';
+        });
+        document.getElementById('dadi-entry-submit').textContent = '确认录入';
+    }
+
     function openDadiEntryModal(type) {
+        resetDadiEntryModal();
         dadiEntryType = type;
         dadiEntryModel = 'cursor';
         document.querySelectorAll('.dadi-model-option').forEach(el => {
@@ -2079,8 +2121,33 @@
         document.getElementById('dadi-entry-overlay').classList.add('active');
     }
 
+    function openDadiEditModal(type, cacheIndex, model, dadiHm, seq) {
+        resetDadiEntryModal();
+        dadiEntryMode = 'edit';
+        dadiEntryType = type;
+        dadiEntryModel = model;
+        dadiEntryIndex = cacheIndex;
+        dadiEntrySeq = seq;
+        const modelLabel = model === 'cursor' ? 'Cursor' : 'DeepSeek';
+        const typeLabel = type === '3d' ? '福彩3D' : '排列三';
+        document.getElementById('dadi-entry-title').textContent = `${typeLabel} · 修改500注大底 · 序号 ${seq} · ${modelLabel}`;
+        document.getElementById('dadi-entry-submit').textContent = '确认修改';
+        document.getElementById('dadi-model-select').style.display = 'none';
+        document.querySelectorAll('.dadi-model-option').forEach(el => {
+            const active = el.dataset.model === model;
+            el.classList.toggle('active', active);
+            el.disabled = !active;
+            el.style.opacity = active ? '' : '0.4';
+            el.style.cursor = active ? '' : 'not-allowed';
+        });
+        document.getElementById('dadi-entry-textarea').value = dadiHm.split(',').join('\n');
+        updateDadiEntryCount();
+        document.getElementById('dadi-entry-overlay').classList.add('active');
+    }
+
     function closeDadiEntryModal() {
         document.getElementById('dadi-entry-overlay').classList.remove('active');
+        resetDadiEntryModal();
     }
 
     function updateDadiEntryCount() {
@@ -2097,13 +2164,19 @@
     async function submitDadiEntry() {
         const numbers = document.getElementById('dadi-entry-textarea').value;
         const submitBtn = document.getElementById('dadi-entry-submit');
+        const isEdit = dadiEntryMode === 'edit';
+        const submitLabel = isEdit ? '确认修改' : '确认录入';
         submitBtn.disabled = true;
         submitBtn.textContent = '提交中…';
         try {
-            const response = await fetch('/data/dadi', {
+            const url = isEdit ? '/data/dadi/update' : '/data/dadi';
+            const body = isEdit
+                ? { type: dadiEntryType, model: dadiEntryModel, numbers, index: dadiEntryIndex }
+                : { type: dadiEntryType, model: dadiEntryModel, numbers };
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: dadiEntryType, model: dadiEntryModel, numbers })
+                body: JSON.stringify(body)
             });
             const result = await response.json();
             if (result.success) {
@@ -2116,13 +2189,13 @@
                 await loadData();
                 alert(result.message);
             } else {
-                alert(result.message || '录入失败');
+                alert(result.message || (isEdit ? '修改失败' : '录入失败'));
             }
         } catch (e) {
             alert('提交失败，请重试');
             console.error(e);
         } finally {
-            submitBtn.textContent = '确认录入';
+            submitBtn.textContent = submitLabel;
             updateDadiEntryCount();
         }
     }
@@ -2367,8 +2440,10 @@
             adjustPredictTable(type);
             return;
         }
+        const fullDadiData = compareType === 'dadi' ? getDadiData(type) : [];
         filteredData.forEach((item, idx) => {
             const seq = idx + 1;
+            const cacheIndex = compareType === 'dadi' ? fullDadiData.length - 1 - idx : -1;
             const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
             const row = document.createElement('tr');
 
@@ -2386,6 +2461,14 @@
                     if (dadiHm) {
                         const numbers = dadiHm.split(',');
                         viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, modelLabel);
+                    }
+                });
+                row.querySelectorAll('.dadi-edit-btn').forEach(editBtn => {
+                    const model = editBtn.dataset.model;
+                    const modelKey = model === 'cursor' ? 'cursorDadiHm' : 'deepseekDadiHm';
+                    const dadiHm = item[modelKey];
+                    if (dadiHm) {
+                        editBtn.onclick = () => openDadiEditModal(type, cacheIndex, model, dadiHm, seq);
                     }
                 });
             } else if (compareType === 'qima') {

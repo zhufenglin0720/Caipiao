@@ -41,6 +41,22 @@ public class DadiService {
                 .collect(Collectors.toList());
     }
 
+    public void updateDadi(boolean is3D, int index, String model, String numbersText) {
+        if (!VALID_MODELS.contains(model)) {
+            throw new IllegalArgumentException("模型无效，请使用 cursor 或 deepseek");
+        }
+        List<String> numbers = parseNumbers(numbersText);
+        if (numbers.size() != DADI_SIZE) {
+            throw new IllegalArgumentException("请输入恰好500注三位数号码，当前有效号码数：" + numbers.size());
+        }
+        List<HmCache.DadiCompareDto> cache = is3D ? HmCache.getSdDadiCompareCache() : HmCache.getPl3DadiCompareCache();
+        if (index < 0 || index >= cache.size()) {
+            throw new IllegalArgumentException("记录不存在或索引无效");
+        }
+        setModelDadiHm(cache.get(index), model, String.join(",", numbers));
+        writeExcel(is3D);
+    }
+
     public void saveDadi(boolean is3D, String model, String numbersText) {
         if (!VALID_MODELS.contains(model)) {
             throw new IllegalArgumentException("模型无效，请使用 cursor 或 deepseek");

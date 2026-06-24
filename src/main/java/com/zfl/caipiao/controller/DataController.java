@@ -74,6 +74,46 @@ public class DataController {
         return result;
     }
 
+    @PostMapping("/dadi/update")
+    public Map<String, Object> updateDadi(@RequestBody Map<String, Object> body) {
+        Map<String, Object> result = new HashMap<>();
+        String type = (String) body.get("type");
+        String model = (String) body.get("model");
+        String numbers = (String) body.get("numbers");
+        Object indexObj = body.get("index");
+        if (type == null || model == null || numbers == null || indexObj == null) {
+            result.put("success", false);
+            result.put("message", "参数不完整");
+            return result;
+        }
+        boolean is3D = "3d".equalsIgnoreCase(type);
+        if (!is3D && !"pl3".equalsIgnoreCase(type)) {
+            result.put("success", false);
+            result.put("message", "类型无效，请使用 3d 或 pl3");
+            return result;
+        }
+        int index;
+        try {
+            index = Integer.parseInt(indexObj.toString());
+        } catch (NumberFormatException e) {
+            result.put("success", false);
+            result.put("message", "索引无效");
+            return result;
+        }
+        try {
+            dadiService.updateDadi(is3D, index, model.toLowerCase(), numbers);
+            result.put("success", true);
+            result.put("message", "500注大底修改成功");
+        } catch (IllegalArgumentException e) {
+            result.put("success", false);
+            result.put("message", e.getMessage());
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("message", "修改失败：" + e.getMessage());
+        }
+        return result;
+    }
+
     private List<Map<String, String>> toCompareList(List<HmCache.CompareDto> list) {
         return list.stream().map(dto -> {
             Map<String, String> map = new HashMap<>();
