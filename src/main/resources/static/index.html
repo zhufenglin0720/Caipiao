@@ -450,6 +450,30 @@
             box-shadow: 0 0 12px var(--accent-glow);
         }
 
+        .kl8-latest-grid,
+        .kl8-balls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            justify-content: center;
+        }
+
+        .kl8-latest-grid .ball-small,
+        .kl8-balls .ball-small {
+            width: 26px;
+            height: 26px;
+            font-size: 11px;
+            margin: 0;
+        }
+
+        .kl8-predict-cell {
+            min-width: 110px;
+        }
+
+        .kl8-draw-cell {
+            min-width: 280px;
+        }
+
         .dingwei-numbers { flex: 1; display: flex; flex-wrap: wrap; gap: 3px; }
 
         thead { background: rgba(99, 102, 241, 0.15); }
@@ -1392,6 +1416,7 @@
     <div class="main-tabs">
         <button class="main-tab active" data-type="3d" onclick="switchMainTab('3d', this)">福彩 3D</button>
         <button class="main-tab" data-type="pl3" onclick="switchMainTab('pl3', this)">排列三</button>
+        <button class="main-tab" data-type="kl8" onclick="switchMainTab('kl8', this)">快乐八</button>
     </div>
 
     <!-- 3D -->
@@ -1646,6 +1671,79 @@
             </div>
         </div>
     </div>
+
+    <!-- 快乐八 -->
+    <div id="kl8-content" class="tab-content">
+        <div class="tab-header">
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="switchSection('kl8', 'predict', this)">手动录入</button>
+                <button class="sub-tab" onclick="switchSection('kl8', 'history', this)">历史走势</button>
+            </div>
+            <div class="latest-bar">
+                <span class="latest-bar-label">最新</span>
+                <div class="latest-numbers" id="kl8-latest"><div class="loading">…</div></div>
+            </div>
+        </div>
+
+        <div id="kl8-predict" class="section-panel active">
+            <div class="stats" id="kl8-stats"></div>
+            <div class="panel-toolbar">
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setKl8Filter(10, this)">近10期</button>
+                    <button class="filter-btn" onclick="setKl8Filter(30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setKl8Filter(50, this)">近50期</button>
+                    <div class="auto-refresh">
+                        <label for="auto-refresh-kl8">自动刷新</label>
+                        <input type="checkbox" id="auto-refresh-kl8" onchange="toggleKl8AutoRefresh()">
+                    </div>
+                </div>
+                <div class="toolbar-divider"></div>
+                <button type="button" class="dadi-entry-btn" onclick="openKl8EntryModal()">录入号码</button>
+            </div>
+            <div class="table-container fill-mode" id="kl8-predict-table">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>期号</th>
+                        <th>预测号码</th>
+                        <th>开奖号码</th>
+                        <th>是否命中</th>
+                        <th>命中个数</th>
+                        <th>操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="kl8-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="kl8-history" class="section-panel">
+            <div class="history-toolbar">
+                <div class="section-title">历史走势</div>
+                <div class="filter-section">
+                    <button class="filter-btn active" onclick="setKl8HistoryFilter(30, this)">近30期</button>
+                    <button class="filter-btn" onclick="setKl8HistoryFilter(50, this)">近50期</button>
+                    <button class="filter-btn" onclick="setKl8HistoryFilter(100, this)">近100期</button>
+                    <button class="filter-btn" onclick="setKl8HistoryFilter(0, this)">全部</button>
+                </div>
+            </div>
+            <div class="table-container scroll-mode" id="kl8-history-table">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>期号</th>
+                        <th>开奖号码</th>
+                        <th>和值</th>
+                        <th>跨度</th>
+                        <th>奇偶比</th>
+                        <th>大小比</th>
+                    </tr>
+                    </thead>
+                    <tbody id="kl8-history-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="qima-popup-overlay" id="qima-popup-overlay" onclick="if(event.target===this)closeQimaPopup()">
@@ -1688,22 +1786,48 @@
     </div>
 </div>
 
+<div class="qima-popup-overlay" id="kl8-entry-overlay" onclick="if(event.target===this)closeKl8EntryModal()">
+    <div class="qima-popup dadi-popup" role="dialog" aria-modal="true">
+        <div class="qima-popup-header">
+            <span class="qima-popup-title" id="kl8-entry-title">录入快乐八预测号码</span>
+            <button type="button" class="qima-popup-close" onclick="closeKl8EntryModal()" aria-label="关闭">&times;</button>
+        </div>
+        <div class="qima-popup-body">
+            <textarea class="dadi-entry-textarea" id="kl8-entry-textarea"
+                      placeholder="输入1-3个号码，用逗号或空格分隔，例如：&#10;05 18 63"
+                      oninput="updateKl8EntryCount()"></textarea>
+            <div class="dadi-entry-meta">
+                <span>号码范围01-80，最多3个，不可重复</span>
+                <span id="kl8-entry-count">当前有效：0（最多3个）</span>
+            </div>
+            <div class="dadi-entry-actions">
+                <button type="button" class="dadi-entry-cancel" onclick="closeKl8EntryModal()">取消</button>
+                <button type="button" class="dadi-entry-submit" id="kl8-entry-submit" onclick="submitKl8Entry()" disabled>确认录入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-    let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [], sdDadiCompare: [], pl3DadiCompare: [] };
+    let currentData = { sd: [], pl3: [], kl8: [], sdCompare: [], pl3Compare: [], kl8Compare: [], sdDadiCompare: [], pl3DadiCompare: [] };
     let dadiEntryType = '3d';
     let dadiEntryModel = 'cursor';
     let dadiEntryMode = 'create';
     let dadiEntryIndex = -1;
     let dadiEntrySeq = 0;
-    let filters = { '3d': 10, 'pl3': 10 };
-    let historyFilters = { '3d': 30, 'pl3': 30 };
+    let kl8EntryMode = 'create';
+    let kl8EntryIndex = -1;
+    let filters = { '3d': 10, 'pl3': 10, 'kl8': 10 };
+    let historyFilters = { '3d': 30, 'pl3': 30, 'kl8': 30 };
     let compareTabs = { '3d': 'sanma', 'pl3': 'sanma' };
-    let sections = { '3d': 'predict', 'pl3': 'predict' };
-    let autoRefreshIntervals = { '3d': null, 'pl3': null };
+    let sections = { '3d': 'predict', 'pl3': 'predict', 'kl8': 'predict' };
+    let autoRefreshIntervals = { '3d': null, 'pl3': null, 'kl8': null };
 
     /** 3d 对应 DOM 前缀 sd，避免 ID 以数字开头导致 querySelector 报错 */
     function domPrefix(type) {
-        return type === '3d' ? 'sd' : 'pl3';
+        if (type === '3d') return 'sd';
+        if (type === 'kl8') return 'kl8';
+        return 'pl3';
     }
 
     function $(type, suffix) {
@@ -1776,7 +1900,10 @@
         const contentEl = $(type, 'content');
         contentEl.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
         $(type, section).classList.add('active');
-        if (section === 'history') renderHistory(type);
+        if (section === 'history') {
+            if (type === 'kl8') renderKl8History();
+            else renderHistory(type);
+        }
         adjustAllTables();
     }
 
@@ -1840,7 +1967,306 @@
                 adjustPredictTable(type);
                 adjustHistoryTable(type);
             });
+            adjustKl8Table();
+            adjustHistoryTable('kl8');
         });
+    }
+
+    function adjustKl8Table() {
+        const container = document.getElementById('kl8-predict-table');
+        if (!container || !document.getElementById('kl8-predict').classList.contains('active')) return;
+        const useFill = filters['kl8'] <= 10 && !isMobileView();
+        applyTableFill(container, useFill, filters['kl8']);
+    }
+
+    function setKl8Filter(count, el) {
+        filters['kl8'] = count;
+        el.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        renderKl8Table();
+    }
+
+    function toggleKl8AutoRefresh() {
+        const checkbox = document.getElementById('auto-refresh-kl8');
+        if (checkbox.checked) {
+            autoRefreshIntervals['kl8'] = setInterval(loadData, 30000);
+        } else if (autoRefreshIntervals['kl8']) {
+            clearInterval(autoRefreshIntervals['kl8']);
+            autoRefreshIntervals['kl8'] = null;
+        }
+    }
+
+    function kl8ToNumbers(item) {
+        if (!item) return '';
+        const nums = [];
+        for (let i = 1; i <= 20; i++) {
+            const q = item['q' + i];
+            if (q != null && String(q).trim() !== '') nums.push(String(q).trim());
+        }
+        return nums.join(',');
+    }
+
+    function kl8ToNumArray(item) {
+        return kl8ToNumbers(item).split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+    }
+
+    function calcKl8Sum(item) {
+        return kl8ToNumArray(item).reduce((sum, n) => sum + n, 0);
+    }
+
+    function calcKl8Span(item) {
+        const nums = kl8ToNumArray(item);
+        if (nums.length === 0) return '-';
+        return Math.max(...nums) - Math.min(...nums);
+    }
+
+    function calcKl8OddEvenRatio(item) {
+        const nums = kl8ToNumArray(item);
+        const odd = nums.filter(n => n % 2 === 1).length;
+        return odd + ':' + (nums.length - odd);
+    }
+
+    function calcKl8BigSmallRatio(item) {
+        const nums = kl8ToNumArray(item);
+        const big = nums.filter(n => n > 40).length;
+        return big + ':' + (nums.length - big);
+    }
+
+    function setKl8HistoryFilter(count, el) {
+        historyFilters['kl8'] = count;
+        el.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        renderKl8History();
+    }
+
+    function renderKl8History() {
+        const data = Array.isArray(currentData.kl8) ? currentData.kl8 : [];
+        const count = historyFilters['kl8'];
+        const filtered = count === 0 ? [...data] : data.slice(-count);
+        const rows = [...filtered].reverse();
+        const tbody = document.getElementById('kl8-history-body');
+        tbody.innerHTML = '';
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">暂无数据</td></tr>';
+            adjustHistoryTable('kl8');
+            return;
+        }
+        rows.forEach(item => {
+            const numbers = kl8ToNumbers(item);
+            const sum = calcKl8Sum(item);
+            const span = calcKl8Span(item);
+            const oe = calcKl8OddEvenRatio(item);
+            const bs = calcKl8BigSmallRatio(item);
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="period-cell">${item.qh ?? '-'}</td>
+                <td class="kl8-draw-cell">${formatKl8Balls(numbers, null)}</td>
+                <td><span class="badge badge-sum">${numbers ? sum : '-'}</span></td>
+                <td><span class="badge badge-span">${span}</span></td>
+                <td><span class="badge badge-ratio">${oe}</span></td>
+                <td><span class="badge badge-ratio">${bs}</span></td>`;
+            tbody.appendChild(row);
+        });
+        adjustHistoryTable('kl8');
+    }
+
+    function checkKl8Hits(aiHm, realHm) {
+        if (!aiHm || !realHm) return { hits: [], count: 0 };
+        const normalize = n => {
+            const num = parseInt(n.trim(), 10);
+            return isNaN(num) ? null : String(num).padStart(2, '0');
+        };
+        const predicted = aiHm.split(',').map(normalize).filter(Boolean);
+        const drawn = new Set(realHm.split(',').map(normalize).filter(Boolean));
+        const hits = predicted.filter(n => drawn.has(n));
+        return { hits, count: hits.length };
+    }
+
+    function formatKl8Balls(numbers, hitSet) {
+        if (!numbers) return '-';
+        return `<div class="kl8-balls">${numbers.split(',').map(num => {
+            const trimmed = num.trim();
+            const cls = hitSet && hitSet.has(trimmed) ? 'ball-small highlight' : 'ball-small';
+            return `<span class="${cls}">${trimmed}</span>`;
+        }).join('')}</div>`;
+    }
+
+    function formatKl8MatchStatus(count, hasResult) {
+        if (!hasResult) return '<span style="color:var(--text-secondary)">待开奖</span>';
+        return count > 0
+            ? '<span class="success">✓ 命中</span>'
+            : '<span class="fail">✗ 未命中</span>';
+    }
+
+    function renderKl8Latest(latest) {
+        const el = document.getElementById('kl8-latest');
+        if (!latest) {
+            el.innerHTML = '<span class="period-info">暂无</span>';
+            return;
+        }
+        const numbers = kl8ToNumbers(latest);
+        el.innerHTML = `
+            <div class="kl8-latest-grid">${formatBalls(numbers)}</div>
+            <div class="period-info">第<span>${latest.qh ?? '-'}</span>期</div>
+        `;
+    }
+
+    function renderKl8Stats(compareData) {
+        const el = document.getElementById('kl8-stats');
+        const total = compareData.length;
+        const drawnData = compareData.filter(i => i.realHm);
+        let hitPeriods = 0;
+        let fullHitPeriods = 0;
+        let totalHits = 0;
+        drawnData.forEach(item => {
+            const { count } = checkKl8Hits(item.aiHm, item.realHm);
+            totalHits += count;
+            if (count > 0) hitPeriods++;
+            if (count === 3) fullHitPeriods++;
+        });
+        const avgHits = drawnData.length > 0 ? (totalHits / drawnData.length).toFixed(1) : '0.0';
+        const hitRate = drawnData.length > 0 ? ((hitPeriods / drawnData.length) * 100).toFixed(1) : '0.0';
+        el.innerHTML = `
+            <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
+            <div class="stat-card"><div class="stat-value">${hitPeriods}/${drawnData.length}</div><div class="stat-label">有命中期数</div></div>
+            <div class="stat-card"><div class="stat-value">${hitRate}%</div><div class="stat-label">有命中率</div></div>
+            <div class="stat-card"><div class="stat-value">${fullHitPeriods}</div><div class="stat-label">全中期数</div></div>
+            <div class="stat-card"><div class="stat-value">${avgHits}</div><div class="stat-label">平均命中个数</div></div>
+        `;
+    }
+
+    function renderKl8Table() {
+        const data = Array.isArray(currentData.kl8Compare) ? currentData.kl8Compare : [];
+        const filteredData = data.slice(-filters['kl8']).reverse();
+        const startIndex = data.length - filteredData.length;
+        renderKl8Stats(filteredData);
+        const tbody = document.getElementById('kl8-table-body');
+        tbody.innerHTML = '';
+        if (filteredData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">暂无数据</td></tr>';
+            adjustKl8Table();
+            return;
+        }
+        filteredData.forEach((item, i) => {
+            const cacheIndex = startIndex + (filteredData.length - 1 - i);
+            const { hits, count } = checkKl8Hits(item.aiHm, item.realHm);
+            const hitSet = new Set(hits);
+            const hasResult = !!item.realHm;
+            const canEdit = !hasResult && !!item.aiHm;
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="period-cell">${item.qh ?? '-'}</td>
+                <td class="kl8-predict-cell">${item.aiHm ? formatKl8Balls(item.aiHm, hasResult ? hitSet : null) : '<span style="color:var(--text-secondary)">未录入</span>'}</td>
+                <td class="kl8-draw-cell">${hasResult ? formatKl8Balls(item.realHm, hitSet) : '-'}</td>
+                <td>${formatKl8MatchStatus(count, hasResult)}</td>
+                <td>${hasResult ? `${count}/3` : '-'}</td>
+                <td>${canEdit ? `<button type="button" class="dadi-fill-btn" data-index="${cacheIndex}">修改</button>` : '-'}</td>`;
+            if (canEdit) {
+                row.querySelector('.dadi-fill-btn').onclick = () => openKl8EditModal(cacheIndex, item.aiHm);
+            }
+            tbody.appendChild(row);
+        });
+        adjustKl8Table();
+    }
+
+    const KL8_MAX_SIZE = 3;
+
+    function parseKl8Numbers(text) {
+        if (!text) return [];
+        const seen = new Set();
+        const result = [];
+        text.split(/[,，\s\n\r]+/).map(s => s.trim()).filter(Boolean).forEach(raw => {
+            if (!/^\d{1,2}$/.test(raw)) return;
+            const num = parseInt(raw, 10);
+            if (num < 1 || num > 80) return;
+            const formatted = String(num).padStart(2, '0');
+            if (!seen.has(formatted)) {
+                seen.add(formatted);
+                result.push(formatted);
+            }
+        });
+        return result;
+    }
+
+    function resetKl8EntryModal() {
+        kl8EntryMode = 'create';
+        kl8EntryIndex = -1;
+        document.getElementById('kl8-entry-submit').textContent = '确认录入';
+    }
+
+    function openKl8EntryModal() {
+        resetKl8EntryModal();
+        const data = Array.isArray(currentData.kl8Compare) ? currentData.kl8Compare : [];
+        const latest = data.length ? data[data.length - 1] : null;
+        if (latest && !latest.realHm) {
+            kl8EntryMode = latest.aiHm ? 'edit' : 'create';
+            kl8EntryIndex = data.length - 1;
+            document.getElementById('kl8-entry-textarea').value = latest.aiHm ? latest.aiHm.split(',').join(' ') : '';
+            document.getElementById('kl8-entry-title').textContent = latest.aiHm ? '修改快乐八预测号码' : '录入快乐八预测号码';
+            document.getElementById('kl8-entry-submit').textContent = latest.aiHm ? '确认修改' : '确认录入';
+        } else {
+            document.getElementById('kl8-entry-textarea').value = '';
+            document.getElementById('kl8-entry-title').textContent = '录入快乐八预测号码';
+        }
+        updateKl8EntryCount();
+        document.getElementById('kl8-entry-overlay').classList.add('active');
+    }
+
+    function openKl8EditModal(cacheIndex, aiHm) {
+        kl8EntryMode = 'edit';
+        kl8EntryIndex = cacheIndex;
+        document.getElementById('kl8-entry-title').textContent = '修改快乐八预测号码';
+        document.getElementById('kl8-entry-submit').textContent = '确认修改';
+        document.getElementById('kl8-entry-textarea').value = aiHm ? aiHm.split(',').join(' ') : '';
+        updateKl8EntryCount();
+        document.getElementById('kl8-entry-overlay').classList.add('active');
+    }
+
+    function closeKl8EntryModal() {
+        document.getElementById('kl8-entry-overlay').classList.remove('active');
+        resetKl8EntryModal();
+    }
+
+    function updateKl8EntryCount() {
+        const text = document.getElementById('kl8-entry-textarea').value;
+        const count = parseKl8Numbers(text).length;
+        const countEl = document.getElementById('kl8-entry-count');
+        const submitBtn = document.getElementById('kl8-entry-submit');
+        const ok = count >= 1 && count <= KL8_MAX_SIZE;
+        countEl.textContent = `当前有效：${count}（最多${KL8_MAX_SIZE}个）`;
+        countEl.className = ok ? 'count-ok' : 'count-bad';
+        submitBtn.disabled = !ok;
+    }
+
+    async function submitKl8Entry() {
+        const numbers = document.getElementById('kl8-entry-textarea').value;
+        const submitBtn = document.getElementById('kl8-entry-submit');
+        const isEdit = kl8EntryMode === 'edit' && kl8EntryIndex >= 0;
+        submitBtn.disabled = true;
+        submitBtn.textContent = '提交中…';
+        try {
+            const url = isEdit ? '/data/kl8/update' : '/data/kl8';
+            const body = isEdit ? { numbers, index: kl8EntryIndex } : { numbers };
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const result = await response.json();
+            if (result.success) {
+                closeKl8EntryModal();
+                await loadData();
+                alert(result.message);
+            } else {
+                alert(result.message || (isEdit ? '修改失败' : '录入失败'));
+            }
+        } catch (error) {
+            console.error('快乐八录入失败:', error);
+            alert('提交失败，请稍后重试');
+        } finally {
+            submitBtn.textContent = isEdit ? '确认修改' : '确认录入';
+            updateKl8EntryCount();
+        }
     }
 
     function setFilter(type, count, el) {
@@ -2499,17 +2925,26 @@
             adjustPredictTable(type);
             return;
         }
-        const fullDadiData = compareType === 'dadi' ? getDadiData(type) : [];
+        if (compareType === 'dadi') {
+            const fullDadiData = getDadiData(type);
+            const needPlaceholder = !!filteredData[0].realHm;
+            if (needPlaceholder) {
+                appendDadiTableRow(tbody, type, {}, 1, -1);
+            }
+            filteredData.forEach((item, idx) => {
+                const seq = idx + (needPlaceholder ? 2 : 1);
+                const cacheIndex = fullDadiData.length - 1 - idx;
+                appendDadiTableRow(tbody, type, item, seq, cacheIndex);
+            });
+            adjustPredictTable(type);
+            return;
+        }
         filteredData.forEach((item, idx) => {
             const seq = idx + 1;
-            const cacheIndex = compareType === 'dadi' ? fullDadiData.length - 1 - idx : -1;
             const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
             const row = document.createElement('tr');
 
-            if (compareType === 'dadi') {
-                appendDadiTableRow(tbody, type, item, seq, cacheIndex);
-                return;
-            } else if (compareType === 'qima') {
+            if (compareType === 'qima') {
                 const positions = getQimaMatchPositions(item.aiDingWeiHm, item.realHm);
                 let matchCell;
                 if (positions) {
@@ -2647,10 +3082,13 @@
 
             renderLatest('3d', currentData.sd?.length ? currentData.sd[currentData.sd.length - 1] : null);
             renderLatest('pl3', currentData.pl3?.length ? currentData.pl3[currentData.pl3.length - 1] : null);
+            renderKl8Latest(currentData.kl8?.length ? currentData.kl8[currentData.kl8.length - 1] : null);
             renderTable('3d');
             renderTable('pl3');
+            renderKl8Table();
             if (sections['3d'] === 'history') renderHistory('3d');
             if (sections['pl3'] === 'history') renderHistory('pl3');
+            if (sections['kl8'] === 'history') renderKl8History();
             updateLastUpdateTime();
             adjustAllTables();
         } catch (error) {
@@ -2659,6 +3097,8 @@
                 '<tr><td colspan="3" class="error-message">数据加载失败，请刷新重试</td></tr>';
             document.getElementById('pl3-table-body').innerHTML =
                 '<tr><td colspan="3" class="error-message">数据加载失败，请刷新重试</td></tr>';
+            document.getElementById('kl8-table-body').innerHTML =
+                '<tr><td colspan="5" class="error-message">数据加载失败，请刷新重试</td></tr>';
         }
     }
 
@@ -2668,7 +3108,7 @@
     };
 
     window.onbeforeunload = function() {
-        ['3d', 'pl3'].forEach(type => {
+        ['3d', 'pl3', 'kl8'].forEach(type => {
             if (autoRefreshIntervals[type]) clearInterval(autoRefreshIntervals[type]);
         });
     };

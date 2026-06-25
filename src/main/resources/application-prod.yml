@@ -6,6 +6,8 @@ file:
     pl3: /jdk/app/caipiao/file/排列三.xlsx
     comparePl3: /jdk/app/caipiao/file/排列三对比.xlsx
     comparePl3Dadi: /jdk/app/caipiao/file/排列三大底对比.xlsx
+    kl8: /jdk/app/caipiao/file/快乐八.xlsx
+    compareKl8: /jdk/app/caipiao/file/快乐八对比.xlsx
 spring:
   mail:
     to: 1162220289@qq.com,18118235@qq.com,13269695159@163.com
