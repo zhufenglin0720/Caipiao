@@ -1794,11 +1794,11 @@
         </div>
         <div class="qima-popup-body">
             <textarea class="dadi-entry-textarea" id="kl8-entry-textarea"
-                      placeholder="输入1-3个号码，用逗号或空格分隔，例如：&#10;05 18 63"
+                      placeholder="输入2个号码，用逗号或空格分隔，例如：&#10;05 18"
                       oninput="updateKl8EntryCount()"></textarea>
             <div class="dadi-entry-meta">
-                <span>号码范围01-80，最多3个，不可重复</span>
-                <span id="kl8-entry-count">当前有效：0（最多3个）</span>
+                <span>号码范围01-80，须录入2个，不可重复</span>
+                <span id="kl8-entry-count">当前有效：0（须2个）</span>
             </div>
             <div class="dadi-entry-actions">
                 <button type="button" class="dadi-entry-cancel" onclick="closeKl8EntryModal()">取消</button>
@@ -2070,6 +2070,8 @@
         adjustHistoryTable('kl8');
     }
 
+    const KL8_MAX_SIZE = 2;
+
     function checkKl8Hits(aiHm, realHm) {
         if (!aiHm || !realHm) return { hits: [], count: 0 };
         const normalize = n => {
@@ -2122,7 +2124,7 @@
             const { count } = checkKl8Hits(item.aiHm, item.realHm);
             totalHits += count;
             if (count > 0) hitPeriods++;
-            if (count === 3) fullHitPeriods++;
+            if (count === KL8_MAX_SIZE) fullHitPeriods++;
         });
         const avgHits = drawnData.length > 0 ? (totalHits / drawnData.length).toFixed(1) : '0.0';
         const hitRate = drawnData.length > 0 ? ((hitPeriods / drawnData.length) * 100).toFixed(1) : '0.0';
@@ -2159,7 +2161,7 @@
                 <td class="kl8-predict-cell">${item.aiHm ? formatKl8Balls(item.aiHm, hasResult ? hitSet : null) : '<span style="color:var(--text-secondary)">未录入</span>'}</td>
                 <td class="kl8-draw-cell">${hasResult ? formatKl8Balls(item.realHm, hitSet) : '-'}</td>
                 <td>${formatKl8MatchStatus(count, hasResult)}</td>
-                <td>${hasResult ? `${count}/3` : '-'}</td>
+                <td>${hasResult ? `${count}/${KL8_MAX_SIZE}` : '-'}</td>
                 <td>${canEdit ? `<button type="button" class="dadi-fill-btn" data-index="${cacheIndex}">修改</button>` : '-'}</td>`;
             if (canEdit) {
                 row.querySelector('.dadi-fill-btn').onclick = () => openKl8EditModal(cacheIndex, item.aiHm);
@@ -2168,8 +2170,6 @@
         });
         adjustKl8Table();
     }
-
-    const KL8_MAX_SIZE = 3;
 
     function parseKl8Numbers(text) {
         if (!text) return [];
@@ -2232,8 +2232,8 @@
         const count = parseKl8Numbers(text).length;
         const countEl = document.getElementById('kl8-entry-count');
         const submitBtn = document.getElementById('kl8-entry-submit');
-        const ok = count >= 1 && count <= KL8_MAX_SIZE;
-        countEl.textContent = `当前有效：${count}（最多${KL8_MAX_SIZE}个）`;
+        const ok = count === KL8_MAX_SIZE;
+        countEl.textContent = `当前有效：${count}（须${KL8_MAX_SIZE}个）`;
         countEl.className = ok ? 'count-ok' : 'count-bad';
         submitBtn.disabled = !ok;
     }

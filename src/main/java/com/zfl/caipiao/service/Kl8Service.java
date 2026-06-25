@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 @Service
 public class Kl8Service {
 
-    private static final int KL8_MAX_SIZE = 3;
+    private static final int KL8_MAX_SIZE = 2;
 
     @Value("${file.location.compareKl8}")
     private String fileLocationCompareKl8;
@@ -89,11 +89,8 @@ public class Kl8Service {
     }
 
     private void validateNumbers(List<String> numbers) {
-        if (numbers.isEmpty()) {
-            throw new IllegalArgumentException("请至少录入1个号码");
-        }
-        if (numbers.size() > KL8_MAX_SIZE) {
-            throw new IllegalArgumentException("最多录入3个号码，当前有效号码数：" + numbers.size());
+        if (numbers.size() != KL8_MAX_SIZE) {
+            throw new IllegalArgumentException("请录入" + KL8_MAX_SIZE + "个号码，当前有效号码数：" + numbers.size());
         }
         for (String number : numbers) {
             int value = Integer.parseInt(number);
