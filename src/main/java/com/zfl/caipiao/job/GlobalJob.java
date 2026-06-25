@@ -191,14 +191,6 @@ public class GlobalJob {
         String p3Url = String.format(Url.PL3_URL, lastPl3Qh, p3Qh);
         setKaiJiangCache(p3Url, false, p3Qh);
 
-        List<Kl8Hm> kl8Cache = HmCache.getKl8Cache();
-        Kl8Hm kl8Hm  = kl8Cache.get(kl8Cache.size() - 1);
-        String lastKl8Qh = kl8Hm.getQh();
-        String kl8Qh = DateUtils.getKl8Qh(lastKl8Qh);
-        System.out.println("kl8 lastQh:" + lastKl8Qh + " currentQh:" + kl8Qh);
-        String kl8Url = String.format(Url.KL8_URL, lastKl8Qh, kl8Qh);
-        setKl8KaiJiangCache(kl8Url, kl8Qh);
-
         //开完奖后发送通知邮件
         List<HmCache.CompareDto> pl3CompareCache = HmCache.getPl3CompareCache();
         HmCache.CompareDto pl3CompareDto = pl3CompareCache.get(pl3CompareCache.size() - 1);
@@ -218,6 +210,17 @@ public class GlobalJob {
                 .replace("{{str3}}", sdAiHm)
                 .replace("{{str4}}", sdRealHm))
         ;
+    }
+
+    @Scheduled(cron = "0 30 22 * * ?")
+    public void setKl8DataTask() throws Exception {
+        List<Kl8Hm> kl8Cache = HmCache.getKl8Cache();
+        Kl8Hm kl8Hm  = kl8Cache.get(kl8Cache.size() - 1);
+        String lastKl8Qh = kl8Hm.getQh();
+        String kl8Qh = DateUtils.getKl8Qh(lastKl8Qh);
+        System.out.println("kl8 lastQh:" + lastKl8Qh + " currentQh:" + kl8Qh);
+        String kl8Url = String.format(Url.KL8_URL, lastKl8Qh, kl8Qh);
+        setKl8KaiJiangCache(kl8Url, kl8Qh);
     }
 
     private boolean checkSuccess(String aiHm, String realHm){
