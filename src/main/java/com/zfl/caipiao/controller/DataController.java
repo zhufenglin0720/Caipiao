@@ -191,7 +191,6 @@ public class DataController {
             Map<String, String> map = new HashMap<>();
             map.put("qh", dto.getQh());
             map.put("cursorDadiHm", dto.getCursorDadiHm());
-            map.put("deepseekDadiHm", dto.getDeepseekDadiHm());
             map.put("customDadiHm", dto.getCustomDadiHm());
             map.put("realHm", dto.getRealHm());
             return map;

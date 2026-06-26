@@ -1768,7 +1768,6 @@
         <div class="qima-popup-body">
             <div class="dadi-model-select" id="dadi-model-select">
                 <button type="button" class="dadi-model-option active" data-model="cursor" onclick="selectDadiModel('cursor', this)">Cursor</button>
-                <button type="button" class="dadi-model-option" data-model="deepseek" onclick="selectDadiModel('deepseek', this)">DeepSeek</button>
                 <button type="button" class="dadi-model-option" data-model="custom" onclick="selectDadiModel('custom', this)">自定义</button>
             </div>
             <textarea class="dadi-entry-textarea" id="dadi-entry-textarea"
@@ -2385,7 +2384,6 @@
     function getDadiModelInfo(model) {
         const map = {
             cursor: { key: 'cursorDadiHm', label: 'Cursor' },
-            deepseek: { key: 'deepseekDadiHm', label: 'DeepSeek' },
             custom: { key: 'customDadiHm', label: '自定义' }
         };
         return map[model] || map.cursor;
@@ -2583,7 +2581,6 @@
         row.innerHTML = `
             <td class="seq-cell">${seq}</td>
             <td>${formatDadiModelCell('Cursor', item.cursorDadiHm, item.realHm, 'cursor')}</td>
-            <td>${formatDadiModelCell('DeepSeek', item.deepseekDadiHm, item.realHm, 'deepseek')}</td>
             <td>${formatDadiModelCell('自定义', item.customDadiHm, item.realHm, 'custom')}</td>
             <td>${realBalls}</td>`;
         bindDadiRowEvents(row, type, item, seq, cacheIndex);
@@ -2691,7 +2688,7 @@
             return;
         }
         if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>Cursor</th><th>DeepSeek</th><th>自定义</th><th>实际开奖</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>Cursor</th><th>自定义</th><th>实际开奖</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -2703,7 +2700,7 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'dadi') return 5;
+        if (compareType === 'dadi') return 4;
         return 3;
     }
 
@@ -2864,24 +2861,19 @@
 
         if (tab === 'dadi') {
             const total = compareData.length;
-            let cursorSuccess = 0, deepseekSuccess = 0, customSuccess = 0;
+            let cursorSuccess = 0, customSuccess = 0;
             const cursorTotal = compareData.filter(i => i.cursorDadiHm).length;
-            const deepseekTotal = compareData.filter(i => i.deepseekDadiHm).length;
             const customTotal = compareData.filter(i => i.customDadiHm).length;
             compareData.forEach(item => {
                 if (checkDadiMatch(item.cursorDadiHm, item.realHm)) cursorSuccess++;
-                if (checkDadiMatch(item.deepseekDadiHm, item.realHm)) deepseekSuccess++;
                 if (checkDadiMatch(item.customDadiHm, item.realHm)) customSuccess++;
             });
             const cursorRate = cursorTotal > 0 ? ((cursorSuccess / cursorTotal) * 100).toFixed(1) : 0;
-            const deepseekRate = deepseekTotal > 0 ? ((deepseekSuccess / deepseekTotal) * 100).toFixed(1) : 0;
             const customRate = customTotal > 0 ? ((customSuccess / customTotal) * 100).toFixed(1) : 0;
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
                 <div class="stat-card"><div class="stat-value">${cursorSuccess}/${cursorTotal}</div><div class="stat-label">Cursor命中(命中期数/录入期数)</div></div>
                 <div class="stat-card"><div class="stat-value">${cursorRate}%</div><div class="stat-label">Cursor命中率</div></div>
-                <div class="stat-card"><div class="stat-value">${deepseekSuccess}/${deepseekTotal}</div><div class="stat-label">DeepSeek命中(命中期数/录入期数)</div></div>
-                <div class="stat-card"><div class="stat-value">${deepseekRate}%</div><div class="stat-label">DeepSeek命中率</div></div>
                 <div class="stat-card"><div class="stat-value">${customSuccess}/${customTotal}</div><div class="stat-label">自定义命中(命中期数/录入期数)</div></div>
                 <div class="stat-card"><div class="stat-value">${customRate}%</div><div class="stat-label">自定义命中率</div></div>`;
             return;

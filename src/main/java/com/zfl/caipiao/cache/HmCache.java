@@ -166,8 +166,6 @@ public class HmCache {
 
         private String cursorDadiHm;
 
-        private String deepseekDadiHm;
-
         private String customDadiHm;
 
         private String realHm;
