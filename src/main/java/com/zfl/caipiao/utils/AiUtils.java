@@ -4,7 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.zfl.caipiao.cache.HmCache;
-import com.zfl.caipiao.constant.DingWeiAskContent;
+import com.zfl.caipiao.constant.DingWeiAsk3DContent;
 import com.zfl.caipiao.constant.Pl3AskContent;
 import com.zfl.caipiao.constant.ThreeDAskContent;
 import com.zfl.caipiao.export.Hm;
@@ -53,11 +53,11 @@ public class AiUtils {
     }
 
     public static String get3dDingWeiAi(){
-        return predictLottery(HmCache::getSdCache, HmCache::getSdCompareCache, DingWeiAskContent.V1, false);
+        return predictLottery(HmCache::getSdCache, HmCache::getSdCompareCache, DingWeiAsk3DContent.V1, false);
     }
 
     public static String getPl3DingWeiAi(){
-        return predictLottery(HmCache::getPl3Cache, HmCache::getPl3CompareCache, DingWeiAskContent.V1,false);
+        return predictLottery(HmCache::getPl3Cache, HmCache::getPl3CompareCache, DingWeiAsk3DContent.V1,false);
     }
 
     private static String predictLottery(DataProvider dataProvider, CompareDataProvider compareProvider, String systemMsgTemplate,
