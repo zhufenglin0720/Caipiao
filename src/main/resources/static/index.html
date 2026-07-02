@@ -1057,6 +1057,10 @@
             text-align: center;
         }
 
+        .dadi-search-input-wide {
+            width: 52px;
+        }
+
         .dadi-search-input:focus {
             outline: none;
             border-color: var(--accent);
@@ -2490,8 +2494,36 @@
         };
     }
 
+    function getDadiSeqRangeFilter() {
+        const pick = id => {
+            const el = document.getElementById(id);
+            const val = (el?.value || '').replace(/\D/g, '').slice(0, 3);
+            if (el && el.value !== val) el.value = val;
+            return val ? parseInt(val, 10) : null;
+        };
+        return {
+            from: pick('dadi-search-seq-from'),
+            to: pick('dadi-search-seq-to')
+        };
+    }
+
+    function getDadiFilters() {
+        return {
+            positions: getDadiPositionFilters(),
+            seq: getDadiSeqRangeFilter()
+        };
+    }
+
     function hasDadiPositionFilter(filters) {
         return !!(filters.bai || filters.shi || filters.ge);
+    }
+
+    function hasDadiSeqRangeFilter(range) {
+        return range.from != null || range.to != null;
+    }
+
+    function hasActiveDadiFilter(filters) {
+        return hasDadiPositionFilter(filters.positions) || hasDadiSeqRangeFilter(filters.seq);
     }
 
     function matchesDadiPositionSearch(num, filters) {
@@ -2502,30 +2534,53 @@
         return true;
     }
 
+    function matchesDadiSeqRange(idx, range) {
+        const from = range.from;
+        const to = range.to;
+        if (from != null && to != null) {
+            const lo = Math.min(from, to);
+            const hi = Math.max(from, to);
+            return idx >= lo && idx <= hi;
+        }
+        if (from != null && idx < from) return false;
+        if (to != null && idx > to) return false;
+        return true;
+    }
+
+    function filterDadiItems(numbers, filters) {
+        const pos = filters.positions;
+        const seq = filters.seq;
+        const posActive = hasDadiPositionFilter(pos);
+        const seqActive = hasDadiSeqRangeFilter(seq);
+        return numbers.map((num, i) => ({ num, idx: i + 1 }))
+            .filter(({ num, idx }) => {
+                if (posActive && !matchesDadiPositionSearch(num, pos)) return false;
+                if (seqActive && !matchesDadiSeqRange(idx, seq)) return false;
+                return true;
+            });
+    }
+
     function renderDadiPopupGrid(numbers, realHm, filters) {
         const hitPos = realHm ? numbers.indexOf(realHm) + 1 : 0;
-        const active = hasDadiPositionFilter(filters);
-        const items = numbers.map((num, i) => ({ num, idx: i + 1 }))
-            .filter(({ num }) => !active || matchesDadiPositionSearch(num, filters));
+        const items = hasActiveDadiFilter(filters)
+            ? filterDadiItems(numbers, filters)
+            : numbers.map((num, i) => ({ num, idx: i + 1 }));
         return items.map(({ num, idx }) => renderDadiNumItem(num, idx, hitPos)).join('');
     }
 
-    let dadiPopupCopyText = '';
     let dadiPopupState = { numbers: [], realHm: '' };
 
     function filterDadiPopupGrid() {
         const grid = document.getElementById('dadi-popup-grid');
         if (!grid) return;
-        const filters = getDadiPositionFilters();
+        const filters = getDadiFilters();
         const { numbers, realHm } = dadiPopupState;
         grid.innerHTML = renderDadiPopupGrid(numbers, realHm, filters);
         const countEl = document.getElementById('dadi-popup-search-count');
         if (countEl) {
             const total = numbers.length;
-            const active = hasDadiPositionFilter(filters);
-            const visible = active
-                ? numbers.filter(n => matchesDadiPositionSearch(n, filters)).length
-                : total;
+            const active = hasActiveDadiFilter(filters);
+            const visible = active ? filterDadiItems(numbers, filters).length : total;
             countEl.textContent = active ? `显示 ${visible} / ${total} 注` : `共 ${total} 注`;
         }
     }
@@ -2546,10 +2601,20 @@
     }
 
     async function copyDadiPopupNumbers() {
-        if (!dadiPopupCopyText) return;
         const btn = document.getElementById('qima-popup-copy-btn');
+        const filters = getDadiFilters();
+        const { numbers } = dadiPopupState;
+        const items = hasActiveDadiFilter(filters)
+            ? filterDadiItems(numbers, filters)
+            : numbers.map((num, i) => ({ num, idx: i + 1 }));
+        const text = items.map(({ num }) => num).join('\n');
+        if (!text) {
+            btn.textContent = '无可复制';
+            setTimeout(() => { btn.textContent = '一键复制'; }, 1500);
+            return;
+        }
         try {
-            await copyTextToClipboard(dadiPopupCopyText);
+            await copyTextToClipboard(text);
             btn.textContent = '已复制';
             btn.classList.add('copied');
             setTimeout(() => {
@@ -2565,6 +2630,7 @@
     function showDadiNumbersPopup(numbers, realHm, seq, modelLabel) {
         dadiPopupState = { numbers, realHm };
         const title = seq ? `序号 ${seq} · ${modelLabel} · 500注大底` : `${modelLabel} · 500注大底`;
+        const emptyFilters = { positions: { bai: '', shi: '', ge: '' }, seq: { from: null, to: null } };
         const bodyHtml = `
             <div class="dadi-view-toolbar">
                 <div class="dadi-search-positions">
@@ -2587,12 +2653,26 @@
                                oninput="filterDadiPopupGrid()">
                     </label>
                 </div>
+                <div class="dadi-search-positions">
+                    <span class="dadi-search-pos-label">序号</span>
+                    <label class="dadi-search-pos">
+                        <span class="dadi-search-pos-label">从</span>
+                        <input type="text" id="dadi-search-seq-from" class="dadi-search-input dadi-search-input-wide"
+                               placeholder="-" maxlength="3" inputmode="numeric"
+                               oninput="filterDadiPopupGrid()">
+                    </label>
+                    <label class="dadi-search-pos">
+                        <span class="dadi-search-pos-label">到</span>
+                        <input type="text" id="dadi-search-seq-to" class="dadi-search-input dadi-search-input-wide"
+                               placeholder="-" maxlength="3" inputmode="numeric"
+                               oninput="filterDadiPopupGrid()">
+                    </label>
+                </div>
                 <span class="dadi-search-count" id="dadi-popup-search-count">共 ${numbers.length} 注</span>
             </div>
-            <div class="dadi-numbers-grid" id="dadi-popup-grid">${renderDadiPopupGrid(numbers, realHm, { bai: '', shi: '', ge: '' })}</div>`;
+            <div class="dadi-numbers-grid" id="dadi-popup-grid">${renderDadiPopupGrid(numbers, realHm, emptyFilters)}</div>`;
         openQimaPopup(title, bodyHtml, {
-            dadiView: true,
-            copyText: numbers.join('\n')
+            dadiView: true
         });
     }
 
@@ -2776,13 +2856,11 @@
         const copyBtn = document.getElementById('qima-popup-copy-btn');
         const isDadiView = !!(options && options.dadiView);
         popup.classList.toggle('dadi-view-popup', isDadiView);
-        if (isDadiView && options.copyText) {
-            dadiPopupCopyText = options.copyText;
+        if (isDadiView) {
             copyBtn.hidden = false;
             copyBtn.textContent = '一键复制';
             copyBtn.classList.remove('copied');
         } else {
-            dadiPopupCopyText = '';
             copyBtn.hidden = true;
         }
         document.getElementById('qima-popup-title').textContent = title;
@@ -2793,7 +2871,6 @@
     function closeQimaPopup() {
         document.querySelector('#qima-popup-overlay .qima-popup').classList.remove('dadi-view-popup');
         document.getElementById('qima-popup-copy-btn').hidden = true;
-        dadiPopupCopyText = '';
         dadiPopupState = { numbers: [], realHm: '' };
         document.getElementById('qima-popup-overlay').classList.remove('active');
     }
