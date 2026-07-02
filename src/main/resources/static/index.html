@@ -2454,11 +2454,31 @@
         return `<span class="dadi-num-item${isHit ? ' hit' : ''}" data-num="${num}" data-idx="${idx}"><sup class="dadi-num-seq">${idx}</sup>${num}</span>`;
     }
 
+    function matchesDadiSearch(num, keyword) {
+        const kw = (keyword || '').trim();
+        if (!kw) return true;
+        const digitCounts = {};
+        for (const ch of kw) {
+            if (ch >= '0' && ch <= '9') {
+                digitCounts[ch] = (digitCounts[ch] || 0) + 1;
+            }
+        }
+        if (Object.keys(digitCounts).length === 0) return num.includes(kw);
+        for (const [digit, count] of Object.entries(digitCounts)) {
+            let found = 0;
+            for (const ch of num) {
+                if (ch === digit) found++;
+            }
+            if (found < count) return false;
+        }
+        return true;
+    }
+
     function renderDadiPopupGrid(numbers, realHm, keyword) {
         const hitPos = realHm ? numbers.indexOf(realHm) + 1 : 0;
         const kw = (keyword || '').trim();
         const items = numbers.map((num, i) => ({ num, idx: i + 1 }))
-            .filter(({ num }) => !kw || num.includes(kw));
+            .filter(({ num }) => matchesDadiSearch(num, kw));
         return items.map(({ num, idx }) => renderDadiNumItem(num, idx, hitPos)).join('');
     }
 
@@ -2475,7 +2495,7 @@
         const countEl = document.getElementById('dadi-popup-search-count');
         if (countEl) {
             const total = numbers.length;
-            const visible = kw ? numbers.filter(n => n.includes(kw)).length : total;
+            const visible = kw ? numbers.filter(n => matchesDadiSearch(n, kw)).length : total;
             countEl.textContent = kw ? `显示 ${visible} / ${total} 注` : `共 ${total} 注`;
         }
     }
@@ -2518,7 +2538,7 @@
         const bodyHtml = `
             <div class="dadi-view-toolbar">
                 <input type="text" id="dadi-popup-search" class="dadi-search-input"
-                       placeholder="搜索号码，如 123" inputmode="numeric"
+                       placeholder="搜索号码，如 67（含6和7，顺序不限）" inputmode="numeric"
                        oninput="filterDadiPopupGrid()">
                 <span class="dadi-search-count" id="dadi-popup-search-count">共 ${numbers.length} 注</span>
             </div>
