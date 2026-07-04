@@ -1,7 +1,6 @@
 package com.zfl.caipiao.cache;
 
 import com.zfl.caipiao.export.Hm;
-import com.zfl.caipiao.export.Kl8Hm;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -19,13 +18,9 @@ public class HmCache {
 
     private static final List<Hm> PL3_CACHE = new ArrayList<>();
 
-    private static final List<Kl8Hm> KL8_CACHE = new ArrayList<>();
-
     private static final List<CompareDto> SD_COMPARE_CACHE = new ArrayList<>();
 
     private static final List<CompareDto> PL3_COMPARE_CACHE = new ArrayList<>();
-
-    private static final List<CompareDto> KL8_COMPARE_CACHE = new ArrayList<>();
 
     private static final List<DadiCompareDto> SD_DADI_COMPARE_CACHE = new ArrayList<>();
 
@@ -39,16 +34,8 @@ public class HmCache {
         return PL3_CACHE;
     }
 
-    public static List<Kl8Hm> getKl8Cache() {
-        return KL8_CACHE;
-    }
-
     public static List<CompareDto> getSdCompareCache() {
         return SD_COMPARE_CACHE;
-    }
-
-    public static List<CompareDto> getKl8CompareCache() {
-        return KL8_COMPARE_CACHE;
     }
 
     public static List<CompareDto> getPl3CompareCache() {
@@ -77,13 +64,6 @@ public class HmCache {
         PL3_COMPARE_CACHE.add(compareDto);
     }
 
-    public static void addKl8CompareCache(CompareDto compareDto) {
-        if(KL8_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE){
-            KL8_COMPARE_CACHE.remove(0);
-        }
-        KL8_COMPARE_CACHE.add(compareDto);
-    }
-
     public static void addSdDadiCompareCache(DadiCompareDto dadiCompareDto) {
         if (SD_DADI_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE) {
             SD_DADI_COMPARE_CACHE.remove(0);
@@ -100,10 +80,6 @@ public class HmCache {
 
     public static void addSdCache(Hm hm) {
         SD_CACHE.add(hm);
-    }
-
-    public static void addKl8Cache(Kl8Hm hm) {
-        KL8_CACHE.add(hm);
     }
 
     public static void addPl3Cache(Hm hm) {
@@ -124,14 +100,6 @@ public class HmCache {
 
     public static void setPl3CompareCache(List<CompareDto> compareDtos) {
         PL3_COMPARE_CACHE.addAll(compareDtos);
-    }
-
-    public static void setKl8Cache(List<Kl8Hm> kl8Cache) {
-        KL8_CACHE.addAll(kl8Cache);
-    }
-
-    public static void setKl8CompareCache(List<CompareDto> compareDtos) {
-        KL8_COMPARE_CACHE.addAll(compareDtos);
     }
 
     public static void setSdDadiCompareCache(List<DadiCompareDto> dadiCompareDtos) {

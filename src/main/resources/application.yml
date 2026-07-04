@@ -21,7 +21,5 @@ file:
     pl3: D:\彩票\排列三.xlsx
     comparePl3: D:\彩票\排列三对比.xlsx
     comparePl3Dadi: D:\彩票\排列三大底对比.xlsx
-    kl8: D:\彩票\快乐八.xlsx
-    compareKl8: D:\彩票\快乐八对比.xlsx
 server:
   port: 10088

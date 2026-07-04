@@ -4,7 +4,6 @@ import com.alibaba.excel.EasyExcel;
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
-import com.zfl.caipiao.export.Kl8Hm;
 import com.zfl.caipiao.service.DadiService;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,10 +31,6 @@ public class AppStarter implements ApplicationRunner {
     private String fileLocationCompare3dDadi;
     @Value("${file.location.comparePl3Dadi}")
     private String fileLocationComparePl3Dadi;
-    @Value("${file.location.kl8}")
-    private String fileLocationKl8;
-    @Value("${file.location.compareKl8}")
-    private String fileLocationCompareKl8;
 
     @Resource
     private DadiService dadiService;
@@ -80,20 +75,6 @@ public class AppStarter implements ApplicationRunner {
 
         dadiService.loadFromExcel(false, fileLocationComparePl3Dadi);
         System.out.println("pl3DadiCompareCache:" + HmCache.getPl3DadiCompareCache().size());
-
-        List<Kl8Hm> kl8List = EasyExcel.read(fileLocationKl8).head(Kl8Hm.class)
-                .sheet().doReadSync();
-        HmCache.setKl8Cache(kl8List);
-        System.out.println("kl8Cache:" + HmCache.getKl8Cache().size());
-
-        List<CompareVO> kl8CompareList = EasyExcel.read(fileLocationCompareKl8).head(CompareVO.class)
-                .sheet().doReadSync();
-        HmCache.setKl8CompareCache(kl8CompareList.stream().map(compareVO -> new HmCache.CompareDto()
-                .setQh(compareVO.getQh())
-                .setAiHm(compareVO.getAiHm())
-                .setRealHm(compareVO.getRealHm())
-        ).toList());
-        System.out.println("kl8CompareCache:" + HmCache.getKl8CompareCache().size());
     }
 
 }

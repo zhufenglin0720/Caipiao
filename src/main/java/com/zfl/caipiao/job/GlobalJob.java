@@ -9,7 +9,6 @@ import com.zfl.caipiao.constant.EmailConstant;
 import com.zfl.caipiao.constant.Url;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
-import com.zfl.caipiao.export.Kl8Hm;
 import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.utils.AiUtils;
 import com.zfl.caipiao.utils.DateUtils;
@@ -19,7 +18,6 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -48,14 +46,10 @@ public class GlobalJob {
     private String fileLocation3d;
     @Value("${file.location.pl3}")
     private String fileLocationPl3;
-    @Value("${file.location.kl8}")
-    private String fileLocationKl8;
     @Value("${file.location.compare3D}")
     private String fileLocationCompare3d;
     @Value("${file.location.comparePl3}")
     private String fileLocationComparePl3;
-    @Value("${file.location.compareKl8}")
-    private String fileLocationCompareKl8;
 
     private void sendEmailCode(String subject, String sendText) throws MessagingException {
         MimeMessage message = javaMailSender.createMimeMessage();
@@ -172,7 +166,7 @@ public class GlobalJob {
         sendEmailCode("今日3D及排三预测", msg[0]);
     }
 
-    @Scheduled(cron = "0 50 21 * * ?")
+    @Scheduled(cron = "0 0 22 * * ?")
     public void setDataTask() throws Exception {
         List<Hm> sdCache = HmCache.getSdCache();
         Hm sdHm = sdCache.get(sdCache.size() - 1);
@@ -212,17 +206,6 @@ public class GlobalJob {
         ;
     }
 
-    @Scheduled(cron = "0 30 22 * * ?")
-    public void setKl8DataTask() throws Exception {
-        List<Kl8Hm> kl8Cache = HmCache.getKl8Cache();
-        Kl8Hm kl8Hm  = kl8Cache.get(kl8Cache.size() - 1);
-        String lastKl8Qh = kl8Hm.getQh();
-        String kl8Qh = DateUtils.getKl8Qh(lastKl8Qh);
-        System.out.println("kl8 lastQh:" + lastKl8Qh + " currentQh:" + kl8Qh);
-        String kl8Url = String.format(Url.KL8_URL, lastKl8Qh, kl8Qh);
-        setKl8KaiJiangCache(kl8Url, kl8Qh);
-    }
-
     private boolean checkSuccess(String aiHm, String realHm){
         // 1. 空值/空字符串校验（保留原逻辑）
         if (StrUtil.isBlank(aiHm) || StrUtil.isBlank(realHm)) {
@@ -242,68 +225,6 @@ public class GlobalJob {
             }
         }
         return false;
-    }
-
-    private void setKl8KaiJiangCache(String url, String computeQh) throws Exception{
-        Kl8Hm kaiJiangHm = null;
-        try {
-            System.out.println(url);
-            Document document = Jsoup.connect(url).get();
-            Elements elements = document.getElementsByTag("tr");
-            for (int i = 1; i < elements.size(); i++) {
-                Elements tds = elements.get(i).getElementsByTag("td");
-                String qh = tds.get(0).text();
-                if(StrUtil.isBlank(qh) || !qh.startsWith("20")){
-                    continue;
-                }
-                if(!qh.equals(computeQh)){
-                    continue;
-                }
-                List<Element> chartBalls = tds.stream().filter(td -> td.hasClass("chartBall01")).toList();
-                if(chartBalls.size() == 20){
-                    kaiJiangHm = Kl8Hm.builder().qh(qh)
-                            .q1(chartBalls.get(0).text())
-                            .q2(chartBalls.get(1).text())
-                            .q3(chartBalls.get(2).text())
-                            .q4(chartBalls.get(3).text())
-                            .q5(chartBalls.get(4).text())
-                            .q6(chartBalls.get(5).text())
-                            .q7(chartBalls.get(6).text())
-                            .q8(chartBalls.get(7).text())
-                            .q9(chartBalls.get(8).text())
-                            .q10(chartBalls.get(9).text())
-                            .q11(chartBalls.get(10).text())
-                            .q12(chartBalls.get(11).text())
-                            .q13(chartBalls.get(12).text())
-                            .q14(chartBalls.get(13).text())
-                            .q15(chartBalls.get(14).text())
-                            .q16(chartBalls.get(15).text())
-                            .q17(chartBalls.get(16).text())
-                            .q18(chartBalls.get(17).text())
-                            .q19(chartBalls.get(18).text())
-                            .q20(chartBalls.get(19).text())
-                            .build();
-                }
-            }
-        }catch (Exception e){
-            e.printStackTrace();
-        }
-        if(kaiJiangHm != null){
-            HmCache.addKl8Cache(kaiJiangHm);
-            EasyExcel.write(fileLocationKl8, Kl8Hm.class).sheet().doWrite(HmCache.getKl8Cache());
-        }
-        List<HmCache.CompareDto> kl8CompareCache = HmCache.getKl8CompareCache();
-        if(CollUtil.isNotEmpty(kl8CompareCache)){
-            HmCache.CompareDto compareDto = kl8CompareCache.get(kl8CompareCache.size() - 1);
-            if(kaiJiangHm == null){
-                kl8CompareCache.remove(compareDto);
-            }else{
-                compareDto.setRealHm(kaiJiangHm.toString());
-                compareDto.setQh(kaiJiangHm.getQh());
-            }
-        }
-        List<CompareVO> insertList = HmCache.getKl8CompareCache().stream().map(compareDto -> CompareVO.builder().qh(compareDto.getQh()).aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).build()).toList();
-        EasyExcel.write(fileLocationCompareKl8, CompareVO.class).sheet("快乐8比对结果").doWrite(insertList);
     }
 
     private void setKaiJiangCache(String url, boolean is3D, String computeQh) throws Exception{

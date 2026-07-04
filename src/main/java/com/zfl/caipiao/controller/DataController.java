@@ -3,7 +3,6 @@ package com.zfl.caipiao.controller;
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
-import com.zfl.caipiao.service.Kl8Service;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,9 +22,6 @@ public class DataController {
     @Resource
     private DadiService dadiService;
 
-    @Resource
-    private Kl8Service kl8Service;
-
     @GetMapping
     public Map<String, Object> getData() {
         Map<String, Object> result = new HashMap<>();
@@ -43,8 +39,6 @@ public class DataController {
         result.put("pl3Compare", toCompareList(pl3CompareCache));
         result.put("sdDadiCompare", toDadiCompareList(sdDadiCompareCache));
         result.put("pl3DadiCompare", toDadiCompareList(pl3DadiCompareCache));
-        result.put("kl8", HmCache.getKl8Cache());
-        result.put("kl8Compare", toCompareList(HmCache.getKl8CompareCache()));
 
         return result;
     }
@@ -76,61 +70,6 @@ public class DataController {
         } catch (Exception e) {
             result.put("success", false);
             result.put("message", "保存失败：" + e.getMessage());
-        }
-        return result;
-    }
-
-    @PostMapping("/kl8")
-    public Map<String, Object> saveKl8(@RequestBody Map<String, String> body) {
-        Map<String, Object> result = new HashMap<>();
-        String numbers = body.get("numbers");
-        if (numbers == null) {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-        }
-        try {
-            kl8Service.savePredict(numbers);
-            result.put("success", true);
-            result.put("message", "快乐八号码录入成功");
-        } catch (IllegalArgumentException e) {
-            result.put("success", false);
-            result.put("message", e.getMessage());
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("message", "保存失败：" + e.getMessage());
-        }
-        return result;
-    }
-
-    @PostMapping("/kl8/update")
-    public Map<String, Object> updateKl8(@RequestBody Map<String, Object> body) {
-        Map<String, Object> result = new HashMap<>();
-        String numbers = (String) body.get("numbers");
-        Object indexObj = body.get("index");
-        if (numbers == null || indexObj == null) {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-        }
-        int index;
-        try {
-            index = Integer.parseInt(indexObj.toString());
-        } catch (NumberFormatException e) {
-            result.put("success", false);
-            result.put("message", "索引无效");
-            return result;
-        }
-        try {
-            kl8Service.updatePredict(index, numbers);
-            result.put("success", true);
-            result.put("message", "快乐八号码修改成功");
-        } catch (IllegalArgumentException e) {
-            result.put("success", false);
-            result.put("message", e.getMessage());
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("message", "修改失败：" + e.getMessage());
         }
         return result;
     }

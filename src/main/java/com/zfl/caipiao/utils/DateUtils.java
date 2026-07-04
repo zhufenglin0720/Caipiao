@@ -36,17 +36,6 @@ public class DateUtils {
         }
     }
 
-    public static String getKl8Qh(String lastQh){
-        String year = lastQh.substring(0, 4);
-        int qh = Integer.parseInt(lastQh.substring(4));
-        String nowYear = String.valueOf(LocalDate.now().getYear());
-        if(Objects.equals(year, nowYear)){
-            return year + String.format("%03d", qh + 1);
-        }else{
-            return nowYear + "001";
-        }
-    }
-
     public static boolean isDateStr(String dateStr){
         if (StrUtil.isBlank(dateStr)) {
             return false;
