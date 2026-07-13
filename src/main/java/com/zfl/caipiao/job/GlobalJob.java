@@ -127,43 +127,36 @@ public class GlobalJob {
     public void applyTask() throws MessagingException, InterruptedException {
         CountDownLatch latch = new CountDownLatch(2);
 
-        final String[] msg = {EmailConstant.EMAIL_TEMPLATE};
+        final String[] sdNumber = {null};
+        final String[] pl3Number = {null};
         ThreadUtils.run(() -> {
             try {
-                String sdNumber = AiUtils.get3dAi();
-                if(StrUtil.isNotBlank(sdNumber)){
-                    String change3dNumber = sdNumber.replace(",", "");
-                    char[] charArray = change3dNumber.toCharArray();
-                    for (int i = 1; i <= charArray.length; i++) {
-                        msg[0] = msg[0].replace("{{num_" + i + "}}", String.valueOf(charArray[i-1]));
-                    }
-                    //添加缓存
-                    HmCache.addSdCompareCache(new HmCache.CompareDto().setAiHm(sdNumber));
+                sdNumber[0] = AiUtils.get3dAi();
+                if (StrUtil.isNotBlank(sdNumber[0])) {
+                    HmCache.addSdCompareCache(new HmCache.CompareDto().setAiHm(sdNumber[0]));
                 }
-            }finally {
+            } finally {
                 latch.countDown();
             }
         });
 
         ThreadUtils.run(() -> {
             try {
-                String pl3Number = AiUtils.getPl3Ai();
-                if(StrUtil.isNotBlank(pl3Number)){
-                    String changePl3Number = pl3Number.replace(",", "");
-                    char[] charArray = changePl3Number.toCharArray();
-                    for (int i = 1; i <= charArray.length; i++) {
-                        msg[0] = msg[0].replace("{{num_" + (i + 15) + "}}", String.valueOf(charArray[i-1]));
-                    }
-                    HmCache.addPl3CompareCache(new HmCache.CompareDto().setAiHm(pl3Number));
+                pl3Number[0] = AiUtils.getPl3Ai();
+                if (StrUtil.isNotBlank(pl3Number[0])) {
+                    HmCache.addPl3CompareCache(new HmCache.CompareDto().setAiHm(pl3Number[0]));
                 }
-            }finally {
+            } finally {
                 latch.countDown();
             }
         });
 
         latch.await();
-        msg[0] = msg[0].replace("{{TIMESTAMP}}", DateUtil.now());
-        sendEmailCode("今日3D及排三预测", msg[0]);
+        String msg = EmailConstant.EMAIL_TEMPLATE
+                .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdNumber[0]))
+                .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Number[0]))
+                .replace("{{TIMESTAMP}}", DateUtil.now());
+        sendEmailCode("今日3D及排三预测", msg);
     }
 
     @Scheduled(cron = "0 0 22 * * ?")

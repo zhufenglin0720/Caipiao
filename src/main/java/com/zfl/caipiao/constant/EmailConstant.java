@@ -28,59 +28,11 @@ public class EmailConstant {
                     <div class="content">
                         <div class="prediction-box">
                             <div class="game-title">📊 3D</div>
-                            <div class="numbers">
-                                <div class="number">{{num_1}}</div>
-                                <div class="number">{{num_2}}</div>
-                                <div class="number">{{num_3}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_4}}</div>
-                                <div class="number">{{num_5}}</div>
-                                <div class="number">{{num_6}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_7}}</div>
-                                <div class="number">{{num_8}}</div>
-                                <div class="number">{{num_9}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_10}}</div>
-                                <div class="number">{{num_11}}</div>
-                                <div class="number">{{num_12}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_13}}</div>
-                                <div class="number">{{num_14}}</div>
-                                <div class="number">{{num_15}}</div>
-                            </div>
+                            {{3D_NUMBERS}}
                         </div>
                         <div class="prediction-box">
                             <div class="game-title">🎰 排列三</div>
-                            <div class="numbers">
-                                <div class="number">{{num_16}}</div>
-                                <div class="number">{{num_17}}</div>
-                                <div class="number">{{num_18}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_19}}</div>
-                                <div class="number">{{num_20}}</div>
-                                <div class="number">{{num_21}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_22}}</div>
-                                <div class="number">{{num_23}}</div>
-                                <div class="number">{{num_24}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_25}}</div>
-                                <div class="number">{{num_26}}</div>
-                                <div class="number">{{num_27}}</div>
-                            </div>
-                            <div class="numbers">
-                                <div class="number">{{num_28}}</div>
-                                <div class="number">{{num_29}}</div>
-                                <div class="number">{{num_30}}</div>
-                            </div>
+                            {{PL3_NUMBERS}}
                         </div>
                         <div style="text-align: center; margin-top: 20px;">
                             <p style="color: #ff6b6b; font-weight: bold; font-size: 13px">💡 温馨提示：理性购彩，祝您好运！</p>
@@ -93,6 +45,25 @@ public class EmailConstant {
             </body>
             </html>
             """;
+
+    public static String buildNumbersHtml(String numbers) {
+        if (numbers == null || numbers.isBlank()) {
+            return "<p style=\"text-align:center;color:#999;\">暂无预测数据</p>";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String part : numbers.split(",")) {
+            String num = part.trim();
+            if (num.length() < 3) {
+                num = String.format("%03d", Integer.parseInt(num));
+            }
+            sb.append("<div class=\"numbers\">");
+            for (char c : num.toCharArray()) {
+                sb.append("<div class=\"number\">").append(c).append("</div>");
+            }
+            sb.append("</div>");
+        }
+        return sb.toString();
+    }
 
     public final static String NOTICE_MSG = """
             <!DOCTYPE html>
