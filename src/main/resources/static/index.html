@@ -681,6 +681,11 @@
             color: var(--success);
         }
 
+        .dadi-copy-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
         .qima-popup-title {
             font-size: 15px;
             font-weight: 700;
@@ -1390,6 +1395,126 @@
             flex-wrap: wrap;
         }
 
+        /* 序号截取工具 */
+        .slice-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .slice-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            flex-shrink: 0;
+        }
+
+        .slice-card.fill {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slice-card-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .slice-card-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .slice-textarea {
+            width: 100%;
+            flex: 1;
+            min-height: 140px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            overflow-y: auto;
+            resize: none;
+        }
+
+        .slice-textarea:focus {
+            outline: none;
+            border-color: var(--purple);
+        }
+
+        .slice-textarea.result {
+            min-height: 100px;
+            color: var(--accent-light);
+        }
+
+        .slice-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+        }
+
+        .slice-meta strong {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        .slice-meta .count-ok { color: var(--success); font-weight: 600; }
+        .slice-meta .count-warn { color: var(--fail); font-weight: 600; }
+
+        .slice-range-input {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.05);
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .slice-range-input:focus {
+            outline: none;
+            border-color: var(--purple);
+        }
+
+        .slice-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .slice-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .slice-result-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
         @media (max-width: 768px) {
             html, body {
                 height: auto;
@@ -1486,6 +1611,13 @@
             .ball-small { width: 28px; height: 28px; font-size: 12px; }
             .history-toolbar { margin-bottom: 8px; }
             .tracker-form .btn-primary { width: 100%; }
+            .slice-toolbar { flex-direction: column; align-items: stretch; }
+            .slice-toolbar .btn-primary,
+            .slice-toolbar .dadi-copy-btn { width: 100%; }
+            .slice-result-actions { width: 100%; }
+            .slice-result-actions .dadi-copy-btn { flex: 1; }
+            .slice-summary { grid-template-columns: 1fr; }
+            .slice-textarea { min-height: 110px; }
         }
     </style>
 </head>
@@ -1502,6 +1634,7 @@
     <div class="main-tabs">
         <button class="main-tab active" data-type="3d" onclick="switchMainTab('3d', this)">福彩 3D</button>
         <button class="main-tab" data-type="pl3" onclick="switchMainTab('pl3', this)">排列三</button>
+        <button class="main-tab" data-type="tools" onclick="switchMainTab('tools', this)">工具</button>
     </div>
 
     <!-- 3D -->
@@ -1772,6 +1905,45 @@
             </div>
         </div>
     </div>
+
+    <!-- 工具 -->
+    <div id="tools-content" class="tab-content">
+        <div class="slice-panel">
+            <div class="slice-card fill">
+                <div class="slice-card-title">号码列表</div>
+                <div class="slice-card-hint">粘贴几百注三位数，用空格、逗号或换行分隔。序号从 1 开始，按粘贴顺序计数。</div>
+                <textarea class="slice-textarea" id="slice-input"
+                          placeholder="例如：123 456 789 012 …"
+                          oninput="updateSliceInputCount()"></textarea>
+                <div class="slice-meta">
+                    <span>仅识别合法三位数（000-999）</span>
+                    <span id="slice-input-count">有效注数：<strong>0</strong></span>
+                </div>
+            </div>
+            <div class="slice-card">
+                <div class="slice-card-title">位置索引</div>
+                <div class="slice-card-hint">格式：100-210,300-500（含起止；多段用逗号分隔）。例：第100注到第210注，再加第300注到第500注。</div>
+                <input class="slice-range-input" id="slice-ranges" type="text"
+                       placeholder="100-210,300-500"
+                       value="100-210,300-500"
+                       onkeydown="if(event.key==='Enter')runSlice()">
+                <div class="slice-toolbar">
+                    <button type="button" class="btn-primary" onclick="runSlice()">截取合并</button>
+                    <button type="button" class="dadi-copy-btn" onclick="clearSlice()">清空</button>
+                </div>
+            </div>
+            <div class="slice-card fill">
+                <div class="slice-card-title">输出结果</div>
+                <div class="slice-summary" id="slice-summary" style="display:none"></div>
+                <textarea class="slice-textarea result" id="slice-output" readonly
+                          placeholder="截取后的号码将用逗号合并输出"></textarea>
+                <div class="slice-result-actions">
+                    <button type="button" class="dadi-copy-btn" id="slice-copy-btn" onclick="copySliceResult()" disabled>一键复制</button>
+                </div>
+                <div class="slice-meta" id="slice-result-meta"></div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="qima-popup-overlay" id="qima-popup-overlay" onclick="if(event.target===this)closeQimaPopup()">
@@ -1890,8 +2062,153 @@
         document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         el.classList.add('active');
-        $(type, 'content').classList.add('active');
-        adjustAllTables();
+        if (type === 'tools') {
+            document.getElementById('tools-content').classList.add('active');
+        } else {
+            $(type, 'content').classList.add('active');
+            adjustAllTables();
+        }
+    }
+
+    function parseSliceNumbers(text) {
+        if (!text) return [];
+        return text.split(/[\s,，、;；]+/)
+            .map(s => s.trim())
+            .filter(s => /^\d{3}$/.test(s));
+    }
+
+    function parseSliceRanges(text) {
+        const raw = (text || '').trim();
+        if (!raw) return { ok: false, error: '请输入位置索引，例如 100-210,300-500' };
+        const parts = raw.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+        if (!parts.length) return { ok: false, error: '请输入位置索引，例如 100-210,300-500' };
+        const ranges = [];
+        for (const part of parts) {
+            const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+            const singleMatch = part.match(/^(\d+)$/);
+            let start, end;
+            if (rangeMatch) {
+                start = parseInt(rangeMatch[1], 10);
+                end = parseInt(rangeMatch[2], 10);
+            } else if (singleMatch) {
+                start = end = parseInt(singleMatch[1], 10);
+            } else {
+                return { ok: false, error: '索引格式错误：' + part + '（应为 100-210 或 100）' };
+            }
+            if (start < 1 || end < 1) {
+                return { ok: false, error: '序号从 1 开始：' + part };
+            }
+            if (start > end) {
+                const tmp = start;
+                start = end;
+                end = tmp;
+            }
+            ranges.push({ start, end, count: end - start + 1 });
+        }
+        return { ok: true, ranges };
+    }
+
+    function updateSliceInputCount() {
+        const nums = parseSliceNumbers(document.getElementById('slice-input').value);
+        document.getElementById('slice-input-count').innerHTML =
+            '有效注数：<strong class="count-ok">' + nums.length + '</strong>';
+    }
+
+    function runSlice() {
+        const numbers = parseSliceNumbers(document.getElementById('slice-input').value);
+        if (!numbers.length) {
+            alert('请先粘贴三位数号码列表');
+            return;
+        }
+        const parsed = parseSliceRanges(document.getElementById('slice-ranges').value);
+        if (!parsed.ok) {
+            alert(parsed.error);
+            return;
+        }
+
+        const selected = [];
+        let missCount = 0;
+        const segmentInfo = [];
+        for (const range of parsed.ranges) {
+            let hit = 0;
+            for (let i = range.start; i <= range.end; i++) {
+                if (i > numbers.length) {
+                    missCount++;
+                    continue;
+                }
+                selected.push(numbers[i - 1]);
+                hit++;
+            }
+            segmentInfo.push(range.start + '-' + range.end + '（' + hit + '注）');
+        }
+
+        const output = selected.join(',');
+        document.getElementById('slice-output').value = output;
+
+        const summaryEl = document.getElementById('slice-summary');
+        summaryEl.style.display = 'grid';
+        summaryEl.innerHTML =
+            '<div class="summary-item"><div class="val">' + numbers.length + '</div><div class="lbl">输入有效注数</div></div>' +
+            '<div class="summary-item"><div class="val">' + selected.length + '</div><div class="lbl">截取合计</div></div>' +
+            '<div class="summary-item"><div class="val">' + parsed.ranges.length + '</div><div class="lbl">索引段数</div></div>';
+
+        const metaEl = document.getElementById('slice-result-meta');
+        let meta = '区间：' + segmentInfo.join('，');
+        if (missCount > 0) {
+            meta += ' · <span class="count-warn">超出范围 ' + missCount + ' 个序号已跳过</span>';
+        }
+        metaEl.innerHTML = meta;
+
+        const copyBtn = document.getElementById('slice-copy-btn');
+        copyBtn.disabled = selected.length === 0;
+        copyBtn.textContent = '一键复制';
+        copyBtn.classList.remove('copied');
+    }
+
+    function copySliceResult() {
+        const text = document.getElementById('slice-output').value;
+        if (!text) return;
+        const btn = document.getElementById('slice-copy-btn');
+        const done = () => {
+            btn.textContent = '已复制';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = '一键复制';
+                btn.classList.remove('copied');
+            }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(() => {
+                fallbackCopyText(text);
+                done();
+            });
+        } else {
+            fallbackCopyText(text);
+            done();
+        }
+    }
+
+    function fallbackCopyText(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    }
+
+    function clearSlice() {
+        document.getElementById('slice-input').value = '';
+        document.getElementById('slice-ranges').value = '100-210,300-500';
+        document.getElementById('slice-output').value = '';
+        document.getElementById('slice-summary').style.display = 'none';
+        document.getElementById('slice-result-meta').innerHTML = '';
+        document.getElementById('slice-copy-btn').disabled = true;
+        document.getElementById('slice-copy-btn').textContent = '一键复制';
+        document.getElementById('slice-copy-btn').classList.remove('copied');
+        updateSliceInputCount();
     }
 
     function switchSection(type, section, el) {
