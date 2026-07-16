@@ -1395,6 +1395,133 @@
             flex-wrap: wrap;
         }
 
+        /* 盈亏记录 */
+        .pnl-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .pnl-entry-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            flex-shrink: 0;
+        }
+
+        .pnl-entry-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .pnl-entry-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+
+        .pnl-stats {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .form-group input.pnl-amount {
+            width: 120px;
+            font-weight: 600;
+        }
+
+        .pnl-table-section {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pnl-table-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .pnl-delete-btn {
+            padding: 4px 10px;
+            border: 1px solid rgba(248, 113, 113, 0.35);
+            background: rgba(248, 113, 113, 0.1);
+            color: var(--fail);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+        }
+
+        .pnl-delete-btn:hover {
+            background: rgba(248, 113, 113, 0.2);
+        }
+
+        .pnl-row-clickable {
+            cursor: pointer;
+        }
+
+        .pnl-row-clickable:hover td {
+            background: var(--bg-card-hover);
+        }
+
+        .pnl-row-selected td {
+            background: rgba(99, 102, 241, 0.15);
+        }
+
+        .pnl-auth-popup {
+            max-width: 360px;
+            width: 90%;
+        }
+
+        .pnl-auth-body {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .pnl-auth-hint {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .pnl-auth-input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text-primary);
+            font-size: 15px;
+            font-family: inherit;
+        }
+
+        .pnl-auth-input:focus {
+            outline: none;
+            border-color: var(--purple);
+        }
+
+        .pnl-auth-error {
+            font-size: 12px;
+            color: var(--fail);
+            min-height: 18px;
+        }
+
+        .pnl-auth-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
         /* 序号截取工具 */
         .slice-panel {
             display: flex;
@@ -1587,6 +1714,7 @@
             .latest-bar { justify-content: center; padding: 5px 10px; }
             .number-ball { width: 34px; height: 34px; font-size: 17px; }
             .stats { grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
+            .pnl-stats { grid-template-columns: repeat(2, 1fr); }
             .stat-card { padding: 8px 4px; }
             .stat-value { font-size: 18px; }
             .stat-label { font-size: 10px; }
@@ -1635,6 +1763,7 @@
         <button class="main-tab active" data-type="3d" onclick="switchMainTab('3d', this)">福彩 3D</button>
         <button class="main-tab" data-type="pl3" onclick="switchMainTab('pl3', this)">排列三</button>
         <button class="main-tab" data-type="tools" onclick="switchMainTab('tools', this)">工具</button>
+        <button class="main-tab" data-type="pnl" onclick="switchMainTab('pnl', this)">盈亏记录</button>
     </div>
 
     <!-- 3D -->
@@ -1944,6 +2073,80 @@
             </div>
         </div>
     </div>
+
+    <!-- 盈亏记录 -->
+    <div id="pnl-content" class="tab-content">
+        <div class="pnl-panel">
+            <div class="stats pnl-stats" id="pnl-stats"></div>
+            <div class="pnl-entry-card">
+                <div class="pnl-entry-title">录入当日数据</div>
+                <div class="tracker-form">
+                    <div class="form-group">
+                        <label>日期</label>
+                        <input type="date" id="pnl-date">
+                    </div>
+                    <div class="form-group">
+                        <label>打票金额</label>
+                        <input class="pnl-amount" id="pnl-ticket" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
+                    </div>
+                    <div class="form-group">
+                        <label>中奖金额</label>
+                        <input class="pnl-amount" id="pnl-win" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
+                    </div>
+                    <button type="button" class="btn-primary" id="pnl-submit-btn" onclick="submitPnlEntry()">保存</button>
+                    <button type="button" class="dadi-copy-btn" onclick="resetPnlForm()">重置</button>
+                </div>
+                <div class="pnl-entry-hint">金额可为 0，留空按 0 处理；同一日期重复保存将覆盖原记录。点击表格行可快速编辑。</div>
+            </div>
+            <div class="pnl-table-section">
+                <div class="pnl-table-toolbar">
+                    <div class="section-title">每日盈亏明细</div>
+                    <div class="filter-section">
+                        <button class="filter-btn" onclick="setPnlFilter(7, this)">近7天</button>
+                        <button class="filter-btn active" onclick="setPnlFilter(30, this)">近30天</button>
+                        <button class="filter-btn" onclick="setPnlFilter(0, this)">全部</button>
+                    </div>
+                </div>
+                <div class="table-container scroll-mode" id="pnl-table-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>打票金额</th>
+                            <th>中奖金额</th>
+                            <th>当日盈亏</th>
+                            <th>累积盈亏</th>
+                            <th>操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="pnl-table-body">
+                        <tr><td colspan="6" class="empty-hint">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="qima-popup-overlay" id="pnl-auth-overlay" onclick="if(event.target===this)closePnlAuthModal()">
+    <div class="qima-popup pnl-auth-popup" role="dialog" aria-modal="true">
+        <div class="qima-popup-header">
+            <span class="qima-popup-title">盈亏记录 · 请输入密码</span>
+            <button type="button" class="qima-popup-close" onclick="closePnlAuthModal()" aria-label="关闭">&times;</button>
+        </div>
+        <div class="qima-popup-body pnl-auth-body">
+            <div class="pnl-auth-hint">进入盈亏记录需要密码验证</div>
+            <input class="pnl-auth-input" id="pnl-auth-password" type="password" placeholder="请输入密码"
+                   autocomplete="current-password"
+                   onkeydown="if(event.key==='Enter')submitPnlAuth()">
+            <div class="pnl-auth-error" id="pnl-auth-error"></div>
+            <div class="pnl-auth-actions">
+                <button type="button" class="dadi-entry-cancel" onclick="closePnlAuthModal()">取消</button>
+                <button type="button" class="dadi-entry-submit" onclick="submitPnlAuth()">确认</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="qima-popup-overlay" id="qima-popup-overlay" onclick="if(event.target===this)closeQimaPopup()">
@@ -1997,6 +2200,11 @@
     let compareTabs = { '3d': 'sanma', 'pl3': 'sanma' };
     let sections = { '3d': 'predict', 'pl3': 'predict' };
     let autoRefreshIntervals = { '3d': null, 'pl3': null };
+    let pnlData = { records: [], summary: {} };
+    let pnlFilter = 30;
+    let pnlSelectedDate = null;
+    const PNL_TOKEN_KEY = 'pnl_token';
+    let pnlPendingTabEl = null;
 
     /** 3d 对应 DOM 前缀 sd，避免 ID 以数字开头导致 querySelector 报错 */
     function domPrefix(type) {
@@ -2058,7 +2266,87 @@
         metaEl.innerHTML = `共 <strong>${matches.length}</strong> 次 · 最近 <strong>${nearestText}</strong>`;
     }
 
+    function getPnlToken() {
+        return sessionStorage.getItem(PNL_TOKEN_KEY) || '';
+    }
+
+    function isPnlUnlocked() {
+        return !!getPnlToken();
+    }
+
+    function clearPnlAuth() {
+        sessionStorage.removeItem(PNL_TOKEN_KEY);
+    }
+
+    function pnlAuthHeaders(extra) {
+        const headers = Object.assign({ 'X-Pnl-Token': getPnlToken() }, extra || {});
+        return headers;
+    }
+
+    function openPnlAuthModal(tabEl) {
+        pnlPendingTabEl = tabEl;
+        document.getElementById('pnl-auth-password').value = '';
+        document.getElementById('pnl-auth-error').textContent = '';
+        document.getElementById('pnl-auth-overlay').classList.add('active');
+        setTimeout(() => document.getElementById('pnl-auth-password').focus(), 50);
+    }
+
+    function closePnlAuthModal() {
+        document.getElementById('pnl-auth-overlay').classList.remove('active');
+        pnlPendingTabEl = null;
+    }
+
+    async function submitPnlAuth() {
+        const input = document.getElementById('pnl-auth-password');
+        const errorEl = document.getElementById('pnl-auth-error');
+        const password = input.value;
+        if (!password) {
+            errorEl.textContent = '请输入密码';
+            input.focus();
+            return;
+        }
+        errorEl.textContent = '';
+        try {
+            const response = await fetch('/data/pnl/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const result = await response.json();
+            if (!result.success || !result.token) {
+                errorEl.textContent = result.message || '密码错误，请重试';
+                input.select();
+                return;
+            }
+            sessionStorage.setItem(PNL_TOKEN_KEY, result.token);
+            const tabEl = pnlPendingTabEl;
+            closePnlAuthModal();
+            if (tabEl) {
+                enterPnlTab(tabEl);
+            }
+        } catch (error) {
+            console.error('盈亏密码验证失败:', error);
+            errorEl.textContent = '验证失败，请重试';
+        }
+    }
+
+    function enterPnlTab(el) {
+        document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('pnl-content').classList.add('active');
+        loadPnlData();
+    }
+
     function switchMainTab(type, el) {
+        if (type === 'pnl') {
+            if (!isPnlUnlocked()) {
+                openPnlAuthModal(el);
+                return;
+            }
+            enterPnlTab(el);
+            return;
+        }
         document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         el.classList.add('active');
@@ -2067,6 +2355,228 @@
         } else {
             $(type, 'content').classList.add('active');
             adjustAllTables();
+        }
+    }
+
+    function handlePnlUnauthorized(result, tabEl) {
+        if (result && result.unauthorized) {
+            clearPnlAuth();
+            openPnlAuthModal(tabEl || document.querySelector('.main-tab[data-type="pnl"]'));
+            return true;
+        }
+        return false;
+    }
+
+    function todayDateStr() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    function formatMoney(value) {
+        const num = Number(value) || 0;
+        const fixed = num.toFixed(2);
+        const parts = fixed.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return parts.join('.');
+    }
+
+    function formatPnl(value) {
+        const num = Number(value) || 0;
+        const prefix = num > 0 ? '+' : '';
+        return prefix + formatMoney(num);
+    }
+
+    function pnlClass(value) {
+        const num = Number(value) || 0;
+        if (num > 0) return 'success';
+        if (num < 0) return 'fail';
+        return '';
+    }
+
+    function filterPnlRecords(records) {
+        if (!pnlFilter || pnlFilter <= 0) return records.slice();
+        const cutoff = new Date();
+        cutoff.setHours(0, 0, 0, 0);
+        cutoff.setDate(cutoff.getDate() - pnlFilter + 1);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        return records.filter(row => row.date >= cutoffStr);
+    }
+
+    function renderPnlStats() {
+        const summary = pnlData.summary || {};
+        const cumulative = summary.cumulativePnl || 0;
+        const cumulativeClass = pnlClass(cumulative);
+        document.getElementById('pnl-stats').innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value ${cumulativeClass}">${formatPnl(cumulative)}</div>
+                <div class="stat-label">累积盈亏</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${formatMoney(summary.totalTicket || 0)}</div>
+                <div class="stat-label">累计打票</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${formatMoney(summary.totalWin || 0)}</div>
+                <div class="stat-label">累计中奖</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${summary.totalDays || 0}</div>
+                <div class="stat-label">记录天数</div>
+            </div>`;
+    }
+
+    function renderPnlTable() {
+        const tbody = document.getElementById('pnl-table-body');
+        const records = filterPnlRecords(pnlData.records || []);
+        tbody.innerHTML = '';
+        if (!records.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-hint">暂无记录，请在上方录入</td></tr>';
+            return;
+        }
+        records.slice().reverse().forEach(row => {
+            const tr = document.createElement('tr');
+            tr.className = 'pnl-row-clickable' + (pnlSelectedDate === row.date ? ' pnl-row-selected' : '');
+            tr.onclick = () => fillPnlForm(row);
+            tr.innerHTML = `
+                <td class="period-cell">${row.date}</td>
+                <td>${formatMoney(row.ticketAmount)}</td>
+                <td>${formatMoney(row.winAmount)}</td>
+                <td class="${pnlClass(row.dailyPnl)}">${formatPnl(row.dailyPnl)}</td>
+                <td class="${pnlClass(row.cumulativePnl)}">${formatPnl(row.cumulativePnl)}</td>
+                <td><button type="button" class="pnl-delete-btn" onclick="event.stopPropagation(); deletePnlRecord('${row.date}')">删除</button></td>`;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function fillPnlForm(row) {
+        pnlSelectedDate = row.date;
+        document.getElementById('pnl-date').value = row.date;
+        document.getElementById('pnl-ticket').value = row.ticketAmount;
+        document.getElementById('pnl-win').value = row.winAmount;
+        document.getElementById('pnl-submit-btn').textContent = '更新';
+        renderPnlTable();
+    }
+
+    function resetPnlForm() {
+        pnlSelectedDate = null;
+        document.getElementById('pnl-date').value = todayDateStr();
+        document.getElementById('pnl-ticket').value = '';
+        document.getElementById('pnl-win').value = '';
+        document.getElementById('pnl-submit-btn').textContent = '保存';
+        renderPnlTable();
+    }
+
+    function setPnlFilter(days, el) {
+        pnlFilter = days;
+        el.parentElement.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        el.classList.add('active');
+        renderPnlTable();
+    }
+
+    async function loadPnlData() {
+        try {
+            const response = await fetch('/data/pnl', {
+                headers: pnlAuthHeaders()
+            });
+            if (!response.ok) throw new Error('网络响应异常: ' + response.status);
+            const result = await response.json();
+            if (handlePnlUnauthorized(result)) {
+                return;
+            }
+            if (result.success === false) {
+                throw new Error(result.message || '加载失败');
+            }
+            pnlData = {
+                records: result.records || [],
+                summary: result.summary || {}
+            };
+            renderPnlStats();
+            renderPnlTable();
+        } catch (error) {
+            console.error('加载盈亏数据失败:', error);
+            document.getElementById('pnl-table-body').innerHTML =
+                '<tr><td colspan="6" class="error-message">数据加载失败，请刷新重试</td></tr>';
+        }
+    }
+
+    async function submitPnlEntry() {
+        const date = document.getElementById('pnl-date').value;
+        const ticketRaw = document.getElementById('pnl-ticket').value.trim();
+        const winRaw = document.getElementById('pnl-win').value.trim();
+        if (!date) {
+            alert('请选择日期');
+            return;
+        }
+        const ticketAmount = ticketRaw === '' ? 0 : parseFloat(ticketRaw);
+        const winAmount = winRaw === '' ? 0 : parseFloat(winRaw);
+        if (Number.isNaN(ticketAmount) || Number.isNaN(winAmount)) {
+            alert('金额格式无效');
+            return;
+        }
+        if (ticketAmount < 0 || winAmount < 0) {
+            alert('金额不能为负数');
+            return;
+        }
+        const submitBtn = document.getElementById('pnl-submit-btn');
+        submitBtn.disabled = true;
+        try {
+            const response = await fetch('/data/pnl', {
+                method: 'POST',
+                headers: pnlAuthHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    date,
+                    ticketAmount,
+                    winAmount
+                })
+            });
+            const result = await response.json();
+            if (handlePnlUnauthorized(result)) {
+                return;
+            }
+            if (result.success) {
+                pnlData.records = result.records || [];
+                pnlData.summary = result.summary || {};
+                renderPnlStats();
+                renderPnlTable();
+                resetPnlForm();
+            } else {
+                alert(result.message || '保存失败');
+            }
+        } catch (error) {
+            console.error('保存盈亏失败:', error);
+            alert('保存失败，请重试');
+        } finally {
+            submitBtn.disabled = false;
+        }
+    }
+
+    async function deletePnlRecord(date) {
+        if (!confirm('确定删除 ' + date + ' 的记录吗？')) return;
+        try {
+            const response = await fetch('/data/pnl/delete', {
+                method: 'POST',
+                headers: pnlAuthHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ date })
+            });
+            const result = await response.json();
+            if (handlePnlUnauthorized(result)) {
+                return;
+            }
+            if (result.success) {
+                pnlData.records = result.records || [];
+                pnlData.summary = result.summary || {};
+                if (pnlSelectedDate === date) resetPnlForm();
+                renderPnlStats();
+                renderPnlTable();
+            } else {
+                alert(result.message || '删除失败');
+            }
+        } catch (error) {
+            console.error('删除盈亏失败:', error);
+            alert('删除失败，请重试');
         }
     }
 
@@ -3322,6 +3832,7 @@
     }
 
     window.onload = function() {
+        document.getElementById('pnl-date').value = todayDateStr();
         loadData();
         window.addEventListener('resize', () => adjustAllTables());
     };

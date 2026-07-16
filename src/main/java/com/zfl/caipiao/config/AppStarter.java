@@ -5,6 +5,7 @@ import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
+import com.zfl.caipiao.service.PnlService;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -34,6 +35,9 @@ public class AppStarter implements ApplicationRunner {
 
     @Resource
     private DadiService dadiService;
+
+    @Resource
+    private PnlService pnlService;
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
@@ -75,6 +79,9 @@ public class AppStarter implements ApplicationRunner {
 
         dadiService.loadFromExcel(false, fileLocationComparePl3Dadi);
         System.out.println("pl3DadiCompareCache:" + HmCache.getPl3DadiCompareCache().size());
+
+        pnlService.loadFromExcel();
+        System.out.println("pnlCache:" + HmCache.getPnlCache().size());
     }
 
 }

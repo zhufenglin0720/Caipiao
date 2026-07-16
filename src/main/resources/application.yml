@@ -21,5 +21,8 @@ file:
     pl3: D:\彩票\排列三.xlsx
     comparePl3: D:\彩票\排列三对比.xlsx
     comparePl3Dadi: D:\彩票\排列三大底对比.xlsx
+    pnl: D:\彩票\盈亏记录.xlsx
+pnl:
+  password: qqWW22@@
 server:
   port: 10088

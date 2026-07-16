@@ -26,6 +26,8 @@ public class HmCache {
 
     private static final List<DadiCompareDto> PL3_DADI_COMPARE_CACHE = new ArrayList<>();
 
+    private static final List<PnlRecordDto> PNL_CACHE = new ArrayList<>();
+
     public static List<Hm> getSdCache() {
         return SD_CACHE;
     }
@@ -48,6 +50,19 @@ public class HmCache {
 
     public static List<DadiCompareDto> getPl3DadiCompareCache() {
         return PL3_DADI_COMPARE_CACHE;
+    }
+
+    public static List<PnlRecordDto> getPnlCache() {
+        return PNL_CACHE;
+    }
+
+    public static void addPnlCache(PnlRecordDto dto) {
+        PNL_CACHE.add(dto);
+    }
+
+    public static void setPnlCache(List<PnlRecordDto> dtos) {
+        PNL_CACHE.clear();
+        PNL_CACHE.addAll(dtos);
     }
 
     public static void addSdCompareCache(CompareDto compareDto) {
@@ -137,6 +152,18 @@ public class HmCache {
         private String customDadiHm;
 
         private String realHm;
+
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PnlRecordDto {
+
+        private String date;
+
+        private Double ticketAmount;
+
+        private Double winAmount;
 
     }
 }
