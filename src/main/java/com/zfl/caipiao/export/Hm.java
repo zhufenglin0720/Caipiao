@@ -29,6 +29,6 @@ public class Hm {
 
     @Override
     public String toString() {
-        return qh + ":" + q1 + q2 + q3;
+        return q1 + q2 + q3;
     }
 }
