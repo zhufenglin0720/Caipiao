@@ -58,6 +58,7 @@ public class AppStarter implements ApplicationRunner {
         HmCache.setSdCompareCache(sdCompareList.stream().map(compareVO -> new HmCache.CompareDto()
                 .setQh(compareVO.getQh())
                 .setAiHm(compareVO.getAiHm())
+                .setAiZuSanHm(compareVO.getAiZuSanHm())
                 .setRealHm(compareVO.getRealHm())
                 .setAiDingWeiHm(compareVO.getDingWeiQm())
         ).toList());
@@ -69,6 +70,7 @@ public class AppStarter implements ApplicationRunner {
         HmCache.setPl3CompareCache(pl3CompareList.stream().map(compareVO -> new HmCache.CompareDto()
                 .setQh(compareVO.getQh())
                 .setAiHm(compareVO.getAiHm())
+                .setAiZuSanHm(compareVO.getAiZuSanHm())
                 .setRealHm(compareVO.getRealHm())
                 .setAiDingWeiHm(compareVO.getDingWeiQm())
         ).toList());

@@ -10,8 +10,10 @@ import com.zfl.caipiao.constant.Url;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
-import com.zfl.caipiao.utils.AiUtils;
 import com.zfl.caipiao.utils.DateUtils;
+import com.zfl.caipiao.utils.RecommendBetUtils;
+import com.zfl.caipiao.utils.RuleBasedDingWeiUtils;
+import com.zfl.caipiao.utils.RuleBasedPredictUtils;
 import com.zfl.caipiao.utils.ThreadUtils;
 import jakarta.annotation.Resource;
 import jakarta.mail.MessagingException;
@@ -51,14 +53,49 @@ public class GlobalJob {
     @Value("${file.location.comparePl3}")
     private String fileLocationComparePl3;
 
-    private void sendEmailCode(String subject, String sendText) throws MessagingException {
-        MimeMessage message = javaMailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-        helper.setFrom(from);
-        helper.setTo(to.split(","));
-        helper.setSubject(subject);
-        helper.setText(sendText, true);
-        javaMailSender.send(message);
+    @Scheduled(cron = "0 40 18 * * ?")
+    public void applyTask() throws MessagingException, InterruptedException {
+        CountDownLatch latch = new CountDownLatch(2);
+
+        final String[] sdNumber = {null};
+        final String[] pl3Number = {null};
+        ThreadUtils.run(() -> {
+            try {
+                String raw = RuleBasedPredictUtils.get3dPredict();
+                String zuSan = RecommendBetUtils.extractZuSanGroups(raw);
+                sdNumber[0] = RecommendBetUtils.reorderByHitRanks(raw, HmCache.getSdCompareCache());
+                if (StrUtil.isNotBlank(sdNumber[0])) {
+                    HmCache.addSdCompareCache(new HmCache.CompareDto()
+                            .setAiHm(sdNumber[0])
+                            .setAiZuSanHm(zuSan));
+                }
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        ThreadUtils.run(() -> {
+            try {
+                String raw = RuleBasedPredictUtils.getPl3Predict();
+                String zuSan = RecommendBetUtils.extractZuSanGroups(raw);
+                pl3Number[0] = RecommendBetUtils.reorderByHitRanks(raw, HmCache.getPl3CompareCache());
+                if (StrUtil.isNotBlank(pl3Number[0])) {
+                    HmCache.addPl3CompareCache(new HmCache.CompareDto()
+                            .setAiHm(pl3Number[0])
+                            .setAiZuSanHm(zuSan));
+                }
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        latch.await();
+        // 邮件与页面三码均展示前5注（近50期命中共性位次 + 差异化）
+        String msg = EmailConstant.EMAIL_TEMPLATE
+                .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(topNBets(sdNumber[0], 5)))
+                .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(topNBets(pl3Number[0], 5)))
+                .replace("{{TIMESTAMP}}", DateUtil.now());
+        sendEmailCode("今日3D及排三预测（高概率5注）", msg);
     }
 
     @Scheduled(cron = "0 50 18 * * ?")
@@ -66,24 +103,22 @@ public class GlobalJob {
         CountDownLatch latch = new CountDownLatch(2);
         ThreadUtils.run(() -> {
             try {
-                String aiAnswer = AiUtils.get3dDingWeiAi();
-                //获取百位号码
-                if(StrUtil.isNotBlank(aiAnswer) && aiAnswer.contains("百位:") && aiAnswer.contains("十位:") && aiAnswer.contains("个位:")){
-                    String bwAnswer = aiAnswer.substring(3, 16);
-                    String swAnswer = aiAnswer.substring(20, 33);
-                    String gwAnswer = aiAnswer.substring(37, 50);
+                // 七码定位改为纯规则引擎，不再调用 AI
+                String aiAnswer = RuleBasedDingWeiUtils.get3dDingWei();
+                String[] parts = RuleBasedDingWeiUtils.parseParts(aiAnswer);
+                if (parts != null) {
                     List<HmCache.CompareDto> sdCompareCache = HmCache.getSdCompareCache();
-                    if(CollUtil.isNotEmpty(sdCompareCache)){
+                    if (CollUtil.isNotEmpty(sdCompareCache)) {
                         HmCache.CompareDto compareDto = sdCompareCache.get(sdCompareCache.size() - 1);
-                        if(compareDto.getAiDingWeiHm() == null){
+                        if (compareDto.getAiDingWeiHm() == null) {
                             compareDto.setAiDingWeiHm(aiAnswer);
                         }
                     }
                     sendEmailCode("3D定位7码推荐", EmailConstant.DingWeiAskContent
                             .replace("{type}", "3D")
-                            .replace("{bw}", bwAnswer)
-                            .replace("{sw}", swAnswer)
-                            .replace("{gw}", gwAnswer)
+                            .replace("{bw}", parts[0])
+                            .replace("{sw}", parts[1])
+                            .replace("{gw}", parts[2])
                     );
                 }
             } catch (MessagingException e) {
@@ -95,70 +130,54 @@ public class GlobalJob {
 
         ThreadUtils.run(() -> {
             try {
-                String pl3Answer = AiUtils.getPl3DingWeiAi();
-                if(StrUtil.isNotBlank(pl3Answer) && pl3Answer.contains("百位:") && pl3Answer.contains("十位:") && pl3Answer.contains("个位:")){
-                    String bwAnswer = pl3Answer.substring(3, 16);
-                    String swAnswer = pl3Answer.substring(20, 33);
-                    String gwAnswer = pl3Answer.substring(37, 50);
+                String pl3Answer = RuleBasedDingWeiUtils.getPl3DingWei();
+                String[] parts = RuleBasedDingWeiUtils.parseParts(pl3Answer);
+                if (parts != null) {
                     List<HmCache.CompareDto> pl3CompareCache = HmCache.getPl3CompareCache();
-                    if(CollUtil.isNotEmpty(pl3CompareCache)){
+                    if (CollUtil.isNotEmpty(pl3CompareCache)) {
                         HmCache.CompareDto compareDto = pl3CompareCache.get(pl3CompareCache.size() - 1);
-                        if(compareDto.getAiDingWeiHm() == null){
+                        if (compareDto.getAiDingWeiHm() == null) {
                             compareDto.setAiDingWeiHm(pl3Answer);
                         }
                     }
                     sendEmailCode("排列3定位7码推荐", EmailConstant.DingWeiAskContent
                             .replace("{type}", "排列三")
-                            .replace("{bw}", bwAnswer)
-                            .replace("{sw}", swAnswer)
-                            .replace("{gw}", gwAnswer)
+                            .replace("{bw}", parts[0])
+                            .replace("{sw}", parts[1])
+                            .replace("{gw}", parts[2])
                     );
                 }
-            }catch (Exception e){
+            } catch (Exception e) {
                 e.printStackTrace();
-            }finally {
+            } finally {
                 latch.countDown();
             }
         });
         latch.await();
     }
 
-    @Scheduled(cron = "0 40 18 * * ?")
-    public void applyTask() throws MessagingException, InterruptedException {
-        CountDownLatch latch = new CountDownLatch(2);
-
-        final String[] sdNumber = {null};
-        final String[] pl3Number = {null};
-        ThreadUtils.run(() -> {
-            try {
-                sdNumber[0] = AiUtils.get3dAi();
-                if (StrUtil.isNotBlank(sdNumber[0])) {
-                    HmCache.addSdCompareCache(new HmCache.CompareDto().setAiHm(sdNumber[0]));
-                }
-            } finally {
-                latch.countDown();
+    private static String topNBets(String pred, int n) {
+        if (StrUtil.isBlank(pred) || n <= 0) {
+            return pred;
+        }
+        String[] parts = pred.split(",");
+        StringBuilder sb = new StringBuilder();
+        int count = 0;
+        for (String p : parts) {
+            String t = p.trim();
+            if (t.isEmpty()) {
+                continue;
             }
-        });
-
-        ThreadUtils.run(() -> {
-            try {
-                pl3Number[0] = AiUtils.getPl3Ai();
-                if (StrUtil.isNotBlank(pl3Number[0])) {
-                    HmCache.addPl3CompareCache(new HmCache.CompareDto().setAiHm(pl3Number[0]));
-                }
-            } finally {
-                latch.countDown();
+            if (count > 0) {
+                sb.append(',');
             }
-        });
-
-        latch.await();
-        String msg = EmailConstant.EMAIL_TEMPLATE
-                .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdNumber[0]))
-                .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Number[0]))
-                .replace("{{TIMESTAMP}}", DateUtil.now());
-        sendEmailCode("今日3D及排三预测", msg);
+            sb.append(t);
+            if (++count >= n) {
+                break;
+            }
+        }
+        return sb.toString();
     }
-
     @Scheduled(cron = "0 0 22 * * ?")
     public void setDataTask() throws Exception {
         List<Hm> sdCache = HmCache.getSdCache();
@@ -185,9 +204,9 @@ public class GlobalJob {
         List<HmCache.CompareDto> sdCompareCache = HmCache.getSdCompareCache();
         HmCache.CompareDto sdCompareDto = sdCompareCache.get(sdCompareCache.size() - 1);
 
-        String pl3AiHm = pl3CompareDto.getAiHm();
+        String pl3AiHm = topNBets(pl3CompareDto.getAiHm(), 5);
         String pl3RealHm = pl3CompareDto.getRealHm();
-        String sdAiHm = sdCompareDto.getAiHm();
+        String sdAiHm = topNBets(sdCompareDto.getAiHm(), 5);
         String sdRealHm = sdCompareDto.getRealHm();
         String result = (checkSuccess(sdAiHm, sdRealHm) || checkSuccess(pl3AiHm, pl3RealHm)) ? "恭喜，中奖了！！！" : "很遗憾未中奖，下期必中！！！";
         sendEmailCode("今日开奖通知", EmailConstant.NOTICE_MSG
@@ -210,10 +229,10 @@ public class GlobalJob {
             return false;
         }
 
-        // 3. 将aiHm的字符存入Set，查询时间复杂度降为O(1)
-        String[] split = aiHm.split(",");
+        // 3. 仅比对展示的前5注
+        String[] split = topNBets(aiHm, 5).split(",");
         for (String str : split){
-            if(realHm.equals(str)){
+            if(realHm.equals(str.trim())){
                 return true;
             }
         }
@@ -289,11 +308,35 @@ public class GlobalJob {
 
         //录入本地预测结果
         if(is3D){
-            List<CompareVO> insertList = HmCache.getSdCompareCache().stream().map(compareDto -> CompareVO.builder().qh(compareDto.getQh()).aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
+            List<CompareVO> insertList = HmCache.getSdCompareCache().stream().map(compareDto -> CompareVO.builder()
+                    .qh(compareDto.getQh())
+                    .aiHm(compareDto.getAiHm())
+                    .aiZuSanHm(StrUtil.blankToDefault(compareDto.getAiZuSanHm(),
+                            RecommendBetUtils.extractZuSanGroups(compareDto.getAiHm())))
+                    .realHm(compareDto.getRealHm())
+                    .dingWeiQm(compareDto.getAiDingWeiHm())
+                    .build()).toList();
             EasyExcel.write(fileLocationCompare3d, CompareVO.class).sheet("3D比对结果").doWrite(insertList);
         }else{
-            List<CompareVO> insertList = HmCache.getPl3CompareCache().stream().map(compareDto -> CompareVO.builder().qh(compareDto.getQh()).aiHm(compareDto.getAiHm()).realHm(compareDto.getRealHm()).dingWeiQm(compareDto.getAiDingWeiHm()).build()).toList();
+            List<CompareVO> insertList = HmCache.getPl3CompareCache().stream().map(compareDto -> CompareVO.builder()
+                    .qh(compareDto.getQh())
+                    .aiHm(compareDto.getAiHm())
+                    .aiZuSanHm(StrUtil.blankToDefault(compareDto.getAiZuSanHm(),
+                            RecommendBetUtils.extractZuSanGroups(compareDto.getAiHm())))
+                    .realHm(compareDto.getRealHm())
+                    .dingWeiQm(compareDto.getAiDingWeiHm())
+                    .build()).toList();
             EasyExcel.write(fileLocationComparePl3, CompareVO.class).sheet("排列三比对结果").doWrite(insertList);
         }
+    }
+
+    private void sendEmailCode(String subject, String sendText) throws MessagingException {
+//        MimeMessage message = javaMailSender.createMimeMessage();
+//        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+//        helper.setFrom(from);
+//        helper.setTo(to.split(","));
+//        helper.setSubject(subject);
+//        helper.setText(sendText, true);
+//        javaMailSender.send(message);
     }
 }

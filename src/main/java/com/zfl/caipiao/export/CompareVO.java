@@ -21,6 +21,9 @@ public class CompareVO {
     @ExcelProperty("AI预测号码")
     private String aiHm;
 
+    @ExcelProperty("AI组三")
+    private String aiZuSanHm;
+
     @ExcelProperty("AI预测七码")
     private String dingWeiQm;
 

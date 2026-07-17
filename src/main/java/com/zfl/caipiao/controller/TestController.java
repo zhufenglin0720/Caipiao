@@ -22,4 +22,9 @@ public class TestController {
     public void applyDingWeiTask() throws Exception {
         globalJob.applyDingWeiTask();
     }
+
+    @GetMapping("/checkApply")
+    public void setDataTask() throws Exception {
+        globalJob.setDataTask();
+    }
 }

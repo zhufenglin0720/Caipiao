@@ -135,6 +135,9 @@ public class HmCache {
 
         private String aiHm;
 
+        /** 组三组选（去重形态，如 112,334） */
+        private String aiZuSanHm;
+
         private String aiDingWeiHm;
 
         private String realHm;

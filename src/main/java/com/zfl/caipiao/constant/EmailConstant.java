@@ -23,7 +23,7 @@ public class EmailConstant {
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>🎯 今日彩票预测</h1>
+                        <h1>🎯 今日彩票预测（高概率5注）</h1>
                     </div>
                     <div class="content">
                         <div class="prediction-box">
