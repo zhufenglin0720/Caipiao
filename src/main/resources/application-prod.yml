@@ -8,7 +8,7 @@ file:
     comparePl3Dadi: /jdk/app/caipiao/file/排列三大底对比.xlsx
     pnl: /jdk/app/caipiao/file/盈亏记录.xlsx
 pnl:
-  password: qqWW22@@
+  password: 112233
 spring:
   mail:
     to: 1162220289@qq.com,18118235@qq.com,13269695159@163.com
