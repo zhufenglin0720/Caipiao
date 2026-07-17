@@ -331,12 +331,12 @@ public class GlobalJob {
     }
 
     private void sendEmailCode(String subject, String sendText) throws MessagingException {
-//        MimeMessage message = javaMailSender.createMimeMessage();
-//        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-//        helper.setFrom(from);
-//        helper.setTo(to.split(","));
-//        helper.setSubject(subject);
-//        helper.setText(sendText, true);
-//        javaMailSender.send(message);
+        MimeMessage message = javaMailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setFrom(from);
+        helper.setTo(to.split(","));
+        helper.setSubject(subject);
+        helper.setText(sendText, true);
+        javaMailSender.send(message);
     }
 }
