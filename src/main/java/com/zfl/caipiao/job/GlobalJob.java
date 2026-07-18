@@ -16,11 +16,13 @@ import com.zfl.caipiao.utils.RuleBasedDingWeiUtils;
 import com.zfl.caipiao.utils.RuleBasedPredictUtils;
 import jakarta.annotation.Resource;
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -277,12 +279,12 @@ public class GlobalJob {
     }
 
     private void sendEmailCode(String subject, String sendText) throws MessagingException {
-//        MimeMessage message = javaMailSender.createMimeMessage();
-//        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-//        helper.setFrom(from);
-//        helper.setTo(to.split(","));
-//        helper.setSubject(subject);
-//        helper.setText(sendText, true);
-//        javaMailSender.send(message);
+        MimeMessage message = javaMailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setFrom(from);
+        helper.setTo(to.split(","));
+        helper.setSubject(subject);
+        helper.setText(sendText, true);
+        javaMailSender.send(message);
     }
 }
