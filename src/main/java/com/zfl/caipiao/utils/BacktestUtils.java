@@ -13,13 +13,14 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 近 50 期滚动回测：3D / 排三分开专项预测。
- * 目标：直选近50期≥8；注数≤100。
+ * 近 100 期滚动回测：3D / 排三分开专项预测。
+ * 目标：直选≥20、组选≥50；注数默认≤100，不够可扩到 150。
  */
 public class BacktestUtils {
 
-    private static final int EVAL_PERIODS = 50;
-    private static final int ZX_TARGET = 8;
+    private static final int EVAL_PERIODS = 100;
+    private static final int ZX_TARGET = 20;
+    private static final int GROUP_TARGET = 50;
     private static final int WARMUP_MIN = 80;
     private static final String DIR_3D = "D:\\彩票\\3D.xlsx";
     private static final String DIR_PL3 = "D:\\彩票\\排列三.xlsx";
@@ -28,8 +29,10 @@ public class BacktestUtils {
     public static void main(String[] args) throws Exception {
         muteLogs();
         StringBuilder sb = new StringBuilder();
-        sb.append("说明：评估最近 ").append(EVAL_PERIODS).append(" 期；注数≤100；")
-                .append("3D/排三分专项；目标直选≥").append(ZX_TARGET).append("\n\n");
+        sb.append("说明：评估最近 ").append(EVAL_PERIODS).append(" 期；注数≤")
+                .append(RuleBasedPredictUtils.maxBetLimit())
+                .append("；3D/排三分专项；目标直选≥").append(ZX_TARGET)
+                .append(" 组选≥").append(GROUP_TARGET).append("\n\n");
         runOne("福彩3D", DIR_3D, RuleBasedPredictUtils.GameKind.SD_3D, sb);
         sb.append('\n');
         runOne("排列三", DIR_PL3, RuleBasedPredictUtils.GameKind.PL3, sb);
@@ -85,6 +88,7 @@ public class BacktestUtils {
         out.append("预热后").append(HitRankStats.of(toDigits(all.subList(0, start))).describe()).append('\n');
 
         int zxHit = 0, groupHit = 0;
+        int maxBetN = 0;
         List<String> details = new ArrayList<>();
 
         long t0 = System.currentTimeMillis();
@@ -105,6 +109,7 @@ public class BacktestUtils {
                 groupHit++;
             }
             int betN = pred == null || pred.isEmpty() ? 0 : pred.split(",").length;
+            maxBetN = Math.max(maxBetN, betN);
             details.add(String.format("期号=%s 开奖=%s 直选命中=%s 组选命中=%s | 注数=%d 纠偏%s | 预测=%s",
                     actualHm.getQh(), actual, zx ? "是" : "否", group ? "是" : "否",
                     betN, Arrays.toString(periodSeed.primarySeed),
@@ -120,7 +125,7 @@ public class BacktestUtils {
         }
         long cost = System.currentTimeMillis() - t0;
         int n = EVAL_PERIODS;
-        out.append(String.format("回测完成：评估=%d期 耗时=%dms%n", n, cost));
+        out.append(String.format("回测完成：评估=%d期 耗时=%dms 最大注数=%d%n", n, cost, maxBetN));
         out.append(String.format("总命中：直选=%d/%d 组选=%d/%d%n", zxHit, n, groupHit, n));
 
         out.append("--- 逐期明细（预测 / 开奖 / 是否命中）---\n");
@@ -128,9 +133,9 @@ public class BacktestUtils {
             out.append(d).append('\n');
         }
 
-        boolean pass = zxHit >= ZX_TARGET;
-        out.append(String.format("--- 达标：直选近%d期≥%d → 实际=%d → %s%n",
-                EVAL_PERIODS, ZX_TARGET, zxHit, pass ? "达标" : "未达标"));
+        boolean pass = zxHit >= ZX_TARGET && groupHit >= GROUP_TARGET;
+        out.append(String.format("--- 达标：直选≥%d 组选≥%d → 实际直选=%d 组选=%d → %s%n",
+                ZX_TARGET, GROUP_TARGET, zxHit, groupHit, pass ? "达标" : "未达标"));
         out.append(String.format("【汇总】%s 直选%d/%d 组选%d/%d %s%n",
                 name, zxHit, n, groupHit, n, pass ? "【达标】" : "【未达标】"));
     }

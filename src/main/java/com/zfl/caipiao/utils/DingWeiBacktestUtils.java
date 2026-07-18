@@ -12,14 +12,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 近 50 期七码定位回测：3D / 排三分开专项。
+ * 近 100 期七码定位回测：3D / 排三分开专项。
  * 命中定义：百/十/个三位数字均落入对应 Top7（与前端 checkDingWeiMatch 一致）。
- * 目标：近50期≥30。
+ * 目标：近100期≥65。
  */
 public class DingWeiBacktestUtils {
 
-    private static final int EVAL_PERIODS = 50;
-    private static final int HIT_TARGET = 30;
+    private static final int EVAL_PERIODS = 100;
+    private static final int HIT_TARGET = 65;
     private static final int WARMUP_MIN = 80;
     private static final String DIR_3D = "D:\\彩票\\3D.xlsx";
     private static final String DIR_PL3 = "D:\\彩票\\排列三.xlsx";

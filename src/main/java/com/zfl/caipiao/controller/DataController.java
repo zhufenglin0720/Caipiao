@@ -230,6 +230,7 @@ public class DataController {
             Map<String, String> map = new HashMap<>();
             map.put("qh", dto.getQh());
             map.put("aiHm", dto.getAiHm());
+            map.put("aiRecommendHm", dto.getAiRecommendHm());
             map.put("aiZuSanHm", dto.getAiZuSanHm());
             map.put("aiDingWeiHm", dto.getAiDingWeiHm());
             map.put("realHm", dto.getRealHm());

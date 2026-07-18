@@ -66,17 +66,39 @@ public class HmCache {
     }
 
     public static void addSdCompareCache(CompareDto compareDto) {
-        if(SD_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE){
-            SD_COMPARE_CACHE.remove(0);
-        }
-        SD_COMPARE_CACHE.add(compareDto);
+        upsertPendingCompare(SD_COMPARE_CACHE, compareDto);
     }
 
     public static void addPl3CompareCache(CompareDto compareDto) {
-        if(PL3_COMPARE_CACHE.size() >= COMPARE_SAVE_SIZE){
-            PL3_COMPARE_CACHE.remove(0);
+        upsertPendingCompare(PL3_COMPARE_CACHE, compareDto);
+    }
+
+    /**
+     * 同期重复预测：若最新一条尚未开奖（realHm 为空），覆盖更新，避免追加脏数据导致结果漂移。
+     */
+    private static void upsertPendingCompare(List<CompareDto> cache, CompareDto compareDto) {
+        if (compareDto == null) {
+            return;
         }
-        PL3_COMPARE_CACHE.add(compareDto);
+        if (!cache.isEmpty()) {
+            CompareDto last = cache.get(cache.size() - 1);
+            if (last.getRealHm() == null || last.getRealHm().isBlank()) {
+                last.setAiHm(compareDto.getAiHm());
+                last.setAiZuSanHm(compareDto.getAiZuSanHm());
+                last.setAiRecommendHm(compareDto.getAiRecommendHm());
+                if (compareDto.getAiDingWeiHm() != null) {
+                    last.setAiDingWeiHm(compareDto.getAiDingWeiHm());
+                }
+                if (compareDto.getQh() != null) {
+                    last.setQh(compareDto.getQh());
+                }
+                return;
+            }
+        }
+        if (cache.size() >= COMPARE_SAVE_SIZE) {
+            cache.remove(0);
+        }
+        cache.add(compareDto);
     }
 
     public static void addSdDadiCompareCache(DadiCompareDto dadiCompareDto) {
@@ -137,6 +159,9 @@ public class HmCache {
 
         /** 组三组选（去重形态，如 112,334） */
         private String aiZuSanHm;
+
+        /** 展示/邮件推荐注（5~10注，来自命中位次带） */
+        private String aiRecommendHm;
 
         private String aiDingWeiHm;
 

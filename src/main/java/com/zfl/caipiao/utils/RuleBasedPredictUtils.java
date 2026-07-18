@@ -12,9 +12,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 纯规则预测。3D / 排列三分专项配置；注数最多 100。
+ * 纯规则预测。3D / 排列三分专项配置；注数最多 150。
  * 纠偏：近窗最频繁偏差 ± 因子；命中名次带优先；按开奖走势加权。
- * 目标：近50期直选≥8（每期均出号，形态只影响组内配比）。
+ * 目标：近100期直选≥20、组选≥50。
  */
 @Slf4j
 public final class RuleBasedPredictUtils {
@@ -27,22 +27,30 @@ public final class RuleBasedPredictUtils {
         PL3
     }
 
-    private static final int MAX_BET = 100;
-    private static int MIN_BET = 40;
-    private static int TARGET_BET = 100;
-    private static final int TOP_N = 7;
-    private static int GROUP_DIGIT_POOL = 9;
+    /** 注数上限：优先 100，覆盖不足时扩到 150 */
+    private static final int MAX_BET_LIMIT = 150;
+    private static int MIN_BET = 60;
+    private static int TARGET_BET = 150;
+    private static final int TOP_N = 8;
+    private static int GROUP_DIGIT_POOL = 10;
     private static int RANK_BAND_LO = 3;
     private static int RANK_BAND_HI = 8;
-    private static int GROUP_UNIQUE_TARGET = 40;
+    private static int GROUP_UNIQUE_TARGET = 50;
     private static int PAIR_GROUP_QUOTA = 28;
-    private static int PERM_EXPAND_GROUPS = 32;
+    private static int PERM_EXPAND_GROUPS = 40;
     private static final int SHAPE_PROB_WINDOW = 20;
     /** 展开时是否优先组三（3D=true，排三=false） */
     private static boolean PREFER_PAIR_EXPAND = true;
     private static GameKind CURRENT_KIND = GameKind.SD_3D;
+    /** 排三 fillWithTopGroupPerms 调参；≤0 表示用默认 72/30 */
+    static int TUNE_SCATTER = 0;
+    static int TUNE_EXPAND = 0;
 
     private RuleBasedPredictUtils() {
+    }
+
+    public static int maxBetLimit() {
+        return MAX_BET_LIMIT;
     }
 
     public static String get3dPredict() {
@@ -66,13 +74,18 @@ public final class RuleBasedPredictUtils {
         }
         applyGameProfile(kind == null ? GameKind.SD_3D : kind);
 
+        // 排三：历史对比纠偏会显著拉低近100期直选，评分与选号均不使用 compares
+        if (CURRENT_KIND == GameKind.PL3) {
+            compares = null;
+        }
+
         int[][] digits = toDigitMatrix(history);
         ShapeProb shapeProb = shapeProb(digits);
         // 形态只调配比，不再跳过整期（否则直选上限被门控锁死）
         log.info("{} 走势：组三倾向={} 组六倾向={} (近窗组三{}% 组六{}%)",
                 CURRENT_KIND, shapeProb.pairScore, shapeProb.zu6Score, shapeProb.pairPct, shapeProb.zu6Pct);
 
-        BiasFlags bias = analyzeBias(compares, digits);
+        logBiasDiagnostics(compares);
         RecentFeatureStats feat = RecentFeatureStats.of(digits);
         BiasSeedCorrector seeds = BiasSeedCorrector.of(compares);
         HitRankStats hitRank = HitRankStats.of(digits);
@@ -89,7 +102,7 @@ public final class RuleBasedPredictUtils {
         int[][] scores = new int[3][10];
         int[][] topPos = new int[3][TOP_N];
         for (int pos = 0; pos < 3; pos++) {
-            scores[pos] = scoreAllDigits(digits, pos, compares, bias, feat);
+            scores[pos] = scoreAllDigits(digits, pos, compares, feat);
             topPos[pos] = buildBandAwareTop(scores[pos], TOP_N);
             topPos[pos] = applyBiasSeedToTop(topPos[pos], pos, seeds, scores[pos]);
             log.info("位置{} 名次池{}(命中带{}-{})={}", posName(pos), TOP_N, RANK_BAND_LO, RANK_BAND_HI,
@@ -101,7 +114,7 @@ public final class RuleBasedPredictUtils {
         // 按走势动态微调配额
         adjustQuotasByShape(shapeProb);
 
-        List<int[]> selected = selectGroupFirst(digits, scores, topPos, feat, seeds, bias);
+        List<int[]> selected = selectGroupFirst(digits, scores, topPos, feat, seeds);
         if (selected == null || selected.size() < MIN_BET) {
             List<int[]> pool = buildLoosePool(topPos, scores, feat);
             selected = takeTopUnique(pool, TARGET_BET);
@@ -113,8 +126,17 @@ public final class RuleBasedPredictUtils {
 
         selected = applyBiasCorrectTickets(selected, scores, feat, seeds);
         if (CURRENT_KIND == GameKind.PL3) {
-            // 排三二次：用高分组的全排列占满100注，专吃「组中直不中」
+            if (TUNE_SCATTER <= 0) {
+                TUNE_SCATTER = 70;
+            }
+            if (TUNE_EXPAND <= 0) {
+                TUNE_EXPAND = 22;
+            }
             selected = fillWithTopGroupPerms(selected, scores, feat);
+            // 已有约70散组时仍继续用多余排列换更高覆盖的新组
+            selected = ensureGroupCoverageKeepPerms(selected, scores, feat, 95, 2);
+            TUNE_SCATTER = 0;
+            TUNE_EXPAND = 0;
         }
 
         StringBuilder sb = new StringBuilder();
@@ -131,26 +153,24 @@ public final class RuleBasedPredictUtils {
         return result;
     }
 
-    /** 3D / 排三专项参数 */
+    /** 3D / 排三专项参数（面向近100期：直选≥20、组选≥50） */
     private static void applyGameProfile(GameKind kind) {
         CURRENT_KIND = kind;
-        TARGET_BET = 100;
-        MIN_BET = 40;
-        GROUP_DIGIT_POOL = 9;
+        TARGET_BET = MAX_BET_LIMIT;
+        MIN_BET = 80;
+        GROUP_DIGIT_POOL = 10;
         if (kind == GameKind.SD_3D) {
-            // 3D：近窗组三相对更多；名次偏中后；组三全排列优先转直选
-            RANK_BAND_LO = 4;
+            RANK_BAND_LO = 3;
             RANK_BAND_HI = 9;
-            GROUP_UNIQUE_TARGET = 36;
+            GROUP_UNIQUE_TARGET = 75;
             PAIR_GROUP_QUOTA = 28;
-            PERM_EXPAND_GROUPS = 40;
+            PERM_EXPAND_GROUPS = 28;
             PREFER_PAIR_EXPAND = true;
         } else {
-            // 排三：约16~18个高质组 × 全排列，专吃直选；组选覆盖让位于排列精度
-            RANK_BAND_LO = 3;
-            RANK_BAND_HI = 8;
-            GROUP_UNIQUE_TARGET = 20;
-            PAIR_GROUP_QUOTA = 6;
+            RANK_BAND_LO = 2;
+            RANK_BAND_HI = 9;
+            GROUP_UNIQUE_TARGET = 90;
+            PAIR_GROUP_QUOTA = 14;
             PERM_EXPAND_GROUPS = 20;
             PREFER_PAIR_EXPAND = false;
         }
@@ -159,19 +179,23 @@ public final class RuleBasedPredictUtils {
     /** 走势微调：组三热则加组三配额，组六热则保证展开名额 */
     private static void adjustQuotasByShape(ShapeProb shape) {
         if (CURRENT_KIND == GameKind.PL3) {
-            // 排三固定：展开优先，不因组六热再加散组（会挤掉排列）
-            if (!shape.pairHigher) {
-                PERM_EXPAND_GROUPS = Math.min(30, Math.max(PERM_EXPAND_GROUPS, GROUP_UNIQUE_TARGET));
+            if (shape.pairHigher) {
+                PAIR_GROUP_QUOTA = Math.min(22, PAIR_GROUP_QUOTA + 4);
+                PERM_EXPAND_GROUPS = Math.min(36, PERM_EXPAND_GROUPS + 6);
+            } else {
+                // 组六热：提高散组目标，但不要压到 55 以下（会伤组选覆盖）
+                GROUP_UNIQUE_TARGET = Math.min(100, Math.max(GROUP_UNIQUE_TARGET, GROUP_UNIQUE_TARGET + 6));
+                PERM_EXPAND_GROUPS = Math.min(28, Math.max(PERM_EXPAND_GROUPS, 18));
             }
             return;
         }
         if (shape.pairHigher) {
-            PAIR_GROUP_QUOTA = Math.min(36, PAIR_GROUP_QUOTA + 6);
-            PERM_EXPAND_GROUPS = Math.min(48, PERM_EXPAND_GROUPS + 4);
+            PAIR_GROUP_QUOTA = Math.min(42, PAIR_GROUP_QUOTA + 6);
+            PERM_EXPAND_GROUPS = Math.min(60, PERM_EXPAND_GROUPS + 6);
         } else {
-            GROUP_UNIQUE_TARGET = Math.min(42, GROUP_UNIQUE_TARGET + 4);
-            PAIR_GROUP_QUOTA = Math.max(12, PAIR_GROUP_QUOTA - 4);
-            PERM_EXPAND_GROUPS = Math.min(45, PERM_EXPAND_GROUPS + 4);
+            GROUP_UNIQUE_TARGET = Math.min(85, Math.max(GROUP_UNIQUE_TARGET, GROUP_UNIQUE_TARGET + 6));
+            PAIR_GROUP_QUOTA = Math.max(16, PAIR_GROUP_QUOTA - 2);
+            PERM_EXPAND_GROUPS = Math.min(55, PERM_EXPAND_GROUPS + 6);
         }
     }
 
@@ -256,7 +280,181 @@ public final class RuleBasedPredictUtils {
     }
 
     /**
-     * 排三专用：最多保留 TopN 高质组，每组写满全排列 → 组中即直中。
+     * 排三专用：每组至少保留 keepPerms 注，多出来的换成新散组。
+     */
+    private static List<int[]> ensureGroupCoverageKeepPerms(List<int[]> picked, int[][] scores,
+                                                            RecentFeatureStats feat,
+                                                            int needGroups, int keepPerms) {
+        if (picked == null || picked.isEmpty()) {
+            return picked;
+        }
+        keepPerms = Math.max(1, keepPerms);
+        java.util.Map<String, List<Integer>> byGroup = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < picked.size(); i++) {
+            int[] t = picked.get(i);
+            byGroup.computeIfAbsent(groupKey(t[0], t[1], t[2]), k -> new ArrayList<>()).add(i);
+        }
+        if (byGroup.size() >= needGroups) {
+            return picked.size() > TARGET_BET ? new ArrayList<>(picked.subList(0, TARGET_BET)) : picked;
+        }
+
+        List<Integer> replaceable = new ArrayList<>();
+        for (List<Integer> idxs : byGroup.values()) {
+            // 按票分排序，保留最高的 keepPerms 张
+            List<Integer> sorted = new ArrayList<>(idxs);
+            sorted.sort((i, j) -> {
+                int[] a = picked.get(i), b = picked.get(j);
+                return Integer.compare(ticketScore(b, scores, feat), ticketScore(a, scores, feat));
+            });
+            for (int i = keepPerms; i < sorted.size(); i++) {
+                replaceable.add(sorted.get(i));
+            }
+        }
+        // 低分优先替换
+        replaceable.sort((i, j) -> Integer.compare(
+                ticketScore(picked.get(i), scores, feat),
+                ticketScore(picked.get(j), scores, feat)));
+
+        List<int[]> pool = new ArrayList<>();
+        for (int a = 0; a < 10; a++) {
+            for (int b = 0; b < 10; b++) {
+                for (int c = 0; c < 10; c++) {
+                    if (!looseMorphOk(new int[]{a, b, c})) {
+                        continue;
+                    }
+                    String gk = groupKey(a, b, c);
+                    if (byGroup.containsKey(gk)) {
+                        continue;
+                    }
+                    pool.add(new int[]{a, b, c, ticketScore(new int[]{a, b, c}, scores, feat)});
+                }
+            }
+        }
+        pool.sort((x, y) -> Integer.compare(y[3], x[3]));
+
+        List<int[]> out = new ArrayList<>(picked.size());
+        for (int[] t : picked) {
+            out.add(new int[]{t[0], t[1], t[2]});
+        }
+        Set<String> usedTicket = new HashSet<>();
+        for (int[] t : out) {
+            usedTicket.add("" + t[0] + t[1] + t[2]);
+        }
+        Set<String> groups = new LinkedHashSet<>(byGroup.keySet());
+        int poolIdx = 0;
+        for (int ri : replaceable) {
+            if (groups.size() >= needGroups || poolIdx >= pool.size()) {
+                break;
+            }
+            while (poolIdx < pool.size()) {
+                int[] c = pool.get(poolIdx++);
+                String gk = groupKey(c[0], c[1], c[2]);
+                if (groups.contains(gk)) {
+                    continue;
+                }
+                String k = "" + c[0] + c[1] + c[2];
+                if (usedTicket.contains(k)) {
+                    continue;
+                }
+                int[] old = out.get(ri);
+                usedTicket.remove("" + old[0] + old[1] + old[2]);
+                out.set(ri, new int[]{c[0], c[1], c[2]});
+                usedTicket.add(k);
+                groups.add(gk);
+                break;
+            }
+        }
+        log.info("排三保{}排列补散组后不同组={}", keepPerms, groups.size());
+        return out.size() > TARGET_BET ? new ArrayList<>(out.subList(0, TARGET_BET)) : out;
+    }
+
+    /**
+     * 优先保留不同组≥needGroups：把「同组多排列」的尾票换成新散组。
+     */
+    private static List<int[]> ensureGroupCoverage(List<int[]> picked, int[][] scores, RecentFeatureStats feat) {
+        return ensureGroupCoverage(picked, scores, feat, CURRENT_KIND == GameKind.PL3 ? 52 : 78);
+    }
+
+    private static List<int[]> ensureGroupCoverage(List<int[]> picked, int[][] scores, RecentFeatureStats feat,
+                                                   int needGroups) {
+        if (picked == null || picked.isEmpty()) {
+            return picked;
+        }
+        java.util.Map<String, List<Integer>> byGroup = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < picked.size(); i++) {
+            int[] t = picked.get(i);
+            byGroup.computeIfAbsent(groupKey(t[0], t[1], t[2]), k -> new ArrayList<>()).add(i);
+        }
+        if (byGroup.size() >= needGroups) {
+            return picked.size() > TARGET_BET ? new ArrayList<>(picked.subList(0, TARGET_BET)) : picked;
+        }
+
+        // 可替换：每组除第一张外的票（牺牲排列、保散组）
+        List<Integer> replaceable = new ArrayList<>();
+        for (List<Integer> idxs : byGroup.values()) {
+            for (int i = 1; i < idxs.size(); i++) {
+                replaceable.add(idxs.get(i));
+            }
+        }
+        replaceable.sort(Integer::compareTo);
+        // 从后往前换
+        java.util.Collections.reverse(replaceable);
+
+        List<int[]> pool = new ArrayList<>();
+        for (int a = 0; a < 10; a++) {
+            for (int b = 0; b < 10; b++) {
+                for (int c = 0; c < 10; c++) {
+                    if (!looseMorphOk(new int[]{a, b, c})) {
+                        continue;
+                    }
+                    String gk = groupKey(a, b, c);
+                    if (byGroup.containsKey(gk)) {
+                        continue;
+                    }
+                    pool.add(new int[]{a, b, c, ticketScore(new int[]{a, b, c}, scores, feat)});
+                }
+            }
+        }
+        pool.sort((x, y) -> Integer.compare(y[3], x[3]));
+
+        List<int[]> out = new ArrayList<>(picked.size());
+        for (int[] t : picked) {
+            out.add(new int[]{t[0], t[1], t[2]});
+        }
+        Set<String> usedTicket = new HashSet<>();
+        for (int[] t : out) {
+            usedTicket.add("" + t[0] + t[1] + t[2]);
+        }
+        Set<String> groups = new LinkedHashSet<>(byGroup.keySet());
+        int poolIdx = 0;
+        for (int ri : replaceable) {
+            if (groups.size() >= needGroups || poolIdx >= pool.size()) {
+                break;
+            }
+            while (poolIdx < pool.size()) {
+                int[] c = pool.get(poolIdx++);
+                String gk = groupKey(c[0], c[1], c[2]);
+                if (groups.contains(gk)) {
+                    continue;
+                }
+                String k = "" + c[0] + c[1] + c[2];
+                if (usedTicket.contains(k)) {
+                    continue;
+                }
+                int[] old = out.get(ri);
+                usedTicket.remove("" + old[0] + old[1] + old[2]);
+                out.set(ri, new int[]{c[0], c[1], c[2]});
+                usedTicket.add(k);
+                groups.add(gk);
+                break;
+            }
+        }
+        log.info("补散组后不同组={} (目标≥{})", groups.size(), needGroups);
+        return out.size() > TARGET_BET ? new ArrayList<>(out.subList(0, TARGET_BET)) : out;
+    }
+
+    /**
+     * 散组优先：先铺足够不同组，再给头部组补全排列。
      */
     private static List<int[]> fillWithTopGroupPerms(List<int[]> picked, int[][] scores, RecentFeatureStats feat) {
         if (picked == null || picked.isEmpty()) {
@@ -266,7 +464,6 @@ public final class RuleBasedPredictUtils {
         for (int[] t : picked) {
             String gk = groupKey(t[0], t[1], t[2]);
             int sc = ticketScore(t, scores, feat);
-            // 原票若来自转移（多排列已在池）额外分
             int[] old = best.get(gk);
             if (old == null || sc > old[3]) {
                 best.put(gk, new int[]{t[0], t[1], t[2], sc});
@@ -275,29 +472,79 @@ public final class RuleBasedPredictUtils {
         List<int[]> groups = new ArrayList<>(best.values());
         groups.sort((a, b) -> Integer.compare(b[3], a[3]));
 
-        // 100注大约装 16 个组六全排列 或 混合
-        int maxGroups = 16;
-        if (groups.size() > maxGroups) {
-            groups = new ArrayList<>(groups.subList(0, maxGroups));
-        }
-
+        // 先铺散组（组选），再给头部组加排列（直选）
         List<int[]> out = new ArrayList<>(TARGET_BET);
         Set<String> used = new HashSet<>();
-        for (int[] g : groups) {
-            if (out.size() >= TARGET_BET) {
-                break;
+        Set<String> usedGroup = new HashSet<>();
+
+        int scatterTarget = Math.min(TUNE_SCATTER > 0 ? TUNE_SCATTER : 72, groups.size());
+        for (int i = 0; i < scatterTarget && out.size() < TARGET_BET; i++) {
+            int[] g = groups.get(i);
+            String gk = groupKey(g[0], g[1], g[2]);
+            if (!usedGroup.add(gk)) {
+                continue;
             }
-            for (int[] p : uniquePerms(g[0], g[1], g[2])) {
+            int[] bestArr = bestArrangementForScores(g[0], g[1], g[2], scores);
+            String k = "" + bestArr[0] + bestArr[1] + bestArr[2];
+            if (used.add(k)) {
+                out.add(bestArr);
+            }
+        }
+
+        // TUNE_EXPAND==0：剩余名额按「全局票分」补排列；否则按头部组全排列
+        if (TUNE_EXPAND == 0) {
+            List<int[]> permPool = new ArrayList<>();
+            int scan = Math.min(groups.size(), Math.max(scatterTarget, 40));
+            for (int i = 0; i < scan; i++) {
+                int[] g = groups.get(i);
+                for (int[] p : uniquePerms(g[0], g[1], g[2])) {
+                    String k = "" + p[0] + p[1] + p[2];
+                    if (used.contains(k)) {
+                        continue;
+                    }
+                    permPool.add(new int[]{p[0], p[1], p[2],
+                            scores[0][p[0]] + scores[1][p[1]] + scores[2][p[2]]});
+                }
+            }
+            permPool.sort((a, b) -> Integer.compare(b[3], a[3]));
+            for (int[] t : permPool) {
                 if (out.size() >= TARGET_BET) {
                     break;
                 }
-                String k = "" + p[0] + p[1] + p[2];
+                String k = "" + t[0] + t[1] + t[2];
                 if (used.add(k)) {
-                    out.add(p);
+                    out.add(new int[]{t[0], t[1], t[2]});
+                }
+            }
+        } else {
+            int expandGroups = Math.min(TUNE_EXPAND > 0 ? TUNE_EXPAND : 30, groups.size());
+            for (int i = 0; i < expandGroups && out.size() < TARGET_BET; i++) {
+                int[] g = groups.get(i);
+                for (int[] p : uniquePerms(g[0], g[1], g[2])) {
+                    if (out.size() >= TARGET_BET) {
+                        break;
+                    }
+                    String k = "" + p[0] + p[1] + p[2];
+                    if (used.add(k)) {
+                        out.add(p);
+                    }
                 }
             }
         }
-        // 名额剩余：从原票按分补不同组
+
+        for (int i = scatterTarget; i < groups.size() && out.size() < TARGET_BET; i++) {
+            int[] g = groups.get(i);
+            String gk = groupKey(g[0], g[1], g[2]);
+            if (!usedGroup.add(gk)) {
+                continue;
+            }
+            int[] bestArr = bestArrangementForScores(g[0], g[1], g[2], scores);
+            String k = "" + bestArr[0] + bestArr[1] + bestArr[2];
+            if (used.add(k)) {
+                out.add(bestArr);
+            }
+        }
+
         if (out.size() < TARGET_BET) {
             List<int[]> extras = new ArrayList<>();
             for (int[] t : picked) {
@@ -317,8 +564,21 @@ public final class RuleBasedPredictUtils {
                 }
             }
         }
-        log.info("排三Top{}组全排列: 最终={}注", groups.size(), out.size());
+        log.info("排三散组优先: 最终={}注 不同组={}", out.size(), usedGroup.size());
         return out;
+    }
+
+    private static int[] bestArrangementForScores(int a, int b, int c, int[][] scores) {
+        int[] best = {a, b, c};
+        int bestSc = scores[0][a] + scores[1][b] + scores[2][c];
+        for (int[] p : uniquePerms(a, b, c)) {
+            int sc = scores[0][p[0]] + scores[1][p[1]] + scores[2][p[2]];
+            if (sc > bestSc) {
+                bestSc = sc;
+                best = p;
+            }
+        }
+        return best;
     }
 
     /**
@@ -473,7 +733,7 @@ public final class RuleBasedPredictUtils {
      * 最多 200 注，直选优先：高分组合全排列展开为主，散组为辅。
      */
     private static List<int[]> selectGroupFirst(int[][] digits, int[][] scores, int[][] topPos,
-                                                RecentFeatureStats feat, BiasSeedCorrector seeds, BiasFlags bias) {
+                                                RecentFeatureStats feat, BiasSeedCorrector seeds) {
         int[] global = globalDigitScore(scores, feat, digits);
         int[] hotPool = buildHotPool(digits, global, feat, GROUP_DIGIT_POOL);
         log.info("直选覆盖热核{}码={}", GROUP_DIGIT_POOL, Arrays.toString(hotPool));
@@ -485,7 +745,7 @@ public final class RuleBasedPredictUtils {
         }
 
         // ticketKey -> [a,b,c,score]
-        java.util.Map<String, int[]> ticketMap = new java.util.HashMap<>();
+        java.util.Map<String, int[]> ticketMap = new java.util.LinkedHashMap<>();
         String lastGk = groupKey(feat.last[0], feat.last[1], feat.last[2]);
 
         // —— 1) 转移：全部 nextFull 全排列 + 宽转移样本 ——
@@ -643,45 +903,39 @@ public final class RuleBasedPredictUtils {
         Set<String> usedGroup = new HashSet<>();
         List<String> expandOrder = new ArrayList<>();
 
-        // 排三：转移样本整组置顶并预占全排列名额
+        // 排三：转移样本只先占「每组1注」，全排列放到后面统一展开，避免挤掉散组
         if (CURRENT_KIND == GameKind.PL3) {
             List<int[]> transferGroups = new ArrayList<>();
             for (int i = 0; i < feat.nextFullCount; i++) {
-                int[] c = feat.nextFullCodes[i];
-                transferGroups.add(c);
+                transferGroups.add(feat.nextFullCodes[i]);
             }
-            for (int[] s : broadTransferCandidates(digits, feat)) {
-                transferGroups.add(s);
-            }
+            transferGroups.addAll(broadTransferCandidates(digits, feat));
             for (int[] c : transferGroups) {
-                if (picked.size() >= TARGET_BET) {
+                if (usedGroup.size() >= GROUP_UNIQUE_TARGET) {
                     break;
                 }
                 String gk = groupKey(c[0], c[1], c[2]);
                 if (groupKey(feat.last[0], feat.last[1], feat.last[2]).equals(gk)) {
                     continue;
                 }
-                if (!usedGroup.contains(gk)) {
+                if (usedGroup.contains(gk)) {
+                    continue;
+                }
+                int[] best = bestArrangementForScores(c[0], c[1], c[2], scores);
+                String tKey = "" + best[0] + best[1] + best[2];
+                if (usedTicket.add(tKey)) {
                     usedGroup.add(gk);
                     expandOrder.add(gk);
-                    bestByGroup.putIfAbsent(gk, new int[]{c[0], c[1], c[2], ticketScore(c, scores, feat) + 100});
-                }
-                for (int[] p : uniquePerms(c[0], c[1], c[2])) {
-                    if (picked.size() >= TARGET_BET) {
-                        break;
-                    }
-                    String tKey = "" + p[0] + p[1] + p[2];
-                    if (usedTicket.add(tKey)) {
-                        picked.add(new int[]{p[0], p[1], p[2]});
-                    }
+                    bestByGroup.putIfAbsent(gk, new int[]{best[0], best[1], best[2], ticketScore(best, scores, feat) + 100});
+                    picked.add(best);
                 }
             }
         }
 
-        // A1) 组三专项配额
+        // A1) 组三专项配额（按不同组计数，不被转移全排列挤占）
         int pairAdded = 0;
         for (int[] s : groupRanked) {
-            if (pairAdded >= PAIR_GROUP_QUOTA || picked.size() >= GROUP_UNIQUE_TARGET) {
+            if (pairAdded >= PAIR_GROUP_QUOTA || usedGroup.size() >= GROUP_UNIQUE_TARGET) {
                 break;
             }
             if (!isPairSet(s[0], s[1], s[2])) {
@@ -695,9 +949,9 @@ public final class RuleBasedPredictUtils {
             pairAdded++;
         }
 
-        // A2) 其余组选散开（排三会拿更多组六）
+        // A2) 其余组选散开：尽量铺满 GROUP_UNIQUE_TARGET 个不同组
         for (int[] s : groupRanked) {
-            if (picked.size() >= GROUP_UNIQUE_TARGET) {
+            if (usedGroup.size() >= GROUP_UNIQUE_TARGET) {
                 break;
             }
             String gk = groupKey(s[0], s[1], s[2]);
@@ -767,8 +1021,9 @@ public final class RuleBasedPredictUtils {
         }
         midRanked.sort((x, y) -> Integer.compare(y[3], x[3]));
         int midAdded = 0;
+        int midQuota = Math.min(40, TARGET_BET / 3);
         for (int[] s : midRanked) {
-            if (midAdded >= 20 || picked.size() >= TARGET_BET) {
+            if (midAdded >= midQuota || picked.size() >= TARGET_BET) {
                 break;
             }
             String tKey = "" + s[0] + s[1] + s[2];
@@ -810,10 +1065,11 @@ public final class RuleBasedPredictUtils {
             return fallback;
         }
 
-        // 3D 做位分重排；排三靠后面的 fillWithTopGroupPerms，避免挤掉散组
         if (CURRENT_KIND == GameKind.SD_3D) {
             picked = correctByPosRearrange(picked, scores, feat, seeds);
+            picked = ensureGroupCoverage(picked, scores, feat);
         }
+        // PL3 的重排/补散组在 predict() 末尾做，便于与 3D 分开调参
         log.info("{} 选号完成: {}注 不同组选={} 组三配额={}",
                 CURRENT_KIND, picked.size(), countUniqueGroups(picked), pairAdded);
         return picked.size() > TARGET_BET ? new ArrayList<>(picked.subList(0, TARGET_BET)) : picked;
@@ -989,20 +1245,6 @@ public final class RuleBasedPredictUtils {
         }
     }
 
-    /** 候选综合分 = 组选分 + 共性名次带加成 + 额外偏置 */
-    private static int[] scoreCandidate(int a, int b, int c, int[][] scores, RecentFeatureStats feat,
-                                        int[] global, int[] groupHitProxy, int[][] digits, int extra) {
-        int[] arr = bestArrangement(a, b, c, scores);
-        if (arr == null) {
-            arr = new int[]{a, b, c};
-        }
-        int sc = scoreGroupSet(arr[0], arr[1], arr[2], global, feat, groupHitProxy, digits);
-        sc += rankBandBonus(scores, arr[0], arr[1], arr[2]);
-        sc += extra;
-        sc += scores[0][arr[0]] + scores[1][arr[1]] + scores[2][arr[2]];
-        return new int[]{arr[0], arr[1], arr[2], sc};
-    }
-
     private static int ticketScore(int[] t, int[][] scores, RecentFeatureStats feat) {
         return scores[0][t[0]] + scores[1][t[1]] + scores[2][t[2]]
                 + feat.shapeBonus(t[0], t[1], t[2]) + rankBandBonus(scores, t[0], t[1], t[2]);
@@ -1023,12 +1265,6 @@ public final class RuleBasedPredictUtils {
 
     private static boolean inRankBand(int rank) {
         return rank >= RANK_BAND_LO && rank <= RANK_BAND_HI;
-    }
-
-    private static boolean allDigitsInRankBand(int[][] scores, int a, int b, int c) {
-        return inRankBand(digitRank(scores[0], a))
-                && inRankBand(digitRank(scores[1], b))
-                && inRankBand(digitRank(scores[2], c));
     }
 
     /** 命中名次带偏好：落在动态统计带内最高，避免死拿 Top1/2 */
@@ -1146,87 +1382,6 @@ public final class RuleBasedPredictUtils {
         return r;
     }
 
-    private static int[] bestBandStraight(int[][] bandPos, int[][] scores, RecentFeatureStats feat,
-                                          BiasSeedCorrector seeds, Set<String> usedTicket) {
-        int best = Integer.MIN_VALUE;
-        int[] bestArr = null;
-        for (int a : bandPos[0]) {
-            for (int b : bandPos[1]) {
-                for (int c : bandPos[2]) {
-                    String tKey = "" + a + b + c;
-                    if (usedTicket.contains(tKey)) {
-                        continue;
-                    }
-                    int s = ticketScore(new int[]{a, b, c}, scores, feat);
-                    if (s > best) {
-                        best = s;
-                        bestArr = new int[]{a, b, c};
-                    }
-                }
-            }
-        }
-        if (bestArr != null) {
-            int[] shifted = {
-                    seeds.shiftAdd(bestArr[0], 0),
-                    seeds.shiftAdd(bestArr[1], 1),
-                    seeds.shiftAdd(bestArr[2], 2)
-            };
-            String tKey = "" + shifted[0] + shifted[1] + shifted[2];
-            if (!usedTicket.contains(tKey) && ticketScore(shifted, scores, feat) > best) {
-                return shifted;
-            }
-        }
-        return bestArr;
-    }
-
-    private static int[] bestStraightTicket(int[][] topPos, int[][] scores, RecentFeatureStats feat,
-                                            BiasSeedCorrector seeds) {
-        int best = Integer.MIN_VALUE;
-        int[] bestArr = null;
-        for (int a : topPos[0]) {
-            for (int b : topPos[1]) {
-                for (int c : topPos[2]) {
-                    int s = ticketScore(new int[]{a, b, c}, scores, feat);
-                    if (s > best) {
-                        best = s;
-                        bestArr = new int[]{a, b, c};
-                    }
-                }
-            }
-        }
-        if (bestArr != null) {
-            int[] shifted = {
-                    seeds.shiftAdd(bestArr[0], 0),
-                    seeds.shiftAdd(bestArr[1], 1),
-                    seeds.shiftAdd(bestArr[2], 2)
-            };
-            if (ticketScore(shifted, scores, feat) > best) {
-                return shifted;
-            }
-        }
-        return bestArr;
-    }
-
-    private static int[] bestAltPerm(List<int[]> nextExact, int[][] scores, Set<String> usedTicket) {
-        int best = Integer.MIN_VALUE;
-        int[] bestArr = null;
-        for (int[] src : nextExact) {
-            for (int[] p : uniquePerms(src[0], src[1], src[2])) {
-                String tKey = "" + p[0] + p[1] + p[2];
-                if (usedTicket.contains(tKey)) {
-                    continue;
-                }
-                int s = scores[0][p[0]] + scores[1][p[1]] + scores[2][p[2]]
-                        + rankBandBonus(scores, p[0], p[1], p[2]);
-                if (s > best) {
-                    best = s;
-                    bestArr = p;
-                }
-            }
-        }
-        return bestArr;
-    }
-
     /** 近窗高频和值 ±1 通道内，按热度取组选候选 */
     private static List<int[]> sumChannelCandidates(int[] global, RecentFeatureStats feat,
                                                     int[] groupHitProxy, int[][] digits, int limit) {
@@ -1305,8 +1460,8 @@ public final class RuleBasedPredictUtils {
     private static List<int[]> broadTransferCandidates(int[][] dig, RecentFeatureStats feat) {
         int n = dig.length;
         int[] last = feat.last;
-        java.util.Map<String, int[]> best = new java.util.HashMap<>();
-        java.util.Map<String, Integer> wmap = new java.util.HashMap<>();
+        java.util.Map<String, int[]> best = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Integer> wmap = new java.util.LinkedHashMap<>();
         int from = Math.max(1, n - 60);
         for (int i = from; i < n; i++) {
             int[] prev = dig[i - 1];
@@ -1333,145 +1488,6 @@ public final class RuleBasedPredictUtils {
         return list;
     }
 
-    private static void addPicked(List<int[]> picked, Set<String> usedTicket, Set<String> usedGroup,
-                                  int a, int b, int c, int[][] scores) {
-        if (picked.size() >= TARGET_BET) {
-            return;
-        }
-        String gKey = groupKey(a, b, c);
-        if (usedGroup.contains(gKey)) {
-            return;
-        }
-        int[] arr = bestArrangement(a, b, c, scores);
-        if (arr == null) {
-            arr = firstLooseArrangement(a, b, c, scores);
-        }
-        if (arr == null) {
-            arr = new int[]{a, b, c};
-        }
-        String tKey = "" + arr[0] + arr[1] + arr[2];
-        if (usedTicket.contains(tKey)) {
-            return;
-        }
-        usedTicket.add(tKey);
-        usedGroup.add(gKey);
-        picked.add(arr);
-    }
-
-    /** 保留给定排列（转移样本），不重排 */
-    private static void addPickedExact(List<int[]> picked, Set<String> usedTicket, Set<String> usedGroup,
-                                       int a, int b, int c) {
-        if (picked.size() >= TARGET_BET) {
-            return;
-        }
-        String gKey = groupKey(a, b, c);
-        if (usedGroup.contains(gKey)) {
-            return;
-        }
-        String tKey = "" + a + b + c;
-        if (usedTicket.contains(tKey)) {
-            return;
-        }
-        usedTicket.add(tKey);
-        usedGroup.add(gKey);
-        picked.add(new int[]{a, b, c});
-    }
-
-    /** 覆盖码池：上期+邻号不必占满；近10期热号与遗漏回补优先，保证池子散度 */
-    private static int[] buildCoverPool(int[][] digits, int[] global, RecentFeatureStats feat, int size) {
-        int[] omitScore = new int[10];
-        int n = digits.length;
-        for (int d = 0; d < 10; d++) {
-            int om = n;
-            for (int i = n - 1; i >= 0; i--) {
-                if (digits[i][0] == d || digits[i][1] == d || digits[i][2] == d) {
-                    om = n - 1 - i;
-                    break;
-                }
-            }
-            omitScore[d] = (om >= 2 && om <= 8) ? 20 - om : 0;
-        }
-
-        int[] cnt10 = new int[10];
-        int from10 = Math.max(0, n - 10);
-        for (int i = from10; i < n; i++) {
-            cnt10[digits[i][0]]++;
-            cnt10[digits[i][1]]++;
-            cnt10[digits[i][2]]++;
-        }
-
-        int[] combined = new int[10];
-        for (int d = 0; d < 10; d++) {
-            combined[d] = global[d] + cnt10[d] * 8 + omitScore[d] * 3 + feat.digitBonus(0, d);
-        }
-        // 上期与邻号轻加，不垄断
-        for (int p = 0; p < 3; p++) {
-            combined[feat.last[p]] += 15;
-            combined[(feat.last[p] + 1) % 10] += 8;
-            combined[(feat.last[p] + 9) % 10] += 8;
-        }
-
-        Integer[] order = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            order[i] = i;
-        }
-        Arrays.sort(order, (a, b) -> Integer.compare(combined[b], combined[a]));
-
-        // 强制至少 2 个上期相关 + Top 散度
-        LinkedHashSet<Integer> set = new LinkedHashSet<>();
-        set.add(feat.last[0]);
-        set.add(feat.last[1]);
-        // 第三个上期码若重复则换邻号
-        if (!set.add(feat.last[2])) {
-            set.add((feat.last[0] + 1) % 10);
-        }
-        for (int d : order) {
-            if (set.size() >= size) {
-                break;
-            }
-            set.add(d);
-        }
-        int[] r = new int[set.size()];
-        int i = 0;
-        for (int d : set) {
-            r[i++] = d;
-        }
-        return r;
-    }
-
-    private static List<int[]> mutateDraw(int[] src, int[] hotPool, int[] last) {
-        List<int[]> out = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (int pos = 0; pos < 3; pos++) {
-            for (int d = -2; d <= 2; d++) {
-                if (d == 0) {
-                    continue;
-                }
-                int[] m = {src[0], src[1], src[2]};
-                m[pos] = (m[pos] + d + 10) % 10;
-                String g = groupKey(m[0], m[1], m[2]);
-                if (seen.add(g)) {
-                    out.add(m);
-                }
-            }
-            for (int h : hotPool) {
-                int[] m = {src[0], src[1], src[2]};
-                m[pos] = h;
-                String g = groupKey(m[0], m[1], m[2]);
-                if (seen.add(g)) {
-                    out.add(m);
-                }
-            }
-            int[] m = {src[0], src[1], src[2]};
-            m[pos] = last[pos];
-            String g = groupKey(m[0], m[1], m[2]);
-            if (seen.add(g)) {
-                out.add(m);
-            }
-        }
-        return out;
-    }
-
     private static int scoreGroupSet(int a, int b, int c, int[] global, RecentFeatureStats feat,
                                      int[] groupHitProxy, int[][] digits) {
         int score = global[a] + global[b] + global[c];
@@ -1493,41 +1509,6 @@ public final class RuleBasedPredictUtils {
         int chong = (lastSet[a] ? 1 : 0) + (lastSet[b] ? 1 : 0) + (lastSet[c] ? 1 : 0);
         score += chong * 10;
         return score;
-    }
-
-    private static int[] bestArrangement(int a, int b, int c, int[][] scores) {
-        int[][] perms = uniquePerms(a, b, c);
-        int[] best = null;
-        int bestScore = Integer.MIN_VALUE;
-        for (int[] p : perms) {
-            if (!looseMorphOk(p)) {
-                continue;
-            }
-            int s = scores[0][p[0]] + scores[1][p[1]] + scores[2][p[2]];
-            if (s > bestScore) {
-                bestScore = s;
-                best = p;
-            }
-        }
-        return best;
-    }
-
-    private static int[] firstLooseArrangement(int a, int b, int c, int[][] scores) {
-        int[][] perms = uniquePerms(a, b, c);
-        int[] best = null;
-        int bestScore = Integer.MIN_VALUE;
-        for (int[] p : perms) {
-            int sum = p[0] + p[1] + p[2];
-            if (sum < 3 || sum > 27) {
-                continue;
-            }
-            int s = scores[0][p[0]] + scores[1][p[1]] + scores[2][p[2]];
-            if (s > bestScore) {
-                bestScore = s;
-                best = p;
-            }
-        }
-        return best != null ? best : new int[]{a, b, c};
     }
 
     private static int[][] uniquePerms(int a, int b, int c) {
@@ -1579,48 +1560,6 @@ public final class RuleBasedPredictUtils {
             g[digits[i][2]] += 2;
         }
         return g;
-    }
-
-    private static int[] topKDigits(int[] score, int k) {
-        Integer[] idx = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            idx[i] = i;
-        }
-        Arrays.sort(idx, (a, b) -> Integer.compare(score[b], score[a]));
-        int[] r = new int[k];
-        for (int i = 0; i < k; i++) {
-            r[i] = idx[i];
-        }
-        return r;
-    }
-
-    private static int[] expandTop(int[] top, int[] score, int n) {
-        boolean[] in = new boolean[10];
-        List<Integer> list = new ArrayList<>();
-        for (int d : top) {
-            if (!in[d]) {
-                in[d] = true;
-                list.add(d);
-            }
-        }
-        Integer[] order = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            order[i] = i;
-        }
-        Arrays.sort(order, (a, b) -> Integer.compare(score[b], score[a]));
-        for (int d : order) {
-            if (list.size() >= n) {
-                break;
-            }
-            if (!in[d]) {
-                list.add(d);
-            }
-        }
-        int[] r = new int[Math.min(n, list.size())];
-        for (int i = 0; i < r.length; i++) {
-            r[i] = list.get(i);
-        }
-        return r;
     }
 
     private static List<int[]> buildLoosePool(int[][] topPos, int[][] scores, RecentFeatureStats feat) {
@@ -1718,181 +1657,7 @@ public final class RuleBasedPredictUtils {
         return 0;
     }
 
-    // ========================= Top5 =========================
-
-    private static int[] buildTop5(int[][] digits, int pos, List<HmCache.CompareDto> compares, BiasFlags bias,
-                                   RecentFeatureStats feat) {
-        int n = digits.length;
-        int last = digits[n - 1][pos];
-
-        boolean[] must = new boolean[10];
-        boolean[] ban = new boolean[10];
-        boolean[] comp = new boolean[10];
-
-        // Must-In: 传号 + 邻号
-        must[last] = true;
-        must[neighbor(last, -1)] = true;
-        must[neighbor(last, 1)] = true;
-
-        if (bias.missNeighborOften || bias.posMiss3[pos]) {
-            must[neighbor(last, -1)] = true;
-            must[neighbor(last, 1)] = true;
-        }
-
-        int[] freq10 = freq(digits, pos, 10);
-        int[] freq5 = freq(digits, pos, 5);
-        int[] freq3 = freq(digits, pos, 3);
-        int[] freq20 = freq(digits, pos, 20);
-        int[] omit = omission(digits, pos);
-        for (int d = 0; d < 10; d++) {
-            if (freq10[d] >= 2 && freq10[d] <= 4 && freq3[d] == 0) {
-                must[d] = true;
-            }
-            if (freq5[d] >= 2) {
-                must[d] = true;
-            }
-            if (omit[d] >= 4 && omit[d] <= 10) {
-                comp[d] = true;
-            }
-        }
-
-        // 转移热号 / 上期重号强制或优先入池
-        int[] transTop = feat.topTransitionDigits(pos, 3);
-        for (int d : transTop) {
-            if (feat.digitBonus(pos, d) > 0) {
-                comp[d] = true;
-            }
-        }
-            // 上期三位数字作重号候选
-        for (int p = 0; p < 3; p++) {
-            comp[feat.last[p]] = true;
-        }
-        // 历史「同位匹配 → 下期整号」中的各位数字优先
-        for (int i = 0; i < Math.min(feat.nextFullCount, 8); i++) {
-            comp[feat.nextFullCodes[i][0]] = true;
-            comp[feat.nextFullCodes[i][1]] = true;
-            comp[feat.nextFullCodes[i][2]] = true;
-        }
-
-        int[] pref = topKByFreq(freq20, 3);
-        for (int d : pref) {
-            comp[d] = true;
-        }
-
-        int[] actual15 = new int[10];
-        int[] pred15 = new int[10];
-        fillComparePosStats(compares, pos, actual15, pred15);
-        for (int d = 0; d < 10; d++) {
-            if (actual15[d] > 0 && pred15[d] <= 1) {
-                comp[d] = true;
-            }
-        }
-
-        for (int d = 0; d < 10; d++) {
-            boolean rebound = (freq10[d] >= 2 && freq10[d] <= 4 && freq3[d] == 0) || freq5[d] >= 2;
-            if (freq20[d] == 0 && !rebound && !must[d]) {
-                ban[d] = true;
-            }
-            if (pred15[d] >= 4 && actual15[d] == 0 && !must[d]) {
-                ban[d] = true;
-            }
-        }
-
-        int[] score = scoreAllDigits(digits, pos, compares, bias, feat);
-        for (int d = 0; d < 10; d++) {
-            if (must[d]) {
-                score[d] += 1000;
-            }
-            if (comp[d]) {
-                score[d] += 50;
-            }
-            if (ban[d]) {
-                score[d] -= 5000;
-            }
-            if (bias.posMiss3[pos] && (d == neighbor(last, -1) || d == neighbor(last, 1))) {
-                score[d] += 200;
-            }
-            if (pred15[d] >= 6) {
-                score[d] -= 12;
-            }
-        }
-
-        Integer[] order = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            order[i] = i;
-        }
-        Arrays.sort(order, (a, b) -> {
-            int c = Integer.compare(score[b], score[a]);
-            if (c != 0) {
-                return c;
-            }
-            boolean oa = omit[a] >= 2 && omit[a] <= 6;
-            boolean ob = omit[b] >= 2 && omit[b] <= 6;
-            if (oa != ob) {
-                return oa ? -1 : 1;
-            }
-            return Integer.compare(freq10[b], freq10[a]);
-        });
-
-        List<Integer> mustOrdered = new ArrayList<>();
-        for (int d = 0; d < 10; d++) {
-            if (freq10[d] >= 2 && freq10[d] <= 4 && freq3[d] == 0 && must[d]) {
-                mustOrdered.add(d);
-            }
-        }
-        for (int d = 0; d < 10; d++) {
-            if (freq5[d] >= 2 && must[d] && !mustOrdered.contains(d)) {
-                mustOrdered.add(d);
-            }
-        }
-        if (must[last] && !mustOrdered.contains(last)) {
-            mustOrdered.add(last);
-        }
-        for (int nb : new int[]{neighbor(last, -1), neighbor(last, 1)}) {
-            if (must[nb] && !mustOrdered.contains(nb)) {
-                mustOrdered.add(nb);
-            }
-        }
-        // 转移 Top1 提升为 must 优先
-        if (transTop.length > 0 && !mustOrdered.contains(transTop[0])) {
-            mustOrdered.add(0, transTop[0]);
-        }
-        for (int d = 0; d < 10; d++) {
-            if (must[d] && !mustOrdered.contains(d)) {
-                mustOrdered.add(d);
-            }
-        }
-
-        List<Integer> top = new ArrayList<>(TOP_N);
-        for (int v : mustOrdered) {
-            if (top.size() >= TOP_N) {
-                break;
-            }
-            if (!top.contains(v)) {
-                top.add(v);
-            }
-        }
-        for (int d = 0; d < 10 && top.size() < TOP_N; d++) {
-            int v = order[d];
-            if (!ban[v] && !top.contains(v)) {
-                top.add(v);
-            }
-        }
-        for (int d = 0; d < 10 && top.size() < TOP_N; d++) {
-            int v = order[d];
-            if (!top.contains(v)) {
-                top.add(v);
-            }
-        }
-
-        int[] result = new int[TOP_N];
-        for (int i = 0; i < TOP_N; i++) {
-            result[i] = top.get(i);
-        }
-        return result;
-    }
-
-    private static int[] scoreAllDigits(int[][] digits, int pos, List<HmCache.CompareDto> compares, BiasFlags bias,
+    private static int[] scoreAllDigits(int[][] digits, int pos, List<HmCache.CompareDto> compares,
                                         RecentFeatureStats feat) {
         int[] freq5 = freq(digits, pos, 5);
         int[] freq10 = freq(digits, pos, 10);
@@ -1934,12 +1699,11 @@ public final class RuleBasedPredictUtils {
         return score;
     }
 
-    // ========================= 偏差分析（近15期） =========================
+    // ========================= 偏差诊断日志（近15期） =========================
 
-    private static BiasFlags analyzeBias(List<HmCache.CompareDto> compares, int[][] digits) {
-        BiasFlags flags = new BiasFlags();
+    private static void logBiasDiagnostics(List<HmCache.CompareDto> compares) {
         if (compares == null || compares.isEmpty()) {
-            return flags;
+            return;
         }
 
         List<HmCache.CompareDto> valid = new ArrayList<>();
@@ -1950,7 +1714,7 @@ public final class RuleBasedPredictUtils {
             }
         }
         if (valid.isEmpty()) {
-            return flags;
+            return;
         }
         int start = Math.max(0, valid.size() - 15);
         List<HmCache.CompareDto> last15 = valid.subList(start, valid.size());
@@ -1958,6 +1722,7 @@ public final class RuleBasedPredictUtils {
         int neighborMiss = 0;
         int extremeFail = 0;
         int checked = 0;
+        boolean[] posMiss3 = new boolean[3];
 
         for (HmCache.CompareDto dto : last15) {
             int[] real = parseCode(dto.getRealHm());
@@ -1975,7 +1740,6 @@ public final class RuleBasedPredictUtils {
                 predDigits.add(t[1]);
                 predDigits.add(t[2]);
             }
-            // 简化：用本期实际各位的邻号是否进过预测池
             boolean hitNeighbor = false;
             for (int pos = 0; pos < 3; pos++) {
                 int d = real[pos];
@@ -1988,19 +1752,12 @@ public final class RuleBasedPredictUtils {
                 neighborMiss++;
             }
 
-            // 全冷/全热导致全错：预测注整体极端且无一命中
             boolean anyHit = Arrays.asList(dto.getAiHm().split(",")).contains(dto.getRealHm());
             if (!anyHit && isPredExtreme(dto.getAiHm())) {
                 extremeFail++;
             }
         }
 
-        if (checked > 0) {
-            flags.missNeighborOften = neighborMiss * 2 >= checked;
-            flags.forceHotMidColdMix = extremeFail * 3 >= checked;
-        }
-
-        // 某一位连续3期完美避开（预测该位数字集合不含实际）
         int from = Math.max(0, last15.size() - 3);
         for (int pos = 0; pos < 3; pos++) {
             boolean miss3 = last15.size() >= 3;
@@ -2023,10 +1780,9 @@ public final class RuleBasedPredictUtils {
                     miss3 = false;
                 }
             }
-            flags.posMiss3[pos] = miss3;
+            posMiss3[pos] = miss3;
         }
 
-        // 近五期偏差诊断日志（帮助定位“极大偏差”根因）
         int recent = Math.min(5, last15.size());
         int posCoverMiss = 0;
         for (int i = last15.size() - recent; i < last15.size(); i++) {
@@ -2054,9 +1810,7 @@ public final class RuleBasedPredictUtils {
             }
         }
         log.info("近{}期偏差诊断: 邻号漏检率≈{}/{}, 极端形态失败≈{}/{}, 位覆盖缺失={}, 连续3期避开位={}",
-                recent, neighborMiss, checked, extremeFail, checked, posCoverMiss, Arrays.toString(flags.posMiss3));
-
-        return flags;
+                recent, neighborMiss, checked, extremeFail, checked, posCoverMiss, Arrays.toString(posMiss3));
     }
 
     private static boolean isPredExtreme(String aiHm) {
@@ -2078,759 +1832,6 @@ public final class RuleBasedPredictUtils {
             }
         }
         return total > 0 && (hotish * 2 >= total || coldish * 2 >= total);
-    }
-
-    // ========================= 候选池与选注 =========================
-
-    private static List<int[]> buildCandidatePool(int[][] top5, int[][] digits, int[][] scores,
-                                                  BiasFlags bias, RecentFeatureStats feat,
-                                                  boolean allowAllOddEven, boolean allowAllBigSmall,
-                                                  boolean defenseOnlyExtreme) {
-        boolean[][] hot = new boolean[3][10];
-        boolean[][] mid = new boolean[3][10];
-        boolean[][] coldOrNb = new boolean[3][10];
-        for (int pos = 0; pos < 3; pos++) {
-            int[] f5 = freq(digits, pos, 5);
-            int[] f10 = freq(digits, pos, 10);
-            int last = digits[digits.length - 1][pos];
-            int[] om = omission(digits, pos);
-            for (int d = 0; d < 10; d++) {
-                hot[pos][d] = f5[d] >= 2;
-                mid[pos][d] = f10[d] >= 2 && f10[d] <= 4;
-                coldOrNb[pos][d] = om[d] >= 8 || d == neighbor(last, -1) || d == neighbor(last, 1) || d == last;
-            }
-        }
-
-        List<int[]> pool = new ArrayList<>(125);
-        for (int a : top5[0]) {
-            for (int b : top5[1]) {
-                for (int c : top5[2]) {
-                    int[] ticket = {a, b, c};
-                    boolean extremeOe = isAllOddOrEven(ticket);
-                    boolean extremeBs = isAllBigOrSmall(ticket);
-                    if (defenseOnlyExtreme) {
-                        if (!extremeOe && !extremeBs) {
-                            continue;
-                        }
-                        if (!passBaseMorph(ticket)) {
-                            continue;
-                        }
-                    } else {
-                        if (!passMorph(ticket, allowAllOddEven, allowAllBigSmall)) {
-                            continue;
-                        }
-                    }
-                    if (bias.forceHotMidColdMix && !passHotMidCold(ticket, hot, mid, coldOrNb)) {
-                        continue;
-                    }
-                    int score = scores[0][a] + scores[1][b] + scores[2][c];
-                    int sum = a + b + c;
-                    if (sum == 20 || sum == 21) {
-                        score += 3;
-                    }
-                    if (sum >= 9 && sum <= 18) {
-                        score += 2;
-                    }
-                    // 近20期和值/跨度/重号形态加分
-                    score += feat.shapeBonus(a, b, c);
-                    if (defenseOnlyExtreme) {
-                        score -= 15;
-                    }
-                    pool.add(new int[]{a, b, c, score});
-                }
-            }
-        }
-        pool.sort((x, y) -> Integer.compare(y[3], x[3]));
-        return pool;
-    }
-
-    private static boolean passBaseMorph(int[] t) {
-        int sum = t[0] + t[1] + t[2];
-        if (sum < 4 || sum > 26) {
-            return false;
-        }
-        int max = Math.max(t[0], Math.max(t[1], t[2]));
-        int min = Math.min(t[0], Math.min(t[1], t[2]));
-        int span = max - min;
-        if (span < 2 || span > 9) {
-            return false;
-        }
-        int r0 = t[0] % 3;
-        return !(r0 == t[1] % 3 && r0 == t[2] % 3);
-    }
-
-    private static boolean isAllOddOrEven(int[] t) {
-        int odd = (t[0] & 1) + (t[1] & 1) + (t[2] & 1);
-        return odd == 0 || odd == 3;
-    }
-
-    private static boolean isAllBigOrSmall(int[] t) {
-        int big = (t[0] >= 5 ? 1 : 0) + (t[1] >= 5 ? 1 : 0) + (t[2] >= 5 ? 1 : 0);
-        return big == 0 || big == 3;
-    }
-
-    private static boolean passMorph(int[] t, boolean allowAllOddEven, boolean allowAllBigSmall) {
-        if (!passBaseMorph(t)) {
-            return false;
-        }
-        if (!allowAllOddEven && isAllOddOrEven(t)) {
-            return false;
-        }
-        if (!allowAllBigSmall && isAllBigOrSmall(t)) {
-            return false;
-        }
-        return true;
-    }
-
-    private static boolean passHotMidCold(int[] t, boolean[][] hot, boolean[][] mid, boolean[][] coldOrNb) {
-        boolean hasHot = false, hasMid = false, hasCold = false;
-        for (int pos = 0; pos < 3; pos++) {
-            int d = t[pos];
-            if (hot[pos][d]) {
-                hasHot = true;
-            }
-            if (mid[pos][d]) {
-                hasMid = true;
-            }
-            if (coldOrNb[pos][d]) {
-                hasCold = true;
-            }
-        }
-        return hasHot && hasMid && hasCold;
-    }
-
-    private static List<int[]> selectBets(List<int[]> pool, List<int[]> defensePool, int[][] top5, int[][] digits,
-                                          BiasFlags bias, RecentFeatureStats feat, BiasSeedCorrector seeds) {
-        int[] last = digits[digits.length - 1];
-        boolean[][] cold15 = new boolean[3][10];
-        for (int pos = 0; pos < 3; pos++) {
-            int[] f15 = freq(digits, pos, 15);
-            for (int d = 0; d < 10; d++) {
-                cold15[pos][d] = f15[d] == 0;
-            }
-        }
-
-        // 合并池：主池 + 最多若干防守极端注
-        List<int[]> merged = new ArrayList<>(pool);
-        Set<String> keys = new HashSet<>();
-        for (int[] c : pool) {
-            keys.add("" + c[0] + c[1] + c[2]);
-        }
-        int defenseAdded = 0;
-        if (defensePool != null) {
-            for (int[] c : defensePool) {
-                String key = "" + c[0] + c[1] + c[2];
-                if (keys.contains(key)) {
-                    continue;
-                }
-                merged.add(c);
-                keys.add(key);
-                if (++defenseAdded >= 12) {
-                    break;
-                }
-            }
-        }
-        merged.sort((x, y) -> Integer.compare(y[3], x[3]));
-
-        int[] tryCounts = {TARGET_BET, 24, 20, 15, 8, 5};
-        List<int[]> best = null;
-        int bestCover = -1;
-        for (int target : tryCounts) {
-            List<int[]> coverPick = greedyPick(merged, top5, last, cold15, target, feat);
-            List<int[]> scorePick = scorePick(merged, cold15, target);
-            List<int[]> picked = hybridMerge(coverPick, scorePick, merged, cold15, target);
-            picked = ensureShapeTickets(picked, merged, feat, top5, last, cold15, target);
-            picked = injectTransitionCodes(picked, feat, top5, last, cold15, target);
-            picked = injectBiasSeedTickets(picked, merged, seeds, top5, cold15, target);
-            if (picked == null || picked.size() < MIN_BET || picked.size() > MAX_BET) {
-                continue;
-            }
-            if (!satisfyHard(picked, top5, last, cold15)) {
-                if (coverPick != null && coverPick.size() >= MIN_BET && satisfyHard(coverPick, top5, last, cold15)) {
-                    picked = coverPick;
-                } else {
-                    continue;
-                }
-            }
-            int cover = totalTopCover(picked, top5);
-            if (cover > bestCover) {
-                bestCover = cover;
-                best = picked;
-            }
-            if (cover >= 14) {
-                return picked;
-            }
-        }
-        if (best != null) {
-            return best;
-        }
-
-        List<int[]> fallback = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (int[] c : merged) {
-            String key = "" + c[0] + c[1] + c[2];
-            if (seen.add(key)) {
-                fallback.add(new int[]{c[0], c[1], c[2]});
-            }
-            if (fallback.size() >= 8) {
-                break;
-            }
-        }
-        return fallback.size() >= MIN_BET ? fallback : null;
-    }
-
-    private static List<int[]> scorePick(List<int[]> pool, boolean[][] cold15, int target) {
-        List<int[]> selected = new ArrayList<>();
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-        for (int[] c : pool) {
-            if (selected.size() >= target) {
-                break;
-            }
-            String key = "" + c[0] + c[1] + c[2];
-            if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                continue;
-            }
-            addTicket(selected, used, c, cold15, coldUsed);
-        }
-        return selected;
-    }
-
-    private static List<int[]> hybridMerge(List<int[]> coverPick, List<int[]> scorePick, List<int[]> pool,
-                                           boolean[][] cold15, int target) {
-        List<int[]> result = new ArrayList<>();
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-
-        if (coverPick != null) {
-            for (int[] c : coverPick) {
-                if (result.size() >= target) {
-                    break;
-                }
-                String key = "" + c[0] + c[1] + c[2];
-                if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                    continue;
-                }
-                addTicket(result, used, c, cold15, coldUsed);
-            }
-        }
-        if (scorePick != null) {
-            for (int[] c : scorePick) {
-                if (result.size() >= target) {
-                    break;
-                }
-                String key = "" + c[0] + c[1] + c[2];
-                if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                    continue;
-                }
-                addTicket(result, used, c, cold15, coldUsed);
-            }
-        }
-        for (int[] c : pool) {
-            if (result.size() >= target) {
-                break;
-            }
-            String key = "" + c[0] + c[1] + c[2];
-            if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                continue;
-            }
-            addTicket(result, used, c, cold15, coldUsed);
-        }
-        return result;
-    }
-
-    private static int totalTopCover(List<int[]> selected, int[][] top5) {
-        int total = 0;
-        for (int pos = 0; pos < 3; pos++) {
-            Set<Integer> set = new HashSet<>();
-            for (int[] s : selected) {
-                if (indexOf(top5[pos], s[pos]) >= 0) {
-                    set.add(s[pos]);
-                }
-            }
-            total += set.size();
-        }
-        return total;
-    }
-
-    /** 强制注入「上期同位→下期整号」高权重历史号码 */
-    /**
-     * 对已选注在各位 ±偏差种子生成校正注，替换低优先级注。
-     * 例如主种子为3：预测码 125 → 校正 455 / 895（各位+3）及 895 的减方向等。
-     */
-    private static List<int[]> injectBiasSeedTickets(List<int[]> picked, List<int[]> pool, BiasSeedCorrector seeds,
-                                                     int[][] top5, boolean[][] cold15, int target) {
-        if (picked == null || picked.isEmpty() || seeds == null) {
-            return picked;
-        }
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-        for (int[] s : picked) {
-            used.add("" + s[0] + s[1] + s[2]);
-            for (int pos = 0; pos < 3; pos++) {
-                if (cold15[pos][s[pos]]) {
-                    coldUsed[pos][s[pos]]++;
-                }
-            }
-        }
-
-        List<int[]> variants = new ArrayList<>();
-        // 对当前选中注做整注 ±主种子，以及单位置 ±主种子
-        for (int[] s : List.copyOf(picked)) {
-            int[] addAll = {seeds.shiftAdd(s[0], 0), seeds.shiftAdd(s[1], 1), seeds.shiftAdd(s[2], 2)};
-            int[] subAll = {seeds.shiftSub(s[0], 0), seeds.shiftSub(s[1], 1), seeds.shiftSub(s[2], 2)};
-            variants.add(addAll);
-            variants.add(subAll);
-            for (int pos = 0; pos < 3; pos++) {
-                int[] addOne = {s[0], s[1], s[2]};
-                int[] subOne = {s[0], s[1], s[2]};
-                addOne[pos] = seeds.shiftAdd(s[pos], pos);
-                subOne[pos] = seeds.shiftSub(s[pos], pos);
-                variants.add(addOne);
-                variants.add(subOne);
-            }
-        }
-        // 也对高分池前若干注做单位置校正
-        int lim = Math.min(20, pool.size());
-        for (int i = 0; i < lim; i++) {
-            int[] s = pool.get(i);
-            for (int pos = 0; pos < 3; pos++) {
-                int[] addOne = {s[0], s[1], s[2]};
-                addOne[pos] = seeds.shiftAdd(s[pos], pos);
-                variants.add(addOne);
-            }
-        }
-
-        int injected = 0;
-        for (int[] c : variants) {
-            if (injected >= 3) {
-                break;
-            }
-            int sum = c[0] + c[1] + c[2];
-            int span = Math.max(c[0], Math.max(c[1], c[2])) - Math.min(c[0], Math.min(c[1], c[2]));
-            if (sum < 4 || sum > 26 || span < 1 || span > 9) {
-                continue;
-            }
-            String key = "" + c[0] + c[1] + c[2];
-            if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                continue;
-            }
-            if (picked.size() < target) {
-                addTicket(picked, used, c, cold15, coldUsed);
-                injected++;
-            } else {
-                int worst = findReplaceable(picked, top5);
-                if (worst < 0) {
-                    break;
-                }
-                int[] old = picked.get(worst);
-                used.remove("" + old[0] + old[1] + old[2]);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][old[pos]]) {
-                        coldUsed[pos][old[pos]] = Math.max(0, coldUsed[pos][old[pos]] - 1);
-                    }
-                }
-                picked.set(worst, new int[]{c[0], c[1], c[2]});
-                used.add(key);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][c[pos]]) {
-                        coldUsed[pos][c[pos]]++;
-                    }
-                }
-                injected++;
-            }
-        }
-        return picked;
-    }
-
-    private static List<int[]> injectTransitionCodes(List<int[]> picked, RecentFeatureStats feat,
-                                                     int[][] top5, int[] last, boolean[][] cold15, int target) {
-        if (picked == null) {
-            picked = new ArrayList<>();
-        }
-        if (feat.nextFullCount <= 0) {
-            return picked;
-        }
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-        for (int[] s : picked) {
-            used.add("" + s[0] + s[1] + s[2]);
-            for (int pos = 0; pos < 3; pos++) {
-                if (cold15[pos][s[pos]]) {
-                    coldUsed[pos][s[pos]]++;
-                }
-            }
-        }
-
-        int injected = 0;
-        for (int i = 0; i < feat.nextFullCount && injected < 3; i++) {
-            int[] c = feat.nextFullCodes[i];
-            int[] ticket = {c[0], c[1], c[2]};
-            // 基础形态：和值/跨度宽松通过即可
-            int sum = c[0] + c[1] + c[2];
-            int span = Math.max(c[0], Math.max(c[1], c[2])) - Math.min(c[0], Math.min(c[1], c[2]));
-            if (sum < 4 || sum > 26 || span < 1 || span > 9) {
-                continue;
-            }
-            String key = "" + c[0] + c[1] + c[2];
-            if (used.contains(key) || !coldOk(ticket, cold15, coldUsed)) {
-                continue;
-            }
-            if (picked.size() < target) {
-                addTicket(picked, used, ticket, cold15, coldUsed);
-                injected++;
-            } else {
-                int worst = findReplaceable(picked, top5);
-                if (worst < 0) {
-                    break;
-                }
-                int[] old = picked.get(worst);
-                used.remove("" + old[0] + old[1] + old[2]);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][old[pos]]) {
-                        coldUsed[pos][old[pos]] = Math.max(0, coldUsed[pos][old[pos]] - 1);
-                    }
-                }
-                picked.set(worst, new int[]{c[0], c[1], c[2]});
-                used.add(key);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][c[pos]]) {
-                        coldUsed[pos][c[pos]]++;
-                    }
-                }
-                injected++;
-            }
-        }
-        return picked;
-    }
-
-    private static List<int[]> ensureShapeTickets(List<int[]> picked, List<int[]> pool, RecentFeatureStats feat,
-                                                  int[][] top5, int[] last, boolean[][] cold15, int target) {
-        if (picked == null) {
-            picked = new ArrayList<>();
-        }
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-        for (int[] s : picked) {
-            used.add("" + s[0] + s[1] + s[2]);
-            for (int pos = 0; pos < 3; pos++) {
-                if (cold15[pos][s[pos]]) {
-                    coldUsed[pos][s[pos]]++;
-                }
-            }
-        }
-
-        // 需要：至少1注命中近20主导和值，1注命中主导跨度，1注含上期重号
-        boolean hasSum = false, hasSpan = false, hasChong = false;
-        boolean[] lastSet = new boolean[10];
-        lastSet[last[0]] = true;
-        lastSet[last[1]] = true;
-        lastSet[last[2]] = true;
-        for (int[] s : picked) {
-            int sum = s[0] + s[1] + s[2];
-            int span = Math.max(s[0], Math.max(s[1], s[2])) - Math.min(s[0], Math.min(s[1], s[2]));
-            if (feat.isPreferredSum(sum)) {
-                hasSum = true;
-            }
-            if (feat.isPreferredSpan(span)) {
-                hasSpan = true;
-            }
-            if (lastSet[s[0]] || lastSet[s[1]] || lastSet[s[2]]) {
-                hasChong = true;
-            }
-        }
-
-        for (int[] c : pool) {
-            if (picked.size() >= target && hasSum && hasSpan && hasChong) {
-                break;
-            }
-            String key = "" + c[0] + c[1] + c[2];
-            if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                continue;
-            }
-            int sum = c[0] + c[1] + c[2];
-            int span = Math.max(c[0], Math.max(c[1], c[2])) - Math.min(c[0], Math.min(c[1], c[2]));
-            boolean need = (!hasSum && feat.isPreferredSum(sum))
-                    || (!hasSpan && feat.isPreferredSpan(span))
-                    || (!hasChong && (lastSet[c[0]] || lastSet[c[1]] || lastSet[c[2]]));
-            if (!need) {
-                continue;
-            }
-            if (picked.size() >= target) {
-                // 替换得分最低且非 Top1 覆盖关键的注
-                int worst = findReplaceable(picked, top5);
-                if (worst < 0) {
-                    break;
-                }
-                int[] old = picked.get(worst);
-                used.remove("" + old[0] + old[1] + old[2]);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][old[pos]]) {
-                        coldUsed[pos][old[pos]] = Math.max(0, coldUsed[pos][old[pos]] - 1);
-                    }
-                }
-                picked.set(worst, new int[]{c[0], c[1], c[2]});
-                used.add(key);
-                for (int pos = 0; pos < 3; pos++) {
-                    if (cold15[pos][c[pos]]) {
-                        coldUsed[pos][c[pos]]++;
-                    }
-                }
-            } else {
-                addTicket(picked, used, c, cold15, coldUsed);
-            }
-            if (feat.isPreferredSum(sum)) {
-                hasSum = true;
-            }
-            if (feat.isPreferredSpan(span)) {
-                hasSpan = true;
-            }
-            if (lastSet[c[0]] || lastSet[c[1]] || lastSet[c[2]]) {
-                hasChong = true;
-            }
-        }
-        return picked;
-    }
-
-    private static int findReplaceable(List<int[]> picked, int[][] top5) {
-        // 不替换唯一覆盖 Top1 的注
-        int worst = -1;
-        for (int i = 0; i < picked.size(); i++) {
-            int[] s = picked.get(i);
-            boolean critical = false;
-            for (int pos = 0; pos < 3; pos++) {
-                if (s[pos] != top5[pos][0]) {
-                    continue;
-                }
-                int cnt = 0;
-                for (int[] o : picked) {
-                    if (o[pos] == top5[pos][0]) {
-                        cnt++;
-                    }
-                }
-                if (cnt <= 1) {
-                    critical = true;
-                    break;
-                }
-            }
-            if (!critical) {
-                worst = i;
-            }
-        }
-        return worst;
-    }
-
-    private static List<int[]> greedyPick(List<int[]> pool, int[][] top5, int[] last, boolean[][] cold15, int target,
-                                          RecentFeatureStats feat) {
-        List<int[]> selected = new ArrayList<>(target);
-        Set<String> used = new HashSet<>();
-        int[][] coldUsed = new int[3][10];
-
-        while (selected.size() < target) {
-            boolean[][] covered = topCoveredFlags(selected, top5);
-            int uncovered = countUncovered(covered);
-            int[] best = null;
-            int bestScore = Integer.MIN_VALUE;
-
-            for (int[] c : pool) {
-                String key = "" + c[0] + c[1] + c[2];
-                if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                    continue;
-                }
-                int newCover = 0;
-                int rankBonus = 0;
-                for (int pos = 0; pos < 3; pos++) {
-                    int idx = indexOf(top5[pos], c[pos]);
-                    if (idx >= 0 && !covered[pos][idx]) {
-                        newCover++;
-                        rankBonus += (TOP_N - idx) * 20;
-                    }
-                }
-                int gain;
-                if (uncovered > 0) {
-                    if (newCover == 0) {
-                        continue;
-                    }
-                    gain = newCover * 1000 + rankBonus + c[3];
-                } else {
-                    gain = c[3];
-                }
-                if (containsChuanOrNeighbor(c, last)) {
-                    gain += 30;
-                }
-                gain += feat.shapeBonus(c[0], c[1], c[2]) / 2;
-                int sum = c[0] + c[1] + c[2];
-                if (sum == 20 || sum == 21) {
-                    gain += 8;
-                }
-                for (int pos = 0; pos < 3; pos++) {
-                    if (c[pos] == top5[pos][0] && !covered[pos][0]) {
-                        gain += 200;
-                    }
-                    if (c[pos] == top5[pos][1] && !covered[pos][1]) {
-                        gain += 150;
-                    }
-                }
-                if (gain > bestScore) {
-                    bestScore = gain;
-                    best = c;
-                }
-            }
-
-            if (best == null) {
-                for (int[] c : pool) {
-                    String key = "" + c[0] + c[1] + c[2];
-                    if (used.contains(key) || !coldOk(c, cold15, coldUsed)) {
-                        continue;
-                    }
-                    int gain = c[3] + feat.shapeBonus(c[0], c[1], c[2]) / 2;
-                    if (containsChuanOrNeighbor(c, last)) {
-                        gain += 30;
-                    }
-                    if (gain > bestScore) {
-                        bestScore = gain;
-                        best = c;
-                    }
-                }
-            }
-            if (best == null) {
-                break;
-            }
-            addTicket(selected, used, best, cold15, coldUsed);
-        }
-
-        return selected;
-    }
-
-    private static boolean[][] topCoveredFlags(List<int[]> selected, int[][] top5) {
-        boolean[][] covered = new boolean[3][TOP_N];
-        for (int[] s : selected) {
-            for (int pos = 0; pos < 3; pos++) {
-                int idx = indexOf(top5[pos], s[pos]);
-                if (idx >= 0) {
-                    covered[pos][idx] = true;
-                }
-            }
-        }
-        return covered;
-    }
-
-    private static int countUncovered(boolean[][] covered) {
-        int n = 0;
-        for (int pos = 0; pos < 3; pos++) {
-            for (int i = 0; i < TOP_N; i++) {
-                if (!covered[pos][i]) {
-                    n++;
-                }
-            }
-        }
-        return n;
-    }
-
-    private static void addTicket(List<int[]> selected, Set<String> used, int[] c,
-                                  boolean[][] cold15, int[][] coldUsed) {
-        selected.add(new int[]{c[0], c[1], c[2]});
-        used.add("" + c[0] + c[1] + c[2]);
-        for (int pos = 0; pos < 3; pos++) {
-            if (cold15[pos][c[pos]]) {
-                coldUsed[pos][c[pos]]++;
-            }
-        }
-    }
-
-    private static boolean coldOk(int[] c, boolean[][] cold15, int[][] coldUsed) {
-        for (int pos = 0; pos < 3; pos++) {
-            if (cold15[pos][c[pos]] && coldUsed[pos][c[pos]] >= 1) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean satisfyHard(List<int[]> selected, int[][] top5, int[] last, boolean[][] cold15) {
-        // C1 覆盖 ≥4
-        for (int pos = 0; pos < 3; pos++) {
-            Set<Integer> set = new HashSet<>();
-            for (int[] s : selected) {
-                if (indexOf(top5[pos], s[pos]) >= 0) {
-                    set.add(s[pos]);
-                }
-            }
-            if (set.size() < 4) {
-                return false;
-            }
-        }
-        // C2 Top1/Top2
-        for (int pos = 0; pos < 3; pos++) {
-            boolean t1 = false, t2 = false;
-            for (int[] s : selected) {
-                if (s[pos] == top5[pos][0]) {
-                    t1 = true;
-                }
-                if (s[pos] == top5[pos][1]) {
-                    t2 = true;
-                }
-            }
-            if (!t1 || !t2) {
-                return false;
-            }
-        }
-        // C3 至少一半含传邻
-        int chuan = 0;
-        for (int[] s : selected) {
-            if (containsChuanOrNeighbor(s, last)) {
-                chuan++;
-            }
-        }
-        if (chuan * 2 < selected.size()) {
-            return false;
-        }
-        // C4 冷号同位置 ≤1
-        int[][] cnt = new int[3][10];
-        for (int[] s : selected) {
-            for (int pos = 0; pos < 3; pos++) {
-                if (cold15[pos][s[pos]]) {
-                    cnt[pos][s[pos]]++;
-                    if (cnt[pos][s[pos]] > 1) {
-                        return false;
-                    }
-                }
-            }
-        }
-        return true;
-    }
-
-
-    private static boolean containsChuanOrNeighbor(int[] ticket, int[] last) {
-        for (int pos = 0; pos < 3; pos++) {
-            int d = ticket[pos];
-            if (d == last[pos] || d == neighbor(last[pos], -1) || d == neighbor(last[pos], 1)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean consecutiveExtreme(int[][] digits, boolean oddEven) {
-        int n = digits.length;
-        if (n < 3) {
-            return false;
-        }
-        for (int i = n - 3; i < n; i++) {
-            int[] t = digits[i];
-            if (oddEven) {
-                int odd = (t[0] & 1) + (t[1] & 1) + (t[2] & 1);
-                if (odd != 0 && odd != 3) {
-                    return false;
-                }
-            } else {
-                int big = (t[0] >= 5 ? 1 : 0) + (t[1] >= 5 ? 1 : 0) + (t[2] >= 5 ? 1 : 0);
-                if (big != 0 && big != 3) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     // ========================= 统计工具 =========================
@@ -2898,19 +1899,6 @@ public final class RuleBasedPredictUtils {
         return om;
     }
 
-    private static int[] topKByFreq(int[] freq, int k) {
-        Integer[] idx = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            idx[i] = i;
-        }
-        Arrays.sort(idx, (a, b) -> Integer.compare(freq[b], freq[a]));
-        int[] r = new int[k];
-        for (int i = 0; i < k; i++) {
-            r[i] = idx[i];
-        }
-        return r;
-    }
-
     private static void fillComparePosStats(List<HmCache.CompareDto> compares, int pos, int[] actual, int[] pred) {
         if (compares == null) {
             return;
@@ -2942,27 +1930,12 @@ public final class RuleBasedPredictUtils {
         return (d + delta + 10) % 10;
     }
 
-    private static int indexOf(int[] arr, int v) {
-        for (int i = 0; i < arr.length; i++) {
-            if (arr[i] == v) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     private static String posName(int pos) {
         return switch (pos) {
             case 0 -> "百";
             case 1 -> "十";
             default -> "个";
         };
-    }
-
-    private static final class BiasFlags {
-        boolean missNeighborOften;
-        boolean forceHotMidColdMix;
-        boolean[] posMiss3 = new boolean[3];
     }
 
     /** 供本地用历史数组快速验证 */

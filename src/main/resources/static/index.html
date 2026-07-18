@@ -753,7 +753,7 @@
             font-weight: 400;
         }
 
-        /* 100注大底 */
+        /* 150注大底 */
         .dadi-preview {
             display: flex;
             flex-direction: column;
@@ -1687,9 +1687,8 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('3d', 'zusan', this)">AI组三</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">100注大底</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">150注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
@@ -1822,9 +1821,8 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'zusan', this)">AI组三</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">100注大底</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">150注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
@@ -2612,13 +2610,11 @@
 
         const isQima = compareTabs[type] === 'qima';
         const isDadi = compareTabs[type] === 'dadi';
-        const isZusan = compareTabs[type] === 'zusan';
         const count = filters[type];
         container.classList.toggle('qima-mode', isQima);
-        // 组三与大底同用紧凑预览行，避免号码撑高
-        container.classList.toggle('dadi-mode', isDadi || isZusan);
+        container.classList.toggle('dadi-mode', isDadi);
 
-        const useFill = count > 0 && count <= 10 && !isQima && !isDadi && !isZusan && !isMobileView();
+        const useFill = count > 0 && count <= 10 && !isQima && !isDadi && !isMobileView();
         applyTableFill(container, useFill, count || 10);
     }
 
@@ -2780,18 +2776,18 @@
     }
 
     function getDadiData(type) {
-        // 100注大底直接取对比文件中的完整三码预测
+        // 150注大底直接取对比文件中的完整三码预测
         const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
         return Array.isArray(data) ? data : [];
     }
 
-    /** 对比文件 aiHm 中取最多 100 注作为大底 */
+    /** 对比文件 aiHm 中取最多 150 注作为大底 */
     function getDadiHm(item) {
         if (!item || !item.aiHm) return '';
         return item.aiHm.split(',')
             .map(s => s.trim())
             .filter(Boolean)
-            .slice(0, 100)
+            .slice(0, 150)
             .join(',');
     }
 
@@ -3163,7 +3159,7 @@
             const dadiHm = getDadiHm(item);
             if (dadiHm) {
                 const numbers = dadiHm.split(',');
-                viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '100注大底');
+                viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '150注大底');
             }
         });
     }
@@ -3214,12 +3210,8 @@
             thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
             return;
         }
-        if (compareType === 'zusan') {
-            thead.innerHTML = '<tr><th>序号</th><th>AI组三</th><th>实际开奖</th></tr>';
-            return;
-        }
         if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>100注大底</th><th>实际开奖</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>150注大底</th><th>实际开奖</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -3231,7 +3223,6 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'dadi' || compareType === 'zusan') return 3;
         return 3;
     }
 
@@ -3320,13 +3311,35 @@
         document.getElementById(domPrefix(type) + '-qima-detail-btn').onclick = () => showQimaHitsPopup(hits);
     }
 
-    function topSanmaBets(aiHm, n = 5) {
+    function topSanmaBets(itemOrHm, n = 10) {
+        // 优先用后端命中位次带选出的推荐注（5~10，已禁同号不同序）
+        if (itemOrHm && typeof itemOrHm === 'object') {
+            if (itemOrHm.aiRecommendHm) {
+                return String(itemOrHm.aiRecommendHm).split(',')
+                    .map(s => s.trim())
+                    .filter(Boolean)
+                    .join(',');
+            }
+            return uniqueDigitSetBets(itemOrHm.aiHm, n);
+        }
+        return uniqueDigitSetBets(itemOrHm, n);
+    }
+
+    /** 从完整列表取前若干注，跳过三码相同仅顺序不同的重复 */
+    function uniqueDigitSetBets(aiHm, maxN = 10) {
         if (!aiHm) return '';
-        return aiHm.split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-            .slice(0, n)
-            .join(',');
+        const out = [];
+        const seen = new Set();
+        for (const raw of String(aiHm).split(',')) {
+            if (out.length >= maxN) break;
+            const t = raw.trim();
+            if (!t) continue;
+            const key = sortedDigitKey(t.length === 3 ? t : t.padStart(3, '0').slice(-3));
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(t.length === 3 ? t : t.padStart(3, '0').slice(-3));
+        }
+        return out.join(',');
     }
 
     function isPairCode(code) {
@@ -3364,9 +3377,11 @@
         return zuSanHm.split(',').map(s => s.trim()).includes(key);
     }
 
-    function checkMatch(aiHm, realHm) {
-        if (!aiHm || !realHm) return false;
-        return topSanmaBets(aiHm).split(',').includes(realHm);
+    function checkMatch(itemOrHm, realHm) {
+        if (!realHm) return false;
+        const bets = topSanmaBets(itemOrHm);
+        if (!bets) return false;
+        return bets.split(',').includes(realHm);
     }
 
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
@@ -3446,28 +3461,12 @@
             return;
         }
 
-        if (tab === 'zusan') {
-            const total = compareData.length;
-            let hitSuccess = 0;
-            const withPred = compareData.filter(i => getZuSanHm(i));
-            withPred.forEach(item => {
-                if (checkZuSanMatch(getZuSanHm(item), item.realHm)) hitSuccess++;
-            });
-            const hitTotal = withPred.length;
-            const hitRate = hitTotal > 0 ? ((hitSuccess / hitTotal) * 100).toFixed(1) : 0;
-            el.innerHTML = `
-                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
-                <div class="stat-card"><div class="stat-value">${hitSuccess}/${hitTotal}</div><div class="stat-label">组三命中(命中期数/有预测期数)</div></div>
-                <div class="stat-card"><div class="stat-value">${hitRate}%</div><div class="stat-label">组三命中率</div></div>`;
-            return;
-        }
-
         let sanmaSuccess = 0, qimaSuccess = 0;
         const total = compareData.length;
         const sanmaTotal = compareData.filter(i => i.aiHm).length;
         const qimaTotal = compareData.filter(i => i.aiDingWeiHm).length;
         compareData.forEach(item => {
-            if (checkMatch(item.aiHm, item.realHm)) sanmaSuccess++;
+            if (checkMatch(item, item.realHm)) sanmaSuccess++;
             if (checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) qimaSuccess++;
         });
         const sanmaRate = sanmaTotal > 0 ? ((sanmaSuccess / sanmaTotal) * 100).toFixed(1) : 0;
@@ -3504,13 +3503,6 @@
             adjustPredictTable(type);
             return;
         }
-        if (compareType === 'zusan') {
-            filteredData.forEach((item, idx) => {
-                appendZuSanTableRow(tbody, item, idx + 1);
-            });
-            adjustPredictTable(type);
-            return;
-        }
         filteredData.forEach((item, idx) => {
             const seq = idx + 1;
             const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
@@ -3537,8 +3529,8 @@
                     btn.onclick = () => showQimaIndexPopup(seq, positions, item.aiDingWeiHm, item.realHm);
                 }
             } else {
-                const displayHm = topSanmaBets(item.aiHm);
-                const isMatch = checkMatch(item.aiHm, item.realHm);
+                const displayHm = topSanmaBets(item);
+                const isMatch = checkMatch(item, item.realHm);
                 const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
                 row.innerHTML = `
                     <td>${formatBalls(displayHm)}</td>
