@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 纯规则预测。3D / 排列三分专项配置；注数最多 150。
+ * 纯规则预测。3D / 排列三分专项配置；注数最多 200。
  * 纠偏：近窗最频繁偏差 ± 因子；命中名次带优先；按开奖走势加权。
  * 目标：近100期直选≥20、组选≥50。
  */
@@ -27,10 +27,12 @@ public final class RuleBasedPredictUtils {
         PL3
     }
 
-    /** 注数上限：优先 100，覆盖不足时扩到 150 */
-    private static final int MAX_BET_LIMIT = 150;
+    /** 注数上限：默认 200 */
+    private static final int MAX_BET_LIMIT = 200;
+    /** 回测对比用：>0 时覆盖上限（如 150） */
+    static int BET_LIMIT_OVERRIDE = 0;
     private static int MIN_BET = 60;
-    private static int TARGET_BET = 150;
+    private static int TARGET_BET = 200;
     private static final int TOP_N = 8;
     private static int GROUP_DIGIT_POOL = 10;
     private static int RANK_BAND_LO = 3;
@@ -50,7 +52,12 @@ public final class RuleBasedPredictUtils {
     }
 
     public static int maxBetLimit() {
-        return MAX_BET_LIMIT;
+        return BET_LIMIT_OVERRIDE > 0 ? BET_LIMIT_OVERRIDE : MAX_BET_LIMIT;
+    }
+
+    /** 回测用：临时覆盖注数上限；传 ≤0 恢复默认 200 */
+    public static void setBetLimitOverride(int limit) {
+        BET_LIMIT_OVERRIDE = limit;
     }
 
     public static String get3dPredict() {
@@ -75,6 +82,8 @@ public final class RuleBasedPredictUtils {
         applyGameProfile(kind == null ? GameKind.SD_3D : kind);
 
         // 排三：历史对比纠偏会显著拉低近100期直选，评分与选号均不使用 compares
+        // 连挂配额仍可用 compares（只调配额、不进位分/纠偏种子）
+        List<HmCache.CompareDto> streakCompares = compares;
         if (CURRENT_KIND == GameKind.PL3) {
             compares = null;
         }
@@ -113,6 +122,8 @@ public final class RuleBasedPredictUtils {
 
         // 按走势动态微调配额
         adjustQuotasByShape(shapeProb);
+        // 命中率优先：根据近窗对比连挂，小幅抬升覆盖配额（不改打分主链路）
+        applyMissStreakQuotaBoost(streakCompares);
 
         List<int[]> selected = selectGroupFirst(digits, scores, topPos, feat, seeds);
         if (selected == null || selected.size() < MIN_BET) {
@@ -134,7 +145,8 @@ public final class RuleBasedPredictUtils {
             }
             selected = fillWithTopGroupPerms(selected, scores, feat);
             // 已有约70散组时仍继续用多余排列换更高覆盖的新组
-            selected = ensureGroupCoverageKeepPerms(selected, scores, feat, 95, 2);
+            int needGroups = TARGET_BET >= 200 ? 110 : 95;
+            selected = ensureGroupCoverageKeepPerms(selected, scores, feat, needGroups, 2);
             TUNE_SCATTER = 0;
             TUNE_EXPAND = 0;
         }
@@ -156,22 +168,22 @@ public final class RuleBasedPredictUtils {
     /** 3D / 排三专项参数（面向近100期：直选≥20、组选≥50） */
     private static void applyGameProfile(GameKind kind) {
         CURRENT_KIND = kind;
-        TARGET_BET = MAX_BET_LIMIT;
-        MIN_BET = 80;
+        TARGET_BET = maxBetLimit();
+        MIN_BET = Math.min(80, TARGET_BET);
         GROUP_DIGIT_POOL = 10;
         if (kind == GameKind.SD_3D) {
             RANK_BAND_LO = 3;
             RANK_BAND_HI = 9;
-            GROUP_UNIQUE_TARGET = 75;
-            PAIR_GROUP_QUOTA = 28;
-            PERM_EXPAND_GROUPS = 28;
+            GROUP_UNIQUE_TARGET = TARGET_BET >= 200 ? 90 : 75;
+            PAIR_GROUP_QUOTA = TARGET_BET >= 200 ? 34 : 28;
+            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 36 : 28;
             PREFER_PAIR_EXPAND = true;
         } else {
             RANK_BAND_LO = 2;
             RANK_BAND_HI = 9;
-            GROUP_UNIQUE_TARGET = 90;
-            PAIR_GROUP_QUOTA = 14;
-            PERM_EXPAND_GROUPS = 20;
+            GROUP_UNIQUE_TARGET = TARGET_BET >= 200 ? 105 : 90;
+            PAIR_GROUP_QUOTA = TARGET_BET >= 200 ? 18 : 14;
+            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 28 : 20;
             PREFER_PAIR_EXPAND = false;
         }
     }
@@ -196,6 +208,85 @@ public final class RuleBasedPredictUtils {
             GROUP_UNIQUE_TARGET = Math.min(85, Math.max(GROUP_UNIQUE_TARGET, GROUP_UNIQUE_TARGET + 6));
             PAIR_GROUP_QUOTA = Math.max(16, PAIR_GROUP_QUOTA - 2);
             PERM_EXPAND_GROUPS = Math.min(55, PERM_EXPAND_GROUPS + 6);
+        }
+    }
+
+    /**
+     * 近窗连挂时抬升覆盖：组选连挂→散组/组三配额；直选连挂→排列展开。
+     * 幅度保守，避免反向扰动原标定。
+     */
+    private static void applyMissStreakQuotaBoost(List<HmCache.CompareDto> compares) {
+        if (compares == null || compares.isEmpty()) {
+            return;
+        }
+        int missZx = 0;
+        int missGroup = 0;
+        boolean stopZx = false;
+        boolean stopGroup = false;
+        for (int i = compares.size() - 1; i >= 0 && i >= compares.size() - 15; i--) {
+            HmCache.CompareDto dto = compares.get(i);
+            if (dto == null || dto.getAiHm() == null || dto.getAiHm().isBlank()
+                    || dto.getRealHm() == null || dto.getRealHm().length() != 3) {
+                continue;
+            }
+            String actual = dto.getRealHm().trim();
+            while (actual.length() < 3) {
+                actual = "0" + actual;
+            }
+            char[] ak = actual.toCharArray();
+            Arrays.sort(ak);
+            String aKey = new String(ak);
+            boolean zx = false;
+            boolean group = false;
+            for (String p : dto.getAiHm().split(",")) {
+                String t = p.trim();
+                while (t.length() < 3) {
+                    t = "0" + t;
+                }
+                if (t.length() != 3) {
+                    continue;
+                }
+                if (t.equals(actual)) {
+                    zx = true;
+                    group = true;
+                    break;
+                }
+                char[] ck = t.toCharArray();
+                Arrays.sort(ck);
+                if (new String(ck).equals(aKey)) {
+                    group = true;
+                }
+            }
+            if (!stopZx) {
+                if (zx) {
+                    stopZx = true;
+                } else {
+                    missZx++;
+                }
+            }
+            if (!stopGroup) {
+                if (group) {
+                    stopGroup = true;
+                } else {
+                    missGroup++;
+                }
+            }
+            if (stopZx && stopGroup) {
+                break;
+            }
+        }
+
+        if (missGroup >= 2) {
+            GROUP_UNIQUE_TARGET = Math.min(CURRENT_KIND == GameKind.PL3 ? 105 : 90,
+                    GROUP_UNIQUE_TARGET + 6 + Math.min(6, missGroup));
+            PAIR_GROUP_QUOTA = Math.min(CURRENT_KIND == GameKind.PL3 ? 24 : 45,
+                    PAIR_GROUP_QUOTA + 3);
+            log.info("组选连挂{}期 → 散组目标={} 组三配额={}", missGroup, GROUP_UNIQUE_TARGET, PAIR_GROUP_QUOTA);
+        }
+        if (missZx >= 3) {
+            PERM_EXPAND_GROUPS = Math.min(CURRENT_KIND == GameKind.PL3 ? 40 : 65,
+                    PERM_EXPAND_GROUPS + 4 + Math.min(8, missZx));
+            log.info("直选连挂{}期 → 排列展开组数={}", missZx, PERM_EXPAND_GROUPS);
         }
     }
 

@@ -753,7 +753,7 @@
             font-weight: 400;
         }
 
-        /* 150注大底 */
+        /* 200注大底 */
         .dadi-preview {
             display: flex;
             flex-direction: column;
@@ -1688,7 +1688,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">150注大底</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">200注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
@@ -1822,7 +1822,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">150注大底</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">200注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
@@ -2776,18 +2776,18 @@
     }
 
     function getDadiData(type) {
-        // 150注大底直接取对比文件中的完整三码预测
+        // 200注大底直接取对比文件中的完整三码预测
         const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
         return Array.isArray(data) ? data : [];
     }
 
-    /** 对比文件 aiHm 中取最多 150 注作为大底 */
+    /** 对比文件 aiHm 中取最多 200 注作为大底 */
     function getDadiHm(item) {
         if (!item || !item.aiHm) return '';
         return item.aiHm.split(',')
             .map(s => s.trim())
             .filter(Boolean)
-            .slice(0, 150)
+            .slice(0, 200)
             .join(',');
     }
 
@@ -3159,7 +3159,7 @@
             const dadiHm = getDadiHm(item);
             if (dadiHm) {
                 const numbers = dadiHm.split(',');
-                viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '150注大底');
+                viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '200注大底');
             }
         });
     }
@@ -3211,7 +3211,7 @@
             return;
         }
         if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>150注大底</th><th>实际开奖</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>200注大底</th><th>实际开奖</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -3312,7 +3312,7 @@
     }
 
     function topSanmaBets(itemOrHm, n = 10) {
-        // 优先用后端命中位次带选出的推荐注（5~10，已禁同号不同序）
+        // 优先用后端选出的推荐注（10注，已禁同号不同序）
         if (itemOrHm && typeof itemOrHm === 'object') {
             if (itemOrHm.aiRecommendHm) {
                 return String(itemOrHm.aiRecommendHm).split(',')

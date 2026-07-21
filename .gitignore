@@ -34,3 +34,8 @@ build/
 ### Mac OS ###
 .DS_Store
 vcs.xml
+# lottery data dumps
+data/lottery/
+
+# lottery local dumps (keep code only)
+data/lottery/

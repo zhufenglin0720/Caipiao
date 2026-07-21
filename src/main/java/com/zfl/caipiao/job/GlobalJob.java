@@ -73,12 +73,12 @@ public class GlobalJob {
                     .setAiRecommendHm(pl3Recommend)
                     .setAiZuSanHm(zuSan));
         }
-        // 邮件：命中位次带内 5~10 注，且无同号不同序
+        // 邮件：位次密度+模型先验固定 10 注，且无同号不同序
         String msg = EmailConstant.EMAIL_TEMPLATE
                 .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdRecommend))
                 .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Recommend))
                 .replace("{{TIMESTAMP}}", DateUtil.now());
-        sendEmailCode("今日3D及排三预测（高概率5-10注）", msg);
+        sendEmailCode("今日3D及排三预测（高概率10注）", msg);
     }
 
     @Scheduled(cron = "0 50 18 * * ?")

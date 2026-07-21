@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 @Service
 public class DadiService {
 
-    private static final int DADI_MAX_SIZE = 150;
+    private static final int DADI_MAX_SIZE = 200;
 
     private static final Set<String> VALID_MODELS = Set.of("cursor", "custom");
 
@@ -89,7 +89,7 @@ public class DadiService {
             throw new IllegalArgumentException("请至少录入1注三位数号码");
         }
         if (numbers.size() > DADI_MAX_SIZE) {
-            throw new IllegalArgumentException("最多录入150注三位数号码，当前有效号码数：" + numbers.size());
+            throw new IllegalArgumentException("最多录入200注三位数号码，当前有效号码数：" + numbers.size());
         }
     }
 

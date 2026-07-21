@@ -5,49 +5,51 @@ import com.zfl.caipiao.cache.HmCache;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 从 ≤150 注中挑展示/邮件推荐注：
- * 按近 100 期「开奖落在预测列表的位次」找普遍命中区间，再在该区间内差异化取 5~10 注。
- * 禁止三码完全相同仅顺序不同（如 353 / 335 / 533）。
+ * 从预测大底中挑展示/邮件推荐注（固定 10 注）。
+ * <p>
+ * 命中率优先策略：
+ * 1) 近窗按衰减统计各预测位次的直选命中密度，并做邻位平滑；
+ * 2) 搜索「单位宽度命中最高」的连续位次带（对齐引擎「命中名次带」思想）；
+ * 3) 带内优先 + 全表密度打分，取 Top10；仅禁同三码不同序，避免浪费直选名额。
  */
 public final class RecommendBetUtils {
 
-    /** 与三码回测窗口对齐 */
     public static final int HIT_LOOKBACK = 100;
-    public static final int MIN_PICK = 5;
+    public static final int MIN_PICK = 10;
     public static final int MAX_PICK = 10;
-    /** 预测列表最大位次（150 注） */
-    private static final int MAX_RANK = 150;
-    /** 命中带至少覆盖的样本比例 */
-    private static final int COVER_PCT = 55;
+    private static final int MAX_RANK = 200;
+    /** 越近的命中权重越高 */
+    private static final double RECENCY_DECAY = 0.96;
+    /** 搜索密集带的目标宽度（约等于 10 注可覆盖的位次邻域） */
+    private static final int DENSE_BAND_WIDTH = 18;
+    /** 密集带内额外加成 */
+    private static final double BAND_BOOST = 0.55;
+    /** 历史密度权重（其余为轻微模型序，仅作并列打散） */
+    private static final double HIST_WEIGHT = 0.90;
+    private static final int COLD_TOP_RANKS = 40;
 
     private RecommendBetUtils() {
     }
 
-    /**
-     * 选出 5~10 注推荐（仅推荐本身，不含其余 150 注）。
-     */
     public static String pickRecommendBets(String pred, List<HmCache.CompareDto> history) {
         List<String> all = parseBets(pred);
         if (all.isEmpty()) {
             return "";
         }
-        int[] freq = hitRankFreq(history, HIT_LOOKBACK);
-        int[] band = discoverHitBand(freq);
-        List<String> picked = pickFromBand(all, freq, band[0], band[1]);
+        double[] scores = scoreRanks(all.size(), history);
+        List<String> picked = pickByScores(all, scores);
         if (picked.size() < MIN_PICK) {
-            picked = pickDiverseSequential(all, MAX_PICK);
+            picked = fillUniqueDigitSets(all, MAX_PICK);
         }
         return String.join(",", picked);
     }
 
-    /**
-     * 推荐注置前，其余原序接后（完整列表仍保留供大底等使用）。
-     */
     public static String reorderByHitRanks(String pred, List<HmCache.CompareDto> history) {
         if (StrUtil.isBlank(pred)) {
             return pred;
@@ -58,7 +60,7 @@ public final class RecommendBetUtils {
         }
         List<String> front = parseBets(pickRecommendBets(pred, history));
         if (front.isEmpty()) {
-            front = pickDiverseSequential(all, MAX_PICK);
+            front = fillUniqueDigitSets(all, MAX_PICK);
         }
         Set<String> used = new LinkedHashSet<>(front);
         List<String> ordered = new ArrayList<>(all.size());
@@ -71,9 +73,6 @@ public final class RecommendBetUtils {
         return String.join(",", ordered);
     }
 
-    /**
-     * 从直选预测中提取组三组选（去重、按首次出现顺序），逗号分隔如 112,334,055。
-     */
     public static String extractZuSanGroups(String pred) {
         if (StrUtil.isBlank(pred)) {
             return "";
@@ -122,6 +121,146 @@ public final class RecommendBetUtils {
         return "" + x[0] + x[1] + x[2];
     }
 
+    /**
+     * 位次综合得分。索引 0 不用；scores[rank] 对应预测第 rank 注（1-based）。
+     */
+    static double[] scoreRanks(int predSize, List<HmCache.CompareDto> history) {
+        int n = Math.min(MAX_RANK, Math.max(predSize, 1));
+        double[] hist = new double[n + 1];
+        if (history != null && !history.isEmpty()) {
+            int end = history.size();
+            int start = Math.max(0, end - HIT_LOOKBACK);
+            for (int i = start; i < end; i++) {
+                HmCache.CompareDto dto = history.get(i);
+                if (dto == null || StrUtil.isBlank(dto.getAiHm()) || StrUtil.isBlank(dto.getRealHm())
+                        || dto.getRealHm().length() != 3) {
+                    continue;
+                }
+                int rank = indexOfBet(dto.getAiHm(), dto.getRealHm().trim());
+                if (rank < 1 || rank > n) {
+                    continue;
+                }
+                int age = end - 1 - i;
+                hist[rank] += Math.pow(RECENCY_DECAY, age);
+            }
+        }
+
+        double[] smooth = new double[n + 1];
+        double smoothSum = 0;
+        for (int r = 1; r <= n; r++) {
+            double v = hist[r];
+            if (r > 1) {
+                v += 0.50 * hist[r - 1];
+            }
+            if (r < n) {
+                v += 0.50 * hist[r + 1];
+            }
+            if (r > 2) {
+                v += 0.22 * hist[r - 2];
+            }
+            if (r < n - 1) {
+                v += 0.22 * hist[r + 2];
+            }
+            smooth[r] = v;
+            smoothSum += v;
+        }
+
+        int[] band = discoverDenseBand(smooth, n);
+        double[] scores = new double[n + 1];
+        boolean hasHist = smoothSum > 1e-9;
+        for (int r = 1; r <= n; r++) {
+            // 模型序仅轻微参与：本引擎刻意把命中放到名次带而非 Top1
+            double prior = 1.0 / (1.0 + Math.log(r));
+            if (!hasHist) {
+                scores[r] = r <= COLD_TOP_RANKS ? prior : prior * 0.12;
+                continue;
+            }
+            double dens = smooth[r] / smoothSum;
+            scores[r] = HIST_WEIGHT * dens + (1.0 - HIST_WEIGHT) * prior;
+            if (r >= band[0] && r <= band[1]) {
+                scores[r] += BAND_BOOST * dens;
+            }
+            if (hist[r] <= 0 && (r < band[0] - 8 || r > band[1] + 8)) {
+                scores[r] *= 0.42;
+            }
+        }
+        return scores;
+    }
+
+    /** 找平滑密度最高的固定宽度连续带 */
+    static int[] discoverDenseBand(double[] smooth, int n) {
+        int width = Math.min(DENSE_BAND_WIDTH, Math.max(MIN_PICK, n));
+        if (n <= width) {
+            return new int[]{1, n};
+        }
+        double bestSum = -1;
+        int bestLo = 1;
+        for (int lo = 1; lo + width - 1 <= n; lo++) {
+            int hi = lo + width - 1;
+            double sum = 0;
+            for (int r = lo; r <= hi; r++) {
+                sum += smooth[r];
+            }
+            // 轻微偏好中段：与「命中名次带」一致，避免纯贴边噪声
+            if (lo <= 2) {
+                sum *= 0.92;
+            }
+            if (sum > bestSum) {
+                bestSum = sum;
+                bestLo = lo;
+            }
+        }
+        return new int[]{bestLo, bestLo + width - 1};
+    }
+
+    private static List<String> pickByScores(List<String> all, double[] scores) {
+        int n = Math.min(all.size(), scores.length - 1);
+        List<Integer> ranks = new ArrayList<>(n);
+        for (int r = 1; r <= n; r++) {
+            ranks.add(r);
+        }
+        ranks.sort(Comparator
+                .comparingDouble((Integer r) -> scores[r]).reversed()
+                .thenComparingInt(r -> r));
+
+        List<String> selected = new ArrayList<>(MAX_PICK);
+        Set<String> usedDigitKeys = new LinkedHashSet<>();
+        for (int rank : ranks) {
+            if (selected.size() >= MAX_PICK) {
+                break;
+            }
+            String bet = all.get(rank - 1);
+            if (bet == null || bet.length() != 3) {
+                continue;
+            }
+            String key = digitKey(bet);
+            if (usedDigitKeys.contains(key)) {
+                continue;
+            }
+            selected.add(bet);
+            usedDigitKeys.add(key);
+        }
+        return selected;
+    }
+
+    private static List<String> fillUniqueDigitSets(List<String> all, int pick) {
+        List<String> selected = new ArrayList<>(pick);
+        Set<String> used = new LinkedHashSet<>();
+        for (String bet : all) {
+            if (selected.size() >= pick) {
+                break;
+            }
+            if (bet == null || bet.length() != 3) {
+                continue;
+            }
+            String key = digitKey(bet);
+            if (used.add(key)) {
+                selected.add(bet);
+            }
+        }
+        return selected;
+    }
+
     static int[] hitRankFreq(List<HmCache.CompareDto> history, int lookback) {
         int[] freq = new int[MAX_RANK + 1];
         if (history == null) {
@@ -141,224 +280,6 @@ public final class RecommendBetUtils {
             }
         }
         return freq;
-    }
-
-    /**
-     * 找覆盖 ≥COVER_PCT% 命中样本的最短连续位次带；偏好避开纯前几名（1~5）。
-     */
-    static int[] discoverHitBand(int[] freq) {
-        int total = 0;
-        for (int r = 1; r <= MAX_RANK; r++) {
-            total += freq[r];
-        }
-        if (total == 0) {
-            // 无历史：用中段，避免默认前几注
-            return new int[]{8, 40};
-        }
-        int need = (total * COVER_PCT + 99) / 100;
-        int bestLo = 6, bestHi = 40, bestScore = Integer.MAX_VALUE;
-        for (int lo = 1; lo <= MAX_RANK; lo++) {
-            int sum = 0;
-            for (int hi = lo; hi <= MAX_RANK; hi++) {
-                sum += freq[hi];
-                if (sum < need) {
-                    continue;
-                }
-                int width = hi - lo;
-                int headPenalty = (hi <= 5) ? 8 : (lo <= 5 ? 3 : 0);
-                int score = width + headPenalty;
-                if (score < bestScore || (score == bestScore && lo >= 6 && bestLo < 6)) {
-                    bestScore = score;
-                    bestLo = lo;
-                    bestHi = hi;
-                }
-                break;
-            }
-        }
-        // 带宽至少能支撑 5~10 选号
-        if (bestHi - bestLo + 1 < MIN_PICK) {
-            bestHi = Math.min(MAX_RANK, bestLo + MIN_PICK - 1);
-        }
-        if (bestHi - bestLo + 1 > 60) {
-            // 过宽则收到命中峰值附近
-            int peak = 1;
-            for (int r = 2; r <= MAX_RANK; r++) {
-                if (freq[r] > freq[peak]) {
-                    peak = r;
-                }
-            }
-            bestLo = Math.max(1, peak - 15);
-            bestHi = Math.min(MAX_RANK, bestLo + 35);
-            if (bestLo <= 5 && freq[peak] > 0 && peak > 5) {
-                bestLo = Math.max(6, peak - 12);
-                bestHi = Math.min(MAX_RANK, bestLo + 35);
-            }
-        }
-        return new int[]{bestLo, bestHi};
-    }
-
-    private static List<String> pickFromBand(List<String> all, int[] freq, int bandLo, int bandHi) {
-        // 带内位次按命中频次排序
-        List<Integer> ranks = new ArrayList<>();
-        for (int r = bandLo; r <= bandHi; r++) {
-            ranks.add(r);
-        }
-        ranks.sort((a, b) -> {
-            int c = Integer.compare(freq[b], freq[a]);
-            return c != 0 ? c : Integer.compare(a, b);
-        });
-
-        List<String> selected = new ArrayList<>(MAX_PICK);
-        Set<Integer> usedIdx = new LinkedHashSet<>();
-
-        // 1) 严格差异：不同组选 + 同位相同 < 2
-        for (int rank : ranks) {
-            if (selected.size() >= MAX_PICK) {
-                break;
-            }
-            tryAdd(all, rank, selected, usedIdx, true);
-        }
-        // 2) 放宽同位，仍禁同组选
-        for (int rank : ranks) {
-            if (selected.size() >= MAX_PICK) {
-                break;
-            }
-            tryAdd(all, rank, selected, usedIdx, false);
-        }
-        // 3) 带内剩余：只禁同组选
-        for (int rank = bandLo; rank <= bandHi && selected.size() < MAX_PICK; rank++) {
-            int idx = rank - 1;
-            if (idx < 0 || idx >= all.size() || usedIdx.contains(idx)) {
-                continue;
-            }
-            String bet = all.get(idx);
-            if (!sameDigitSet(bet, selected)) {
-                selected.add(bet);
-                usedIdx.add(idx);
-            }
-        }
-        // 4) 不足 MIN_PICK：向带外扩展（仍禁同组选），优先带右侧再左侧
-        for (int step = 1; selected.size() < MIN_PICK && step < MAX_RANK; step++) {
-            for (int rank : new int[]{bandHi + step, bandLo - step}) {
-                if (selected.size() >= MIN_PICK) {
-                    break;
-                }
-                if (rank < 1 || rank > MAX_RANK) {
-                    continue;
-                }
-                int idx = rank - 1;
-                if (idx >= all.size() || usedIdx.contains(idx)) {
-                    continue;
-                }
-                String bet = all.get(idx);
-                if (!sameDigitSet(bet, selected)) {
-                    selected.add(bet);
-                    usedIdx.add(idx);
-                }
-            }
-        }
-        // 目标尽量靠近 MAX_PICK：带外继续补（已有 ≥MIN）
-        for (int rank = 1; rank <= Math.min(MAX_RANK, all.size()) && selected.size() < MAX_PICK; rank++) {
-            if (rank >= bandLo && rank <= bandHi) {
-                continue;
-            }
-            int idx = rank - 1;
-            if (usedIdx.contains(idx)) {
-                continue;
-            }
-            String bet = all.get(idx);
-            if (!sameDigitSet(bet, selected)) {
-                selected.add(bet);
-                usedIdx.add(idx);
-            }
-        }
-        return selected;
-    }
-
-    private static void tryAdd(List<String> all, int rank, List<String> selected,
-                               Set<Integer> usedIdx, boolean strict) {
-        int idx = rank - 1;
-        if (idx < 0 || idx >= all.size() || usedIdx.contains(idx)) {
-            return;
-        }
-        String bet = all.get(idx);
-        if (isDiverse(bet, selected, strict)) {
-            selected.add(bet);
-            usedIdx.add(idx);
-        }
-    }
-
-    private static List<String> pickDiverseSequential(List<String> all, int pick) {
-        List<String> selected = new ArrayList<>(pick);
-        for (String bet : all) {
-            if (selected.size() >= pick) {
-                break;
-            }
-            if (isDiverse(bet, selected, true)) {
-                selected.add(bet);
-            }
-        }
-        for (String bet : all) {
-            if (selected.size() >= pick) {
-                break;
-            }
-            if (!selected.contains(bet) && isDiverse(bet, selected, false)) {
-                selected.add(bet);
-            }
-        }
-        for (String bet : all) {
-            if (selected.size() >= Math.max(MIN_PICK, pick)) {
-                break;
-            }
-            if (!selected.contains(bet) && !sameDigitSet(bet, selected)) {
-                selected.add(bet);
-            }
-        }
-        return selected;
-    }
-
-    /**
-     * @param strict true：同三码集合禁止，且同位相同≥2 禁止；false：仍禁止同三码集合
-     */
-    private static boolean isDiverse(String cand, List<String> selected, boolean strict) {
-        if (cand == null || cand.length() != 3) {
-            return false;
-        }
-        if (sameDigitSet(cand, selected)) {
-            return false;
-        }
-        for (String s : selected) {
-            if (s == null || s.length() != 3) {
-                continue;
-            }
-            if (cand.equals(s)) {
-                return false;
-            }
-            int samePos = 0;
-            for (int i = 0; i < 3; i++) {
-                if (cand.charAt(i) == s.charAt(i)) {
-                    samePos++;
-                }
-            }
-            if (strict && samePos >= 2) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** 是否与已选任一注三码完全相同（忽略顺序，如 353 与 335） */
-    private static boolean sameDigitSet(String cand, List<String> selected) {
-        if (cand == null || cand.length() != 3) {
-            return true;
-        }
-        String candKey = digitKey(cand);
-        for (String s : selected) {
-            if (s != null && s.length() == 3 && digitKey(s).equals(candKey)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static String digitKey(String code) {
@@ -402,16 +323,33 @@ public final class RecommendBetUtils {
     }
 
     public static String describeHitRanks(List<HmCache.CompareDto> history) {
+        double[] scores = scoreRanks(MAX_RANK, history);
+        List<Integer> ranks = new ArrayList<>();
+        for (int r = 1; r < scores.length; r++) {
+            ranks.add(r);
+        }
+        ranks.sort(Comparator
+                .comparingDouble((Integer r) -> scores[r]).reversed()
+                .thenComparingInt(r -> r));
+        int[] top = new int[Math.min(MAX_PICK, ranks.size())];
+        for (int i = 0; i < top.length; i++) {
+            top[i] = ranks.get(i);
+        }
+        double[] smooth = new double[MAX_RANK + 1];
         int[] freq = hitRankFreq(history, HIT_LOOKBACK);
-        int[] band = discoverHitBand(freq);
-        int cover = 0, total = 0;
+        for (int r = 1; r <= MAX_RANK; r++) {
+            smooth[r] = freq[r];
+        }
+        int[] band = discoverDenseBand(smooth, MAX_RANK);
+        int covered = 0;
+        int total = 0;
         for (int r = 1; r <= MAX_RANK; r++) {
             total += freq[r];
             if (r >= band[0] && r <= band[1]) {
-                cover += freq[r];
+                covered += freq[r];
             }
         }
-        return String.format("近%d期命中位次带=%d~%d (覆盖%d/%d)，推荐%d~%d注且禁同号不同序",
-                HIT_LOOKBACK, band[0], band[1], cover, total, MIN_PICK, MAX_PICK);
+        return String.format("近%d期密集位次带=%d~%d(落%d/%d)，按密度取固定%d注 优选=%s",
+                HIT_LOOKBACK, band[0], band[1], covered, total, MAX_PICK, Arrays.toString(top));
     }
 }
