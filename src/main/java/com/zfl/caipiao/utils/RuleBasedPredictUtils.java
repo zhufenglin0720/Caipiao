@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 纯规则预测。3D / 排列三分专项配置；注数最多 150。
+ * 纯规则预测。3D / 排列三分专项配置；注数最多 200。
  * 纠偏：近窗最频繁偏差 ± 因子；命中名次带优先；按开奖走势加权。
  * 目标：近100期直选≥20、组选≥50。
  */
@@ -27,10 +27,12 @@ public final class RuleBasedPredictUtils {
         PL3
     }
 
-    /** 注数上限：优先 100，覆盖不足时扩到 150 */
-    private static final int MAX_BET_LIMIT = 150;
+    /** 注数上限：默认 200 */
+    private static final int MAX_BET_LIMIT = 200;
+    /** 回测对比用：>0 时覆盖上限（如 150） */
+    static int BET_LIMIT_OVERRIDE = 0;
     private static int MIN_BET = 60;
-    private static int TARGET_BET = 150;
+    private static int TARGET_BET = 200;
     private static final int TOP_N = 8;
     private static int GROUP_DIGIT_POOL = 10;
     private static int RANK_BAND_LO = 3;
@@ -50,7 +52,12 @@ public final class RuleBasedPredictUtils {
     }
 
     public static int maxBetLimit() {
-        return MAX_BET_LIMIT;
+        return BET_LIMIT_OVERRIDE > 0 ? BET_LIMIT_OVERRIDE : MAX_BET_LIMIT;
+    }
+
+    /** 回测用：临时覆盖注数上限；传 ≤0 恢复默认 200 */
+    public static void setBetLimitOverride(int limit) {
+        BET_LIMIT_OVERRIDE = limit;
     }
 
     public static String get3dPredict() {
@@ -138,7 +145,8 @@ public final class RuleBasedPredictUtils {
             }
             selected = fillWithTopGroupPerms(selected, scores, feat);
             // 已有约70散组时仍继续用多余排列换更高覆盖的新组
-            selected = ensureGroupCoverageKeepPerms(selected, scores, feat, 95, 2);
+            int needGroups = TARGET_BET >= 200 ? 110 : 95;
+            selected = ensureGroupCoverageKeepPerms(selected, scores, feat, needGroups, 2);
             TUNE_SCATTER = 0;
             TUNE_EXPAND = 0;
         }
@@ -160,22 +168,22 @@ public final class RuleBasedPredictUtils {
     /** 3D / 排三专项参数（面向近100期：直选≥20、组选≥50） */
     private static void applyGameProfile(GameKind kind) {
         CURRENT_KIND = kind;
-        TARGET_BET = MAX_BET_LIMIT;
-        MIN_BET = 80;
+        TARGET_BET = maxBetLimit();
+        MIN_BET = Math.min(80, TARGET_BET);
         GROUP_DIGIT_POOL = 10;
         if (kind == GameKind.SD_3D) {
             RANK_BAND_LO = 3;
             RANK_BAND_HI = 9;
-            GROUP_UNIQUE_TARGET = 75;
-            PAIR_GROUP_QUOTA = 28;
-            PERM_EXPAND_GROUPS = 28;
+            GROUP_UNIQUE_TARGET = TARGET_BET >= 200 ? 90 : 75;
+            PAIR_GROUP_QUOTA = TARGET_BET >= 200 ? 34 : 28;
+            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 36 : 28;
             PREFER_PAIR_EXPAND = true;
         } else {
             RANK_BAND_LO = 2;
             RANK_BAND_HI = 9;
-            GROUP_UNIQUE_TARGET = 90;
-            PAIR_GROUP_QUOTA = 14;
-            PERM_EXPAND_GROUPS = 20;
+            GROUP_UNIQUE_TARGET = TARGET_BET >= 200 ? 105 : 90;
+            PAIR_GROUP_QUOTA = TARGET_BET >= 200 ? 18 : 14;
+            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 28 : 20;
             PREFER_PAIR_EXPAND = false;
         }
     }

@@ -14,8 +14,8 @@ import java.util.Locale;
 
 /**
  * 近 500 期综合命中率回测：
- * - 10注三码（取预测前10注）直选 / 组选
- * - 150注大底 直选 / 组选
+ * - 7注三码（取预测前7注，对齐邮件）直选 / 组选
+ * - 200注大底 直选 / 组选
  * - 七码定位 三位全中 / 分位命中
  * <p>
  * 数据优先 F:\彩票 Excel，其次项目 data/lottery 或 17500 文本。
@@ -24,7 +24,7 @@ public class FullHitRateBacktest {
 
     private static final int EVAL_PERIODS = 500;
     private static final int WARMUP_MIN = 60;
-    private static final int TOP10 = 10;
+    private static final int TOP_MAIL = 7;
 
     public static void main(String[] args) throws Exception {
         muteLogs();
@@ -35,7 +35,7 @@ public class FullHitRateBacktest {
 
         StringBuilder sb = new StringBuilder();
         sb.append("========== 近").append(eval).append("期综合命中率回测 ==========\n");
-        sb.append("指标：10注三码(直/组)、150注大底(直/组)、七码(全中/分位)\n");
+        sb.append("指标：7注三码(直/组)、200注大底(直/组)、七码(全中/分位)\n");
         sb.append("数据源优先：F:\\彩票 → D:\\彩票 → data/lottery → 17500\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(),
@@ -46,7 +46,7 @@ public class FullHitRateBacktest {
 
         sb.append("\n========== 汇总表 ==========\n");
         sb.append(String.format(Locale.ROOT,
-                "%-8s | 10注直选 | 10注组选 | 150注直选 | 150注组选 | 七码全中 | 七码百 | 七码十 | 七码个%n",
+                "%-8s | 7注直选 | 7注组选 | 200注直选 | 200注组选 | 七码全中 | 七码百 | 七码十 | 七码个%n",
                 "彩种"));
         appendSummaryRow(sb, sd);
         appendSummaryRow(sb, pl3);
@@ -77,8 +77,8 @@ public class FullHitRateBacktest {
         sb.append(String.format(Locale.ROOT,
                 "%-8s | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d | %4d | %4d%n",
                 r.name,
-                r.top10Zx, r.n, pct(r.top10Zx, r.n),
-                r.top10Group, r.n, pct(r.top10Group, r.n),
+                r.mailZx, r.n, pct(r.mailZx, r.n),
+                r.mailGroup, r.n, pct(r.mailGroup, r.n),
                 r.dadiZx, r.n, pct(r.dadiZx, r.n),
                 r.dadiGroup, r.n, pct(r.dadiGroup, r.n),
                 r.dwFull, r.n, pct(r.dwFull, r.n),
@@ -139,13 +139,13 @@ public class FullHitRateBacktest {
 
             String pred = RuleBasedPredictUtils.predict(hist, compares, predKind);
             String dw = RuleBasedDingWeiUtils.predict(hist, compares, dwKind);
-            String top10 = takeTopN(pred, TOP10);
+            String mailTop = takeTopN(pred, TOP_MAIL);
 
-            if (isZxHit(top10, actual)) {
-                r.top10Zx++;
+            if (isZxHit(mailTop, actual)) {
+                r.mailZx++;
             }
-            if (isGroupHit(top10, actual)) {
-                r.top10Group++;
+            if (isGroupHit(mailTop, actual)) {
+                r.mailGroup++;
             }
             if (isZxHit(pred, actual)) {
                 r.dadiZx++;
@@ -173,17 +173,17 @@ public class FullHitRateBacktest {
             int done = i - start + 1;
             if (done % 25 == 0 || done == evalPeriods) {
                 long cost = System.currentTimeMillis() - t0;
-                System.out.printf("%s 评估进度 %d/%d 耗时%dms | 10直%d 150直%d 七码%d%n",
-                        name, done, evalPeriods, cost, r.top10Zx, r.dadiZx, r.dwFull);
+                System.out.printf("%s 评估进度 %d/%d 耗时%dms | 7直%d 200直%d 七码%d%n",
+                        name, done, evalPeriods, cost, r.mailZx, r.dadiZx, r.dwFull);
             }
         }
         long cost = System.currentTimeMillis() - t0;
         out.append(String.format(Locale.ROOT, "评估完成：%d期 耗时=%dms%n", r.n, cost));
         out.append(String.format(Locale.ROOT,
-                "10注三码：直选=%d/%d (%.2f%%)  组选=%d/%d (%.2f%%)%n",
-                r.top10Zx, r.n, pct(r.top10Zx, r.n), r.top10Group, r.n, pct(r.top10Group, r.n)));
+                "7注三码：直选=%d/%d (%.2f%%)  组选=%d/%d (%.2f%%)%n",
+                r.mailZx, r.n, pct(r.mailZx, r.n), r.mailGroup, r.n, pct(r.mailGroup, r.n)));
         out.append(String.format(Locale.ROOT,
-                "150注大底：直选=%d/%d (%.2f%%)  组选=%d/%d (%.2f%%)%n",
+                "200注大底：直选=%d/%d (%.2f%%)  组选=%d/%d (%.2f%%)%n",
                 r.dadiZx, r.n, pct(r.dadiZx, r.n), r.dadiGroup, r.n, pct(r.dadiGroup, r.n)));
         out.append(String.format(Locale.ROOT,
                 "七码定位：全中=%d/%d (%.2f%%)  百=%d/%d (%.2f%%)  十=%d/%d (%.2f%%)  个=%d/%d (%.2f%%)%n",
@@ -302,8 +302,8 @@ public class FullHitRateBacktest {
     private static final class Result {
         final String name;
         int n;
-        int top10Zx;
-        int top10Group;
+        int mailZx;
+        int mailGroup;
         int dadiZx;
         int dadiGroup;
         int dwFull;

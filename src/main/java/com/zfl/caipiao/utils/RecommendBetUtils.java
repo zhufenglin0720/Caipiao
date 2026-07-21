@@ -10,18 +10,19 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 从 ≤150 注中挑展示/邮件推荐注：
- * 按近 100 期「开奖落在预测列表的位次」找普遍命中区间，再在该区间内差异化取 5~10 注。
+ * 从预测大底中挑展示/邮件推荐注：
+ * 按近 100 期「开奖落在预测列表的位次」找普遍命中区间，再在该区间内差异化取固定 7 注。
  * 禁止三码完全相同仅顺序不同（如 353 / 335 / 533）。
  */
 public final class RecommendBetUtils {
 
     /** 与三码回测窗口对齐 */
     public static final int HIT_LOOKBACK = 100;
-    public static final int MIN_PICK = 5;
-    public static final int MAX_PICK = 10;
-    /** 预测列表最大位次（150 注） */
-    private static final int MAX_RANK = 150;
+    /** 邮件推送固定 7 注 */
+    public static final int MIN_PICK = 7;
+    public static final int MAX_PICK = 7;
+    /** 预测列表最大位次（与大底上限对齐） */
+    private static final int MAX_RANK = 200;
     /** 命中带至少覆盖的样本比例 */
     private static final int COVER_PCT = 55;
 
@@ -29,7 +30,7 @@ public final class RecommendBetUtils {
     }
 
     /**
-     * 选出 5~10 注推荐（仅推荐本身，不含其余 150 注）。
+     * 选出固定 7 注推荐（仅推荐本身，不含其余大底）。
      */
     public static String pickRecommendBets(String pred, List<HmCache.CompareDto> history) {
         List<String> all = parseBets(pred);
@@ -175,7 +176,7 @@ public final class RecommendBetUtils {
                 break;
             }
         }
-        // 带宽至少能支撑 5~10 选号
+        // 带宽至少能支撑 7 选号
         if (bestHi - bestLo + 1 < MIN_PICK) {
             bestHi = Math.min(MAX_RANK, bestLo + MIN_PICK - 1);
         }
@@ -411,7 +412,7 @@ public final class RecommendBetUtils {
                 cover += freq[r];
             }
         }
-        return String.format("近%d期命中位次带=%d~%d (覆盖%d/%d)，推荐%d~%d注且禁同号不同序",
-                HIT_LOOKBACK, band[0], band[1], cover, total, MIN_PICK, MAX_PICK);
+        return String.format("近%d期命中位次带=%d~%d (覆盖%d/%d)，推荐固定%d注且禁同号不同序",
+                HIT_LOOKBACK, band[0], band[1], cover, total, MAX_PICK);
     }
 }
