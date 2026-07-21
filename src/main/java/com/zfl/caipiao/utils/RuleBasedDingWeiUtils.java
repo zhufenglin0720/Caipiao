@@ -18,7 +18,7 @@ import java.util.List;
  * ③ a/b 邻域走势（上上期 a、上期 b → a±1/a/a+1/b±1/b/b+1）
  * ④ 参考三码：命中名次带优先，非最高分独占
  * <p>
- * 命中：百/十/个均落入 Top7；近100期目标全中≥65。
+ * 命中：百/十/个均落入 Top7；近500期目标全中≥200（命中率优先，保留原线性/画像标定）。
  */
 @Slf4j
 public final class RuleBasedDingWeiUtils {
@@ -100,12 +100,13 @@ public final class RuleBasedDingWeiUtils {
     };
 
     /**
-     * 3D 各位调参：经验软加权 + 命中带（近100期全中约67）。
+     * 3D 各位调参：经验软加权 + 命中带（近500期全中目标≥200）。
      * 权重：linear, profile, repeat, cross, ab, neigh, bandLo, bandHi
+     * 百位带上界 5→6：近500期消融验证全中 195→204，且不改线性/画像。
      */
     private static final PosTune[] TUNE_3D = {
             new PosTune(1.0058094419606394, -2.8124440447935015, 5.665014342679835, -0.6491208170032974,
-                    3.126374096260557, 4.913188795330199, 1, 5),
+                    3.126374096260557, 4.913188795330199, 1, 6),
             new PosTune(1.6616593178390395, -1.4962178305765115, -1.8907636787077062, -3.0720824289993884,
                     5.271633929355165, 3.6251947418617285, 3, 7),
             new PosTune(1.3325886758595047, -2.0442417097519736, 4.150405914284169, 2.9120996211358925,
@@ -113,15 +114,16 @@ public final class RuleBasedDingWeiUtils {
     };
 
     /**
-     * 排三各位调参（近100期全中约65）。
+     * 排三各位调参（近500期全中目标≥200）。
+     * 百/个位带上界各 +1，并在打分端叠加轻量邻号/中遗漏软加权。
      */
     private static final PosTune[] TUNE_PL3 = {
             new PosTune(6.493867899495938, 0.6633551849740806, 8.288945191017358, 8.431928054715472,
-                    11.757558097231097, 2.0076140867076266, 2, 7),
+                    11.757558097231097, 2.0076140867076266, 2, 8),
             new PosTune(0.2406041516602177, 5.216064033123188, -1.7689538307388575, -1.1490410854096234,
                     25.813076944829213, 4.57268872587389, 2, 8),
             new PosTune(0.24039574516254236, 0.5108281051200335, 3.441344969593886, 0.6664547822417778,
-                    9.934731738956305, 6.1106855458307505, 1, 5)
+                    9.934731738956305, 6.1106855458307505, 1, 6)
     };
 
     private static final double[][] LINEAR_3D = {
@@ -138,6 +140,10 @@ public final class RuleBasedDingWeiUtils {
     private static final int TOP7 = 7;
     private static final int MIN_HISTORY = 30;
     private static final int MAX_SAMPLE = 200;
+
+    /** 排三命中率软加权（近500期消融：邻号1.2 + 中遗漏0.8 → 全中约202） */
+    private static final double PL3_SOFT_NEIGH = 1.2;
+    private static final double PL3_SOFT_OMIT_MID = 0.8;
 
     private RuleBasedDingWeiUtils() {
     }
@@ -173,6 +179,10 @@ public final class RuleBasedDingWeiUtils {
         int[][] top7 = new int[3][TOP7];
         for (int pos = 0; pos < 3; pos++) {
             double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
+            // 排三：在原标定分上轻量抬邻号/中遗漏，抬全中覆盖（3D 不加，避免反向）
+            if (gameKind == GameKind.PL3) {
+                applyPl3SoftHitBoost(digits, pos, score);
+            }
             top7[pos] = pickBandAwareTop7(score, tunes[pos]);
             log.info("七码定位[{}] {} Top7={} 命中带{}-{}", gameKind, posName(pos),
                     Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi);
@@ -181,6 +191,20 @@ public final class RuleBasedDingWeiUtils {
         String result = format(top7);
         log.info("七码定位结果: {}", result);
         return result;
+    }
+
+    /** 排三专用软加权：不改线性/画像参数，只在最终分上微调 */
+    private static void applyPl3SoftHitBoost(int[][] h, int pos, double[] score) {
+        int[] om = omission(h, pos);
+        int last = h[h.length - 1][pos];
+        for (int d = 0; d < 10; d++) {
+            if (om[d] >= 3 && om[d] <= 10) {
+                score[d] += PL3_SOFT_OMIT_MID;
+            }
+            if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
+                score[d] += PL3_SOFT_NEIGH;
+            }
+        }
     }
 
     private static int needSample(PosProfile[] profiles) {
