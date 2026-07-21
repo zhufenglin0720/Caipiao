@@ -160,7 +160,7 @@ public class HmCache {
         /** 组三组选（去重形态，如 112,334） */
         private String aiZuSanHm;
 
-        /** 展示/邮件推荐注（固定7注，来自命中位次带） */
+        /** 展示/邮件推荐注（固定10注，位次密度+模型先验） */
         private String aiRecommendHm;
 
         private String aiDingWeiHm;

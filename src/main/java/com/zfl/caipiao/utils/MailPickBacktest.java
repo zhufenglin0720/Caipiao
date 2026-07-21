@@ -13,14 +13,16 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 近500期注数/邮件挑选对比：
- * 原始：150注大底 + 预测序前10注
- * 优化：200注大底 + RecommendBetUtils 优化10注（邮件）
+ * 近500期：200注大底固定；对比
+ * - 基线：预测列表前10注
+ * - 优化：RecommendBetUtils 新挑选逻辑的10注（与邮件一致）
  */
-public class CompareBetSizeBacktest {
+public class MailPickBacktest {
 
     private static final int EVAL_PERIODS = 500;
     private static final int WARMUP_MIN = 60;
+    private static final int BET_LIMIT = 200;
+    private static final int MAIL_N = 10;
 
     public static void main(String[] args) throws Exception {
         muteLogs();
@@ -29,67 +31,59 @@ public class CompareBetSizeBacktest {
             eval = Integer.parseInt(args[0]);
         }
 
+        RuleBasedPredictUtils.setBetLimitOverride(BET_LIMIT);
         StringBuilder sb = new StringBuilder();
-        sb.append("========== 近").append(eval).append("期 注数/邮件挑选对比 ==========\n");
-        sb.append("原始：150注大底 + 预测序前10注\n");
-        sb.append("优化：200注大底 + 密集位次带优化10注（邮件）\n\n");
+        sb.append("========== 近").append(eval).append("期 邮件10注挑选对比（大底")
+                .append(BET_LIMIT).append("注）==========\n");
+        sb.append("基线：预测序前10注\n");
+        sb.append("优化：RecommendBetUtils 密集位次带+密度打分 Top10\n\n");
 
-        List<Hm> sd = HistoryDataLoader.load3d();
-        List<Hm> pl3 = HistoryDataLoader.loadPl3();
-
-        sb.append("----- 原始 150注 / 前10注 -----\n");
-        Result sdOld = runConfig("福彩3D", sd, RuleBasedPredictUtils.GameKind.SD_3D, 150, false, eval, sb);
-        Result pl3Old = runConfig("排列三", pl3, RuleBasedPredictUtils.GameKind.PL3, 150, false, eval, sb);
-
-        sb.append("\n----- 优化 200注 / 推荐10注 -----\n");
-        Result sdNew = runConfig("福彩3D", sd, RuleBasedPredictUtils.GameKind.SD_3D, 200, true, eval, sb);
-        Result pl3New = runConfig("排列三", pl3, RuleBasedPredictUtils.GameKind.PL3, 200, true, eval, sb);
+        Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), RuleBasedPredictUtils.GameKind.SD_3D, eval, sb);
+        sb.append('\n');
+        Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(), RuleBasedPredictUtils.GameKind.PL3, eval, sb);
 
         RuleBasedPredictUtils.setBetLimitOverride(0);
 
-        sb.append("\n========== 对比汇总 ==========\n");
+        sb.append("\n========== 汇总 ==========\n");
         sb.append(String.format(Locale.ROOT,
-                "%-8s | 配置 | 邮件10直选 | 邮件10组选 | 大底直选 | 大底组选 | 大底注数%n", "彩种"));
-        appendRow(sb, sdOld);
-        appendRow(sb, sdNew);
-        appendRow(sb, pl3Old);
-        appendRow(sb, pl3New);
+                "%-8s | 前10直选 | 优化10直选 | 前10组选 | 优化10组选 | 200注直选 | 200注组选%n", "彩种"));
+        append(sb, sd);
+        append(sb, pl3);
 
-        Path out = Path.of("reports/bet_size_compare_500.txt");
+        Path out = Path.of("reports/mail_pick_compare_500.txt");
         Files.createDirectories(out.getParent());
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
         sb.append("\n结果已写入: ").append(out.toAbsolutePath()).append('\n');
         System.out.println(sb);
     }
 
-    private static void appendRow(StringBuilder sb, Result r) {
+    private static void append(StringBuilder sb, Result r) {
         sb.append(String.format(Locale.ROOT,
-                "%-8s | %s | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %4d/%d (%5.1f%%) | %d%n",
-                r.name, r.label,
-                r.mailZx, r.n, pct(r.mailZx, r.n),
-                r.mailGroup, r.n, pct(r.mailGroup, r.n),
+                "%-8s | %4d/%d (%.1f%%) | %4d/%d (%.1f%%) | %4d/%d (%.1f%%) | %4d/%d (%.1f%%) | %4d/%d (%.1f%%) | %4d/%d (%.1f%%)%n",
+                r.name,
+                r.baseZx, r.n, pct(r.baseZx, r.n),
+                r.optZx, r.n, pct(r.optZx, r.n),
+                r.baseGroup, r.n, pct(r.baseGroup, r.n),
+                r.optGroup, r.n, pct(r.optGroup, r.n),
                 r.dadiZx, r.n, pct(r.dadiZx, r.n),
-                r.dadiGroup, r.n, pct(r.dadiGroup, r.n),
-                r.betLimit));
+                r.dadiGroup, r.n, pct(r.dadiGroup, r.n)));
     }
 
     private static double pct(int hit, int n) {
         return n == 0 ? 0 : hit * 100.0 / n;
     }
 
-    private static Result runConfig(String name, List<Hm> all, RuleBasedPredictUtils.GameKind kind,
-                                    int betLimit, boolean useRecommend, int evalPeriods, StringBuilder out) {
-        RuleBasedPredictUtils.setBetLimitOverride(betLimit);
-        String mailLabel = useRecommend ? "推荐10注" : "前10注";
-        out.append(String.format(Locale.ROOT, ">> %s 大底=%d 邮件=%s%n", name, betLimit, mailLabel));
+    private static Result runOne(String name, List<Hm> all, RuleBasedPredictUtils.GameKind kind,
+                                 int evalPeriods, StringBuilder out) {
+        out.append(">> ").append(name).append('\n');
         if (all == null || all.isEmpty()) {
             out.append("无数据\n");
-            return Result.empty(name, betLimit, useRecommend);
+            return Result.empty(name);
         }
         int start = all.size() - evalPeriods;
         if (start < WARMUP_MIN) {
             out.append("历史过短\n");
-            return Result.empty(name, betLimit, useRecommend);
+            return Result.empty(name);
         }
 
         List<HmCache.CompareDto> compares = new ArrayList<>();
@@ -103,24 +97,26 @@ public class CompareBetSizeBacktest {
             trim(compares);
         }
 
-        Result r = new Result(name, betLimit, useRecommend);
+        Result r = new Result(name);
         r.n = evalPeriods;
         long t0 = System.currentTimeMillis();
-        int maxBetN = 0;
         for (int i = start; i < all.size(); i++) {
             String actual = pad3(all.get(i).toString());
             String pred = RuleBasedPredictUtils.predict(all.subList(0, i), compares, kind);
-            int betN = pred == null || pred.isEmpty() ? 0 : pred.split(",").length;
-            maxBetN = Math.max(maxBetN, betN);
-            String mail = useRecommend
-                    ? RecommendBetUtils.pickRecommendBets(pred, compares)
-                    : takeTopN(pred, 10);
+            String baseMail = takeTopN(pred, MAIL_N);
+            String optMail = RecommendBetUtils.pickRecommendBets(pred, compares);
 
-            if (isZxHit(mail, actual)) {
-                r.mailZx++;
+            if (isZxHit(baseMail, actual)) {
+                r.baseZx++;
             }
-            if (isGroupHit(mail, actual)) {
-                r.mailGroup++;
+            if (isGroupHit(baseMail, actual)) {
+                r.baseGroup++;
+            }
+            if (isZxHit(optMail, actual)) {
+                r.optZx++;
+            }
+            if (isGroupHit(optMail, actual)) {
+                r.optGroup++;
             }
             if (isZxHit(pred, actual)) {
                 r.dadiZx++;
@@ -132,21 +128,22 @@ public class CompareBetSizeBacktest {
             compares.add(new HmCache.CompareDto()
                     .setQh(all.get(i).getQh())
                     .setAiHm(pred == null ? "" : pred)
-                    .setAiRecommendHm(useRecommend ? mail : null)
+                    .setAiRecommendHm(optMail)
                     .setRealHm(actual));
             trim(compares);
 
             int done = i - start + 1;
             if (done % 50 == 0 || done == evalPeriods) {
-                System.out.printf("%s[%d/%s] %d/%d 邮件直%d 大底直%d 最大注数=%d%n",
-                        name, betLimit, mailLabel, done, evalPeriods, r.mailZx, r.dadiZx, maxBetN);
+                System.out.printf("%s %d/%d 前10直%d 优化10直%d 大底直%d%n",
+                        name, done, evalPeriods, r.baseZx, r.optZx, r.dadiZx);
             }
         }
         long cost = System.currentTimeMillis() - t0;
         out.append(String.format(Locale.ROOT,
-                "%s 完成：%d期 耗时=%dms 最大注数=%d | 邮件%s 直选=%d/%d (%.2f%%) 组选=%d/%d (%.2f%%) | 大底直选=%d/%d (%.2f%%) 组选=%d/%d (%.2f%%)%n",
-                name, r.n, cost, maxBetN, mailLabel,
-                r.mailZx, r.n, pct(r.mailZx, r.n), r.mailGroup, r.n, pct(r.mailGroup, r.n),
+                "%s 完成：%d期 耗时=%dms | 前10直选=%d/%d (%.2f%%) 组选=%d/%d (%.2f%%) | 优化10直选=%d/%d (%.2f%%) 组选=%d/%d (%.2f%%) | 大底直选=%d/%d (%.2f%%) 组选=%d/%d (%.2f%%)%n",
+                name, r.n, cost,
+                r.baseZx, r.n, pct(r.baseZx, r.n), r.baseGroup, r.n, pct(r.baseGroup, r.n),
+                r.optZx, r.n, pct(r.optZx, r.n), r.optGroup, r.n, pct(r.optGroup, r.n),
                 r.dadiZx, r.n, pct(r.dadiZx, r.n), r.dadiGroup, r.n, pct(r.dadiGroup, r.n)));
         return r;
     }
@@ -238,24 +235,20 @@ public class CompareBetSizeBacktest {
 
     private static final class Result {
         final String name;
-        final int betLimit;
-        final boolean useRecommend;
-        final String label;
         int n;
-        int mailZx;
-        int mailGroup;
+        int baseZx;
+        int baseGroup;
+        int optZx;
+        int optGroup;
         int dadiZx;
         int dadiGroup;
 
-        Result(String name, int betLimit, boolean useRecommend) {
+        Result(String name) {
             this.name = name;
-            this.betLimit = betLimit;
-            this.useRecommend = useRecommend;
-            this.label = betLimit + "注/" + (useRecommend ? "推荐10" : "前10");
         }
 
-        static Result empty(String name, int betLimit, boolean useRecommend) {
-            return new Result(name, betLimit, useRecommend);
+        static Result empty(String name) {
+            return new Result(name);
         }
     }
 }

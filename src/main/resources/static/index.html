@@ -3312,7 +3312,7 @@
     }
 
     function topSanmaBets(itemOrHm, n = 10) {
-        // 优先用后端命中位次带选出的推荐注（7注，已禁同号不同序）
+        // 优先用后端选出的推荐注（10注，已禁同号不同序）
         if (itemOrHm && typeof itemOrHm === 'object') {
             if (itemOrHm.aiRecommendHm) {
                 return String(itemOrHm.aiRecommendHm).split(',')
