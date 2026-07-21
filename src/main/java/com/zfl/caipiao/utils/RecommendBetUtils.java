@@ -11,13 +11,13 @@ import java.util.Set;
 
 /**
  * 从 ≤150 注中挑展示/邮件推荐注：
- * 按近 100 期「开奖落在预测列表的位次」找普遍命中区间，再在该区间内差异化取 5~10 注。
+ * 按近短期「开奖落在预测列表的位次」找普遍命中区间，再在该区间内差异化取 5~10 注。
  * 禁止三码完全相同仅顺序不同（如 353 / 335 / 533）。
  */
 public final class RecommendBetUtils {
 
-    /** 与三码回测窗口对齐 */
-    public static final int HIT_LOOKBACK = 100;
+    /** 与短期走势对齐：近 20 期命中位次 */
+    public static final int HIT_LOOKBACK = 20;
     public static final int MIN_PICK = 5;
     public static final int MAX_PICK = 10;
     /** 预测列表最大位次（150 注） */

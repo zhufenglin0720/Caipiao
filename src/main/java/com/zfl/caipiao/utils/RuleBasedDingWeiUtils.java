@@ -18,7 +18,7 @@ import java.util.List;
  * ③ a/b 邻域走势（上上期 a、上期 b → a±1/a/a+1/b±1/b/b+1）
  * ④ 参考三码：命中名次带优先，非最高分独占
  * <p>
- * 命中：百/十/个均落入 Top7；近100期目标全中≥65。
+ * 短期自适应：预测前在近10/15/20等窗口择优，并对比往期七码差异动态调参。
  */
 @Slf4j
 public final class RuleBasedDingWeiUtils {
@@ -136,8 +136,10 @@ public final class RuleBasedDingWeiUtils {
     };
 
     private static final int TOP7 = 7;
-    private static final int MIN_HISTORY = 30;
-    private static final int MAX_SAMPLE = 200;
+    private static final int MIN_HISTORY = 25;
+    private static final int MAX_SAMPLE = 80;
+    /** 当期短期自适应 */
+    private static ShortTermAdaptiveTuner.DingWeiTune CURRENT_TUNE;
 
     private RuleBasedDingWeiUtils() {
     }
@@ -168,14 +170,23 @@ public final class RuleBasedDingWeiUtils {
         PosTune[] tunes = gameKind == GameKind.PL3 ? TUNE_PL3 : TUNE_3D;
         double[][] linear = gameKind == GameKind.PL3 ? LINEAR_PL3 : LINEAR_3D;
 
-        int[][] digits = toDigitMatrix(tail(history, Math.max(MAX_SAMPLE, needSample(profiles))));
+        // 先用足够样本择窗，再截到短期样本做打分
+        int[][] allDigits = toDigitMatrix(history);
+        CURRENT_TUNE = ShortTermAdaptiveTuner.tuneForDingWei(allDigits, compares);
+        int sampleSize = Math.max(CURRENT_TUNE.transferWindow + 10,
+                Math.max(CURRENT_TUNE.featureWindow * 3, 40));
+        sampleSize = Math.min(MAX_SAMPLE, Math.max(sampleSize, needSample(profiles)));
+        int[][] digits = toDigitMatrix(tail(history, sampleSize));
 
         int[][] top7 = new int[3][TOP7];
         for (int pos = 0; pos < 3; pos++) {
-            double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
-            top7[pos] = pickBandAwareTop7(score, tunes[pos]);
-            log.info("七码定位[{}] {} Top7={} 命中带{}-{}", gameKind, posName(pos),
-                    Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi);
+            PosTune tuned = applyDingWeiBandDelta(tunes[pos], CURRENT_TUNE);
+            double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tuned);
+            // 短期频次/遗漏/邻号再加权
+            applyShortTermDigitBoost(digits, pos, score, CURRENT_TUNE);
+            top7[pos] = pickBandAwareTop7(score, tuned);
+            log.info("七码定位[{}] {} Top7={} 命中带{}-{} 短期窗={}", gameKind, posName(pos),
+                    Arrays.toString(top7[pos]), tuned.bandLo, tuned.bandHi, CURRENT_TUNE.featureWindow);
         }
 
         String result = format(top7);
@@ -183,12 +194,60 @@ public final class RuleBasedDingWeiUtils {
         return result;
     }
 
-    private static int needSample(PosProfile[] profiles) {
-        int max = MAX_SAMPLE;
-        for (PosProfile p : profiles) {
-            max = Math.max(max, Math.max(p.w, p.w2) + 20);
+    private static PosTune applyDingWeiBandDelta(PosTune base, ShortTermAdaptiveTuner.DingWeiTune tune) {
+        if (tune == null) {
+            return base;
         }
-        return Math.max(max, 120);
+        int lo = Math.max(1, Math.min(7, base.bandLo + tune.bandLoDelta));
+        int hi = Math.max(lo + 1, Math.min(9, base.bandHi + tune.bandHiDelta));
+        return new PosTune(base.wLinear, base.wProfile, base.wRepeat * tune.repeatMul,
+                base.wCross, base.wAb, base.wNeigh * tune.neighborMul, lo, hi);
+    }
+
+    /** 按短期自适应窗口抬升近频、遗漏回补、邻号 */
+    private static void applyShortTermDigitBoost(int[][] h, int pos, double[] score,
+                                                 ShortTermAdaptiveTuner.DingWeiTune tune) {
+        if (tune == null || score == null) {
+            return;
+        }
+        int[] f = freq(h, pos, tune.featureWindow);
+        int[] om = omission(h, pos);
+        int last = h[h.length - 1][pos];
+        double maxF = 1;
+        for (int d = 0; d < 10; d++) {
+            maxF = Math.max(maxF, f[d]);
+        }
+        for (int d = 0; d < 10; d++) {
+            score[d] += (f[d] / maxF) * 18.0 * tune.recentFreqMul;
+            if (om[d] >= 2 && om[d] <= Math.max(4, tune.featureWindow / 2)) {
+                score[d] += 6.0 * tune.omitMul;
+            }
+            if (d == last) {
+                score[d] += 4.0 * tune.repeatMul;
+            }
+            if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
+                score[d] += 5.0 * tune.neighborMul;
+            }
+        }
+        // 该位连挂时额外抬邻号与中遗漏
+        if (tune.posMissStreak != null && pos < tune.posMissStreak.length && tune.posMissStreak[pos] >= 2) {
+            for (int d = 0; d < 10; d++) {
+                if (d == neighbor(last, -1) || d == neighbor(last, 1) || d == neighbor(last, -2) || d == neighbor(last, 2)) {
+                    score[d] += 4.0;
+                }
+                if (om[d] >= 3 && om[d] <= tune.featureWindow) {
+                    score[d] += 3.0;
+                }
+            }
+        }
+    }
+
+    private static int needSample(PosProfile[] profiles) {
+        int max = 50;
+        for (PosProfile p : profiles) {
+            max = Math.max(max, Math.max(Math.min(p.w, 40), Math.min(p.w2, 40)) + 10);
+        }
+        return Math.max(max, CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow + 20 : 40);
     }
 
     /**
@@ -287,12 +346,16 @@ public final class RuleBasedDingWeiUtils {
 
     private static double[] scoreLinear(int[][] h, int pos, double[] w) {
         double[] s = new double[10];
-        int[] f8 = freq(h, pos, 8);
-        int[] f15 = freq(h, pos, 15);
-        int[] f30 = freq(h, pos, 30);
+        int fw = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
+        int w8 = Math.max(5, Math.min(8, fw * 2 / 3));
+        int w15 = Math.max(8, fw);
+        int w30 = Math.max(w15 + 5, Math.min(35, CURRENT_TUNE != null ? CURRENT_TUNE.transferWindow : 25));
+        int[] f8 = freq(h, pos, w8);
+        int[] f15 = freq(h, pos, w15);
+        int[] f30 = freq(h, pos, w30);
         int[] om = omission(h, pos);
         int[] tr = transCount(h, pos);
-        int[] f5 = freq(h, pos, 5);
+        int[] f5 = freq(h, pos, Math.max(3, fw / 3));
         int last = h[h.length - 1][pos];
         for (int d = 0; d < 10; d++) {
             s[d] = w[0] * f8[d] + w[1] * f15[d] + w[2] * f30[d]
@@ -310,7 +373,8 @@ public final class RuleBasedDingWeiUtils {
     private static int[] transCount(int[][] h, int pos) {
         int[] t = new int[10];
         int last = h[h.length - 1][pos];
-        int from = Math.max(1, h.length - 120);
+        int look = CURRENT_TUNE != null ? CURRENT_TUNE.transferWindow : 25;
+        int from = Math.max(1, h.length - look);
         for (int i = from; i < h.length; i++) {
             if (h[i - 1][pos] == last) {
                 t[h[i][pos]]++;
@@ -320,9 +384,12 @@ public final class RuleBasedDingWeiUtils {
     }
 
     private static double[] scoreDigits(int[][] h, int pos, PosProfile pf) {
-        double[] s = normalize100(freq(h, pos, pf.w));
+        int fw = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
+        int primaryW = Math.min(Math.max(pf.w, 8), Math.max(fw, 10));
+        int secondaryW = Math.min(Math.max(pf.w2, primaryW), Math.max(fw + 10, 20));
+        double[] s = normalize100(freq(h, pos, primaryW));
         if (pf.mixW2 > 0) {
-            s = mix(s, normalize100(freq(h, pos, pf.w2)), 1 - pf.mixW2, pf.mixW2);
+            s = mix(s, normalize100(freq(h, pos, secondaryW)), 1 - pf.mixW2, pf.mixW2);
         }
         if (pf.mixT > 0) {
             s = mix(s, normalize100(transScore(h, pos)), 1 - pf.mixT, pf.mixT);
@@ -331,25 +398,29 @@ public final class RuleBasedDingWeiUtils {
 
         int last = h[h.length - 1][pos];
         int[] f3 = freq(h, pos, 3);
-        int[] f5 = freq(h, pos, 5);
+        int[] f5 = freq(h, pos, Math.max(3, fw / 3));
         int[] om = omission(h, pos);
-        int[] spans = top2Spans(h, pos, 25);
+        int[] spans = top2Spans(h, pos, Math.max(10, fw));
+
+        double omitMul = CURRENT_TUNE != null ? CURRENT_TUNE.omitMul : 1.0;
+        double neighMul = CURRENT_TUNE != null ? CURRENT_TUNE.neighborMul : 1.0;
+        double repeatMul = CURRENT_TUNE != null ? CURRENT_TUNE.repeatMul : 1.0;
 
         for (int d = 0; d < 10; d++) {
             s[d] -= f3[d] * pf.anti;
-            s[d] += Math.min(om[d], 18) * pf.omitF;
+            s[d] += Math.min(om[d], 18) * pf.omitF * omitMul;
             int spa = Math.abs(d - last);
             if (spa == spans[0] || spa == spans[1]) {
                 s[d] += pf.span;
             }
             if (d == last) {
-                s[d] += pf.lastB;
+                s[d] += pf.lastB * repeatMul;
             }
             if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
-                s[d] += pf.neighB;
+                s[d] += pf.neighB * neighMul;
             }
             if (om[d] >= 4 && om[d] <= 14) {
-                s[d] += pf.mid;
+                s[d] += pf.mid * omitMul;
             }
             if (f5[d] >= 3) {
                 s[d] -= 10;
@@ -361,7 +432,8 @@ public final class RuleBasedDingWeiUtils {
     private static double[] transScore(int[][] h, int pos) {
         double[] s = new double[10];
         int last = h[h.length - 1][pos];
-        int from = Math.max(1, h.length - 100);
+        int look = CURRENT_TUNE != null ? CURRENT_TUNE.transferWindow : 25;
+        int from = Math.max(1, h.length - look);
         for (int i = from; i < h.length; i++) {
             if (h[i - 1][pos] == last) {
                 s[h[i][pos]]++;

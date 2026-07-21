@@ -8,10 +8,11 @@ import java.util.List;
 /**
  * 预测偏差纠偏：逐期取「最接近实开」的一注，统计各位 (actual-pred) mod10 频次，
  * 出现更频繁的非零偏差作为主纠偏因子，后续预测对该位做 ± 纠偏。
+ * 默认回看近 15 期（短期），可由自适应调参覆盖。
  */
 final class BiasSeedCorrector {
 
-    static final int LOOKBACK = 20;
+    static final int LOOKBACK = 15;
 
     /** 每位 Top 偏差种子（模10差值 actual-pred），最多2个 */
     final int[][] seeds;
@@ -27,10 +28,15 @@ final class BiasSeedCorrector {
     }
 
     static BiasSeedCorrector of(List<HmCache.CompareDto> compares) {
+        return of(compares, LOOKBACK);
+    }
+
+    static BiasSeedCorrector of(List<HmCache.CompareDto> compares, int lookback) {
         int[][] deltaCnt = new int[3][10];
+        int lb = Math.max(8, lookback);
         if (compares != null) {
             int end = compares.size();
-            int start = Math.max(0, end - LOOKBACK);
+            int start = Math.max(0, end - lb);
             for (int i = start; i < end; i++) {
                 HmCache.CompareDto dto = compares.get(i);
                 if (dto == null || dto.getAiHm() == null || dto.getAiHm().isBlank()

@@ -13,15 +13,15 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 近 100 期滚动回测：3D / 排三分开专项预测。
- * 目标：直选≥20、组选≥50；注数默认≤100，不够可扩到 150。
+ * 短期滚动回测：3D / 排三分开专项预测。
+ * 评估近 30 期（贴合短期走势自适应）；注数≤150。
  */
 public class BacktestUtils {
 
-    private static final int EVAL_PERIODS = 100;
-    private static final int ZX_TARGET = 20;
-    private static final int GROUP_TARGET = 50;
-    private static final int WARMUP_MIN = 80;
+    private static final int EVAL_PERIODS = 30;
+    private static final int ZX_TARGET = 6;
+    private static final int GROUP_TARGET = 12;
+    private static final int WARMUP_MIN = 40;
     private static final String DIR_3D = "D:\\彩票\\3D.xlsx";
     private static final String DIR_PL3 = "D:\\彩票\\排列三.xlsx";
     private static final Path OUT = Path.of("D:\\彩票\\backtest_result.txt");
@@ -29,9 +29,9 @@ public class BacktestUtils {
     public static void main(String[] args) throws Exception {
         muteLogs();
         StringBuilder sb = new StringBuilder();
-        sb.append("说明：评估最近 ").append(EVAL_PERIODS).append(" 期；注数≤")
+        sb.append("说明：评估最近 ").append(EVAL_PERIODS).append(" 期（短期走势自适应）；注数≤")
                 .append(RuleBasedPredictUtils.maxBetLimit())
-                .append("；3D/排三分专项；目标直选≥").append(ZX_TARGET)
+                .append("；3D/排三分专项；参考直选≥").append(ZX_TARGET)
                 .append(" 组选≥").append(GROUP_TARGET).append("\n\n");
         runOne("福彩3D", DIR_3D, RuleBasedPredictUtils.GameKind.SD_3D, sb);
         sb.append('\n');

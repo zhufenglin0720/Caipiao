@@ -55,7 +55,7 @@ public class GlobalJob {
     public void applyTask() throws MessagingException, InterruptedException {
         String raw = RuleBasedPredictUtils.get3dPredict();
         String zuSan = RecommendBetUtils.extractZuSanGroups(raw);
-        // aiHm 保持原始预测序，供近100期命中位次统计；推荐注单独存 aiRecommendHm
+        // aiHm 保持原始预测序，供近短期命中位次统计；推荐注单独存 aiRecommendHm
         String sdRecommend = RecommendBetUtils.pickRecommendBets(raw, HmCache.getSdCompareCache());
         if (StrUtil.isNotBlank(raw)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
