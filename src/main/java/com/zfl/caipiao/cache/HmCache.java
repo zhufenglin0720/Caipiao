@@ -84,6 +84,7 @@ public class HmCache {
             CompareDto last = cache.get(cache.size() - 1);
             if (last.getRealHm() == null || last.getRealHm().isBlank()) {
                 last.setAiHm(compareDto.getAiHm());
+                last.setAiFullHm(compareDto.getAiFullHm());
                 last.setAiZuSanHm(compareDto.getAiZuSanHm());
                 last.setAiRecommendHm(compareDto.getAiRecommendHm());
                 if (compareDto.getAiDingWeiHm() != null) {
@@ -155,12 +156,16 @@ public class HmCache {
 
         private String qh;
 
+        /** 落盘/展示大底：组选形态去重后（同号不同序只留第一注） */
         private String aiHm;
+
+        /** 原始≤200注大底（未去重），供邮件选号与命中位次统计 */
+        private String aiFullHm;
 
         /** 组三组选（去重形态，如 112,334） */
         private String aiZuSanHm;
 
-        /** 展示/邮件推荐注（固定10注，位次密度+模型先验） */
+        /** 展示/邮件推荐注（固定10注，基于原始200注挑选） */
         private String aiRecommendHm;
 
         private String aiDingWeiHm;

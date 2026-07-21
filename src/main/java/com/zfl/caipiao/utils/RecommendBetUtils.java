@@ -50,6 +50,34 @@ public final class RecommendBetUtils {
         return String.join(",", picked);
     }
 
+    /**
+     * 同一组选形态只保留预测序第一注（如 353 已保留则丢弃 335/533）。
+     * 用于 200 注大底落盘前去重，抬组选覆盖效率。
+     */
+    public static String dedupeByGroupKeepFirst(String pred) {
+        List<String> all = parseBets(pred);
+        if (all.isEmpty()) {
+            return "";
+        }
+        List<String> out = new ArrayList<>();
+        Set<String> seenGroup = new LinkedHashSet<>();
+        for (String bet : all) {
+            if (bet == null || bet.length() != 3) {
+                continue;
+            }
+            String key = digitKey(bet);
+            if (seenGroup.add(key)) {
+                out.add(bet);
+            }
+        }
+        return String.join(",", out);
+    }
+
+    /** 去重后注数（组选形态数） */
+    public static int countBets(String pred) {
+        return parseBets(pred).size();
+    }
+
     public static String reorderByHitRanks(String pred, List<HmCache.CompareDto> history) {
         if (StrUtil.isBlank(pred)) {
             return pred;
@@ -132,11 +160,11 @@ public final class RecommendBetUtils {
             int start = Math.max(0, end - HIT_LOOKBACK);
             for (int i = start; i < end; i++) {
                 HmCache.CompareDto dto = history.get(i);
-                if (dto == null || StrUtil.isBlank(dto.getAiHm()) || StrUtil.isBlank(dto.getRealHm())
+                if (dto == null || StrUtil.isBlank(listForRank(dto)) || StrUtil.isBlank(dto.getRealHm())
                         || dto.getRealHm().length() != 3) {
                     continue;
                 }
-                int rank = indexOfBet(dto.getAiHm(), dto.getRealHm().trim());
+                int rank = indexOfBet(listForRank(dto), dto.getRealHm().trim());
                 if (rank < 1 || rank > n) {
                     continue;
                 }
@@ -270,16 +298,27 @@ public final class RecommendBetUtils {
         int start = Math.max(0, end - lookback);
         for (int i = start; i < end; i++) {
             HmCache.CompareDto dto = history.get(i);
-            if (dto == null || StrUtil.isBlank(dto.getAiHm()) || StrUtil.isBlank(dto.getRealHm())
+            if (dto == null || StrUtil.isBlank(listForRank(dto)) || StrUtil.isBlank(dto.getRealHm())
                     || dto.getRealHm().length() != 3) {
                 continue;
             }
-            int rank = indexOfBet(dto.getAiHm(), dto.getRealHm().trim());
+            int rank = indexOfBet(listForRank(dto), dto.getRealHm().trim());
             if (rank >= 1 && rank <= MAX_RANK) {
                 freq[rank]++;
             }
         }
         return freq;
+    }
+
+    /** 位次统计优先用原始200注列表，与邮件挑选对齐 */
+    private static String listForRank(HmCache.CompareDto dto) {
+        if (dto == null) {
+            return "";
+        }
+        if (StrUtil.isNotBlank(dto.getAiFullHm())) {
+            return dto.getAiFullHm();
+        }
+        return dto.getAiHm();
     }
 
     private static String digitKey(String code) {

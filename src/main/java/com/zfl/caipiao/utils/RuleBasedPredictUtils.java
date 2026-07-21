@@ -98,9 +98,17 @@ public final class RuleBasedPredictUtils {
         RecentFeatureStats feat = RecentFeatureStats.of(digits);
         BiasSeedCorrector seeds = BiasSeedCorrector.of(compares);
         HitRankStats hitRank = HitRankStats.of(digits);
-        // 彩种默认带与统计带取交集偏置
-        RANK_BAND_LO = Math.max(hitRank.bandLo, RANK_BAND_LO);
-        RANK_BAND_HI = Math.min(hitRank.bandHi, RANK_BAND_HI);
+        if (CURRENT_KIND == GameKind.PL3) {
+            // 排三：默认带与统计带取并集，扩大覆盖（近500期消融直选 88→103）
+            RANK_BAND_LO = Math.min(hitRank.bandLo, RANK_BAND_LO);
+            RANK_BAND_HI = Math.max(hitRank.bandHi, RANK_BAND_HI);
+            RANK_BAND_LO = Math.max(1, Math.min(RANK_BAND_LO, 4));
+            RANK_BAND_HI = Math.min(10, Math.max(RANK_BAND_HI, 7));
+        } else {
+            // 3D：保持交集偏置（并集/扩上界会伤直选）
+            RANK_BAND_LO = Math.max(hitRank.bandLo, RANK_BAND_LO);
+            RANK_BAND_HI = Math.min(hitRank.bandHi, RANK_BAND_HI);
+        }
         if (RANK_BAND_LO > RANK_BAND_HI) {
             RANK_BAND_LO = hitRank.bandLo;
             RANK_BAND_HI = hitRank.bandHi;
@@ -183,7 +191,7 @@ public final class RuleBasedPredictUtils {
             RANK_BAND_HI = 9;
             GROUP_UNIQUE_TARGET = TARGET_BET >= 200 ? 105 : 90;
             PAIR_GROUP_QUOTA = TARGET_BET >= 200 ? 18 : 14;
-            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 28 : 20;
+            PERM_EXPAND_GROUPS = TARGET_BET >= 200 ? 34 : 20;
             PREFER_PAIR_EXPAND = false;
         }
     }
@@ -197,7 +205,7 @@ public final class RuleBasedPredictUtils {
             } else {
                 // 组六热：提高散组目标，但不要压到 55 以下（会伤组选覆盖）
                 GROUP_UNIQUE_TARGET = Math.min(100, Math.max(GROUP_UNIQUE_TARGET, GROUP_UNIQUE_TARGET + 6));
-                PERM_EXPAND_GROUPS = Math.min(28, Math.max(PERM_EXPAND_GROUPS, 18));
+                PERM_EXPAND_GROUPS = Math.min(42, Math.max(PERM_EXPAND_GROUPS, 22));
             }
             return;
         }
@@ -1389,9 +1397,10 @@ public final class RuleBasedPredictUtils {
             } else if (r == RANK_BAND_LO - 1 || r == RANK_BAND_HI + 1) {
                 bonus += 12;
             } else if (r == 1) {
-                bonus -= 8; // 不迷信第一
+                // 排三轻降权以保留高分组合；3D 维持较强降权
+                bonus -= (CURRENT_KIND == GameKind.PL3 ? 3 : 8);
             } else if (r == 2) {
-                bonus -= 2;
+                bonus -= (CURRENT_KIND == GameKind.PL3 ? 1 : 2);
             } else {
                 bonus -= 6;
             }

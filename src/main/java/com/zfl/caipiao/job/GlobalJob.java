@@ -53,27 +53,30 @@ public class GlobalJob {
 
     @Scheduled(cron = "0 40 18 * * ?")
     public void applyTask() throws MessagingException, InterruptedException {
-        String raw = RuleBasedPredictUtils.get3dPredict();
-        String zuSan = RecommendBetUtils.extractZuSanGroups(raw);
-        // aiHm 保持原始预测序，供近100期命中位次统计；推荐注单独存 aiRecommendHm
-        String sdRecommend = RecommendBetUtils.pickRecommendBets(raw, HmCache.getSdCompareCache());
-        if (StrUtil.isNotBlank(raw)) {
+        // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
+        String raw200 = RuleBasedPredictUtils.get3dPredict();
+        String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
+        String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
+        String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache());
+        if (StrUtil.isNotBlank(sdDadi)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
-                    .setAiHm(raw)
+                    .setAiHm(sdDadi)
+                    .setAiFullHm(raw200)
                     .setAiRecommendHm(sdRecommend)
                     .setAiZuSanHm(zuSan));
         }
 
-        raw = RuleBasedPredictUtils.getPl3Predict();
-        zuSan = RecommendBetUtils.extractZuSanGroups(raw);
-        String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw, HmCache.getPl3CompareCache());
-        if (StrUtil.isNotBlank(raw)) {
+        raw200 = RuleBasedPredictUtils.getPl3Predict();
+        String pl3Dadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
+        zuSan = RecommendBetUtils.extractZuSanGroups(pl3Dadi);
+        String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache());
+        if (StrUtil.isNotBlank(pl3Dadi)) {
             HmCache.addPl3CompareCache(new HmCache.CompareDto()
-                    .setAiHm(raw)
+                    .setAiHm(pl3Dadi)
+                    .setAiFullHm(raw200)
                     .setAiRecommendHm(pl3Recommend)
                     .setAiZuSanHm(zuSan));
         }
-        // 邮件：位次密度+模型先验固定 10 注，且无同号不同序
         String msg = EmailConstant.EMAIL_TEMPLATE
                 .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdRecommend))
                 .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Recommend))
@@ -170,7 +173,8 @@ public class GlobalJob {
         if (StrUtil.isNotBlank(dto.getAiRecommendHm())) {
             return dto.getAiRecommendHm();
         }
-        return RecommendBetUtils.pickRecommendBets(dto.getAiHm(), null);
+        return RecommendBetUtils.pickRecommendBets(
+                StrUtil.blankToDefault(dto.getAiFullHm(), dto.getAiHm()), null);
     }
 
     private boolean checkSuccess(String recommendHm, String realHm) {
