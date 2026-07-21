@@ -4,12 +4,12 @@ import java.util.Arrays;
 
 /**
  * 近窗统计特征：上期重号、各位→下期转移、和值、跨度。
- * 默认短期窗；可由 ShortTermAdaptiveTuner 动态指定转移/形态窗口。
+ * 转移匹配用近 60 期，和值/跨度用近 20 期，不用全历史。
  */
 final class RecentFeatureStats {
 
-    static final int TRANS_LOOKBACK = 25;
-    static final int SHAPE_LOOKBACK = 15;
+    static final int TRANS_LOOKBACK = 60;
+    static final int SHAPE_LOOKBACK = 20;
 
     final int[] last;
     /** 同位置转移：历史上「该位=上期该位」时，下期同位置数字频次 */
@@ -23,8 +23,6 @@ final class RecentFeatureStats {
     final int[] topSums;
     final int[] topSpans;
     final double recentRepeatRate;
-    final int transferWindow;
-    final int shapeWindow;
 
     /** 历史上与上期「同位数字」匹配时，下期完整开奖号（最多保留 24 个，近窗优先） */
     final int[][] nextFullCodes;
@@ -32,8 +30,7 @@ final class RecentFeatureStats {
 
     private RecentFeatureStats(int[] last, int[][] samePosNext, int[][] afterPosNext, int[][] repeatNext,
                                int[] sumFreq, int[] spanFreq, double recentRepeatRate,
-                               int[][] nextFullCodes, int nextFullCount,
-                               int transferWindow, int shapeWindow) {
+                               int[][] nextFullCodes, int nextFullCount) {
         this.last = last;
         this.samePosNext = samePosNext;
         this.afterPosNext = afterPosNext;
@@ -45,18 +42,10 @@ final class RecentFeatureStats {
         this.recentRepeatRate = recentRepeatRate;
         this.nextFullCodes = nextFullCodes;
         this.nextFullCount = nextFullCount;
-        this.transferWindow = transferWindow;
-        this.shapeWindow = shapeWindow;
     }
 
     static RecentFeatureStats of(int[][] digits) {
-        return of(digits, TRANS_LOOKBACK, SHAPE_LOOKBACK);
-    }
-
-    static RecentFeatureStats of(int[][] digits, int transferLookback, int shapeLookback) {
         int n = digits.length;
-        int transW = Math.max(10, transferLookback);
-        int shapeW = Math.max(8, shapeLookback);
         int[] last = digits[n - 1];
         int[][] samePosNext = new int[3][10];
         int[][] afterPosNext = new int[3][10];
@@ -66,7 +55,7 @@ final class RecentFeatureStats {
         int[][] nextFull = new int[24][4]; // [a,b,c,weight]
         int nextCnt = 0;
 
-        int from = Math.max(1, n - transW);
+        int from = Math.max(1, n - TRANS_LOOKBACK);
         int digitSlots = 0;
         int repeatSlots = 0;
 
@@ -138,7 +127,7 @@ final class RecentFeatureStats {
             }
         }
 
-        int shapeFrom = Math.max(0, n - shapeW);
+        int shapeFrom = Math.max(0, n - SHAPE_LOOKBACK);
         for (int i = shapeFrom; i < n; i++) {
             int a = digits[i][0], b = digits[i][1], c = digits[i][2];
             int sum = a + b + c;
@@ -163,8 +152,7 @@ final class RecentFeatureStats {
         }
 
         double rate = digitSlots == 0 ? 0.3 : (double) repeatSlots / digitSlots;
-        return new RecentFeatureStats(last, samePosNext, afterPosNext, repeatNext, sumFreq, spanFreq, rate,
-                sorted, nextCnt, transW, shapeW);
+        return new RecentFeatureStats(last, samePosNext, afterPosNext, repeatNext, sumFreq, spanFreq, rate, sorted, nextCnt);
     }
 
     int digitBonus(int pos, int d) {

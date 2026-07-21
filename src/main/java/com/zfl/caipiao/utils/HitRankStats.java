@@ -5,11 +5,10 @@ import java.util.Arrays;
 /**
  * 统计近窗开奖号在「各位位分名次」上的分布，找出大多数开奖落在的名次带，
  * 选号时优先该带，而不是死拿每位 Top1/Top2。
- * 默认回看近 20 期短期走势，可由自适应调参覆盖。
  */
 final class HitRankStats {
 
-    static final int LOOKBACK = 20;
+    static final int LOOKBACK = 40;
 
     /** 名次带下界（含），1=最高分 */
     final int bandLo;
@@ -28,17 +27,12 @@ final class HitRankStats {
      * 用历史开奖滚动重算各位得分，统计实际开奖落在第几名。
      */
     static HitRankStats of(int[][] digits) {
-        return of(digits, LOOKBACK);
-    }
-
-    static HitRankStats of(int[][] digits, int lookback) {
         int[][] rankFreq = new int[3][11];
-        if (digits == null || digits.length < 20) {
+        if (digits == null || digits.length < 25) {
             return new HitRankStats(3, 8, rankFreq);
         }
         int n = digits.length;
-        int lb = Math.max(12, lookback);
-        int from = Math.max(12, n - lb);
+        int from = Math.max(20, n - LOOKBACK);
         for (int i = from; i < n; i++) {
             int[][] hist = Arrays.copyOfRange(digits, 0, i);
             for (int pos = 0; pos < 3; pos++) {

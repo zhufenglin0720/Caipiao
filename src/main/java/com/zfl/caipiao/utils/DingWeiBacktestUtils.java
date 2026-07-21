@@ -12,15 +12,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 短期七码定位回测：3D / 排三分开专项。
+ * 近 100 期七码定位回测：3D / 排三分开专项。
  * 命中定义：百/十/个三位数字均落入对应 Top7（与前端 checkDingWeiMatch 一致）。
- * 评估近 30 期（贴合短期走势自适应）。
+ * 目标：近100期≥65。
  */
 public class DingWeiBacktestUtils {
 
-    private static final int EVAL_PERIODS = 30;
-    private static final int HIT_TARGET = 18;
-    private static final int WARMUP_MIN = 40;
+    private static final int EVAL_PERIODS = 100;
+    private static final int HIT_TARGET = 65;
+    private static final int WARMUP_MIN = 80;
     private static final String DIR_3D = "D:\\彩票\\3D.xlsx";
     private static final String DIR_PL3 = "D:\\彩票\\排列三.xlsx";
     private static final Path OUT = Path.of("D:\\彩票\\dingwei_backtest_result.txt");
@@ -28,8 +28,8 @@ public class DingWeiBacktestUtils {
     public static void main(String[] args) throws Exception {
         muteLogs();
         StringBuilder sb = new StringBuilder();
-        sb.append("说明：七码定位评估最近 ").append(EVAL_PERIODS).append(" 期（短期自适应）；")
-                .append("3D/排三分专项；参考三位全中≥").append(HIT_TARGET).append("\n\n");
+        sb.append("说明：七码定位评估最近 ").append(EVAL_PERIODS).append(" 期；")
+                .append("3D/排三分专项；目标三位全中≥").append(HIT_TARGET).append("\n\n");
         runOne("福彩3D", DIR_3D, RuleBasedDingWeiUtils.GameKind.SD_3D, sb);
         sb.append('\n');
         runOne("排列三", DIR_PL3, RuleBasedDingWeiUtils.GameKind.PL3, sb);

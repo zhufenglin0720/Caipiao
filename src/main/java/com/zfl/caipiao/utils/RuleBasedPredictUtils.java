@@ -14,7 +14,7 @@ import java.util.Set;
 /**
  * 纯规则预测。3D / 排列三分专项配置；注数最多 150。
  * 纠偏：近窗最频繁偏差 ± 因子；命中名次带优先；按开奖走势加权。
- * 短期自适应：预测前在近10/15/20等窗口择优，并对比往期差异动态调参。
+ * 目标：近100期直选≥20、组选≥50。
  */
 @Slf4j
 public final class RuleBasedPredictUtils {
@@ -38,12 +38,10 @@ public final class RuleBasedPredictUtils {
     private static int GROUP_UNIQUE_TARGET = 50;
     private static int PAIR_GROUP_QUOTA = 28;
     private static int PERM_EXPAND_GROUPS = 40;
-    private static int SHAPE_PROB_WINDOW = 15;
+    private static final int SHAPE_PROB_WINDOW = 20;
     /** 展开时是否优先组三（3D=true，排三=false） */
     private static boolean PREFER_PAIR_EXPAND = true;
     private static GameKind CURRENT_KIND = GameKind.SD_3D;
-    /** 当期短期自适应参数 */
-    private static ShortTermAdaptiveTuner.PredictTune CURRENT_TUNE;
     /** 排三 fillWithTopGroupPerms 调参；≤0 表示用默认 72/30 */
     static int TUNE_SCATTER = 0;
     static int TUNE_EXPAND = 0;
@@ -77,36 +75,28 @@ public final class RuleBasedPredictUtils {
         applyGameProfile(kind == null ? GameKind.SD_3D : kind);
 
         // 排三：历史对比纠偏会显著拉低近100期直选，评分与选号均不使用 compares
-        // 但短期自适应仍可用 compares 做差异诊断（仅调参，不进位分纠偏种子）
-        List<HmCache.CompareDto> tuneCompares = compares;
+        // 连挂配额仍可用 compares（只调配额、不进位分/纠偏种子）
+        List<HmCache.CompareDto> streakCompares = compares;
         if (CURRENT_KIND == GameKind.PL3) {
             compares = null;
         }
 
         int[][] digits = toDigitMatrix(history);
-        // 预测前：短期窗口择优 + 往期差异对比 → 动态参数
-        CURRENT_TUNE = ShortTermAdaptiveTuner.tuneForPredict(digits, tuneCompares);
-        applyShortTermTune(CURRENT_TUNE);
-
         ShapeProb shapeProb = shapeProb(digits);
         // 形态只调配比，不再跳过整期（否则直选上限被门控锁死）
-        log.info("{} 走势：组三倾向={} 组六倾向={} (近窗组三{}% 组六{}%) 短期窗={}",
-                CURRENT_KIND, shapeProb.pairScore, shapeProb.zu6Score, shapeProb.pairPct, shapeProb.zu6Pct,
-                CURRENT_TUNE.featureWindow);
+        log.info("{} 走势：组三倾向={} 组六倾向={} (近窗组三{}% 组六{}%)",
+                CURRENT_KIND, shapeProb.pairScore, shapeProb.zu6Score, shapeProb.pairPct, shapeProb.zu6Pct);
 
-        logBiasDiagnostics(tuneCompares);
-        RecentFeatureStats feat = RecentFeatureStats.of(digits,
-                CURRENT_TUNE.transferWindow, CURRENT_TUNE.featureWindow);
-        BiasSeedCorrector seeds = BiasSeedCorrector.of(compares, CURRENT_TUNE.biasLookback);
-        HitRankStats hitRank = HitRankStats.of(digits, CURRENT_TUNE.hitRankLookback);
-        // 彩种默认带与统计带取交集偏置，再叠加短期带偏移
-        RANK_BAND_LO = Math.max(hitRank.bandLo, RANK_BAND_LO) + CURRENT_TUNE.bandLoDelta;
-        RANK_BAND_HI = Math.min(hitRank.bandHi, RANK_BAND_HI) + CURRENT_TUNE.bandHiDelta;
-        RANK_BAND_LO = Math.max(1, Math.min(8, RANK_BAND_LO));
-        RANK_BAND_HI = Math.max(RANK_BAND_LO + 2, Math.min(10, RANK_BAND_HI));
+        logBiasDiagnostics(compares);
+        RecentFeatureStats feat = RecentFeatureStats.of(digits);
+        BiasSeedCorrector seeds = BiasSeedCorrector.of(compares);
+        HitRankStats hitRank = HitRankStats.of(digits);
+        // 彩种默认带与统计带取交集偏置
+        RANK_BAND_LO = Math.max(hitRank.bandLo, RANK_BAND_LO);
+        RANK_BAND_HI = Math.min(hitRank.bandHi, RANK_BAND_HI);
         if (RANK_BAND_LO > RANK_BAND_HI) {
-            RANK_BAND_LO = Math.max(1, hitRank.bandLo + CURRENT_TUNE.bandLoDelta);
-            RANK_BAND_HI = Math.min(10, hitRank.bandHi + CURRENT_TUNE.bandHiDelta);
+            RANK_BAND_LO = hitRank.bandLo;
+            RANK_BAND_HI = hitRank.bandHi;
         }
         log.info("偏差纠偏: {}", seeds.describe());
         log.info("{} {}", CURRENT_KIND, hitRank.describe());
@@ -125,9 +115,8 @@ public final class RuleBasedPredictUtils {
 
         // 按走势动态微调配额
         adjustQuotasByShape(shapeProb);
-        // 短期差异再微调配额
-        PAIR_GROUP_QUOTA = Math.max(8, Math.min(50, PAIR_GROUP_QUOTA + CURRENT_TUNE.pairQuotaDelta));
-        GROUP_UNIQUE_TARGET = Math.max(40, Math.min(110, GROUP_UNIQUE_TARGET + CURRENT_TUNE.groupTargetDelta));
+        // 命中率优先：根据近窗对比连挂，小幅抬升覆盖配额（不改打分主链路）
+        applyMissStreakQuotaBoost(streakCompares);
 
         List<int[]> selected = selectGroupFirst(digits, scores, topPos, feat, seeds);
         if (selected == null || selected.size() < MIN_BET) {
@@ -164,21 +153,11 @@ public final class RuleBasedPredictUtils {
             sb.append(t[0]).append(t[1]).append(t[2]);
         }
         String result = sb.toString();
-        log.info("{} 规则预测结果(≤{}注, 短期窗{}): {}", CURRENT_KIND, TARGET_BET,
-                CURRENT_TUNE.featureWindow, result);
+        log.info("{} 规则预测结果(≤{}注): {}", CURRENT_KIND, TARGET_BET, result);
         return result;
     }
 
-    /** 应用短期自适应到形态窗等 */
-    private static void applyShortTermTune(ShortTermAdaptiveTuner.PredictTune tune) {
-        if (tune == null) {
-            SHAPE_PROB_WINDOW = 15;
-            return;
-        }
-        SHAPE_PROB_WINDOW = tune.featureWindow;
-    }
-
-    /** 3D / 排三专项参数（短期走势优先，注数≤150） */
+    /** 3D / 排三专项参数（面向近100期：直选≥20、组选≥50） */
     private static void applyGameProfile(GameKind kind) {
         CURRENT_KIND = kind;
         TARGET_BET = MAX_BET_LIMIT;
@@ -225,12 +204,90 @@ public final class RuleBasedPredictUtils {
     }
 
     /**
-     * 开奖走势加权：和值通道、奇偶偏置、重号/邻号延续（窗口跟短期自适应）。
+     * 近窗连挂时抬升覆盖：组选连挂→散组/组三配额；直选连挂→排列展开。
+     * 幅度保守，避免反向扰动原标定。
+     */
+    private static void applyMissStreakQuotaBoost(List<HmCache.CompareDto> compares) {
+        if (compares == null || compares.isEmpty()) {
+            return;
+        }
+        int missZx = 0;
+        int missGroup = 0;
+        boolean stopZx = false;
+        boolean stopGroup = false;
+        for (int i = compares.size() - 1; i >= 0 && i >= compares.size() - 15; i--) {
+            HmCache.CompareDto dto = compares.get(i);
+            if (dto == null || dto.getAiHm() == null || dto.getAiHm().isBlank()
+                    || dto.getRealHm() == null || dto.getRealHm().length() != 3) {
+                continue;
+            }
+            String actual = dto.getRealHm().trim();
+            while (actual.length() < 3) {
+                actual = "0" + actual;
+            }
+            char[] ak = actual.toCharArray();
+            Arrays.sort(ak);
+            String aKey = new String(ak);
+            boolean zx = false;
+            boolean group = false;
+            for (String p : dto.getAiHm().split(",")) {
+                String t = p.trim();
+                while (t.length() < 3) {
+                    t = "0" + t;
+                }
+                if (t.length() != 3) {
+                    continue;
+                }
+                if (t.equals(actual)) {
+                    zx = true;
+                    group = true;
+                    break;
+                }
+                char[] ck = t.toCharArray();
+                Arrays.sort(ck);
+                if (new String(ck).equals(aKey)) {
+                    group = true;
+                }
+            }
+            if (!stopZx) {
+                if (zx) {
+                    stopZx = true;
+                } else {
+                    missZx++;
+                }
+            }
+            if (!stopGroup) {
+                if (group) {
+                    stopGroup = true;
+                } else {
+                    missGroup++;
+                }
+            }
+            if (stopZx && stopGroup) {
+                break;
+            }
+        }
+
+        if (missGroup >= 2) {
+            GROUP_UNIQUE_TARGET = Math.min(CURRENT_KIND == GameKind.PL3 ? 105 : 90,
+                    GROUP_UNIQUE_TARGET + 6 + Math.min(6, missGroup));
+            PAIR_GROUP_QUOTA = Math.min(CURRENT_KIND == GameKind.PL3 ? 24 : 45,
+                    PAIR_GROUP_QUOTA + 3);
+            log.info("组选连挂{}期 → 散组目标={} 组三配额={}", missGroup, GROUP_UNIQUE_TARGET, PAIR_GROUP_QUOTA);
+        }
+        if (missZx >= 3) {
+            PERM_EXPAND_GROUPS = Math.min(CURRENT_KIND == GameKind.PL3 ? 40 : 65,
+                    PERM_EXPAND_GROUPS + 4 + Math.min(8, missZx));
+            log.info("直选连挂{}期 → 排列展开组数={}", missZx, PERM_EXPAND_GROUPS);
+        }
+    }
+
+    /**
+     * 开奖走势加权：和值通道、奇偶偏置、重号/邻号延续。
      */
     private static void applyTrendBoost(int[][] digits, int[][] scores, ShapeProb shape) {
         int n = digits.length;
-        int trendW = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 12;
-        int from = Math.max(0, n - trendW);
+        int from = Math.max(0, n - 12);
         int[] sumCnt = new int[28];
         int[] oddCnt = new int[4];
         for (int i = from; i < n; i++) {
@@ -273,13 +330,10 @@ public final class RuleBasedPredictUtils {
                 }
             }
         }
-        double hotMul = CURRENT_TUNE != null ? CURRENT_TUNE.hotMul : 1.0;
-        double neighMul = CURRENT_TUNE != null ? CURRENT_TUNE.neighborMul : 1.0;
-        double repeatMul = CURRENT_TUNE != null ? CURRENT_TUNE.repeatMul : 1.0;
         int boost = CURRENT_KIND == GameKind.PL3 ? 2 : 1;
         for (int pos = 0; pos < 3; pos++) {
             for (int d = 0; d < 10; d++) {
-                scores[pos][d] += (int) Math.round(Math.min(8, digitInHotSum[d] / 30.0) * boost * hotMul);
+                scores[pos][d] += Math.min(8, digitInHotSum[d] / 30) * boost;
             }
         }
         int preferOddSlots = 0;
@@ -297,13 +351,13 @@ public final class RuleBasedPredictUtils {
         }
         int[] last = digits[n - 1];
         for (int pos = 0; pos < 3; pos++) {
-            scores[pos][last[pos]] += (int) Math.round((CURRENT_KIND == GameKind.SD_3D ? 2 : 1) * repeatMul);
-            scores[pos][(last[pos] + 1) % 10] += (int) Math.round(4 * neighMul);
-            scores[pos][(last[pos] + 9) % 10] += (int) Math.round(4 * neighMul);
+            scores[pos][last[pos]] += CURRENT_KIND == GameKind.SD_3D ? 2 : 1;
+            scores[pos][(last[pos] + 1) % 10] += 4;
+            scores[pos][(last[pos] + 9) % 10] += 4;
         }
         if (shape.pairHigher && CURRENT_KIND == GameKind.SD_3D) {
             for (int pos = 0; pos < 3; pos++) {
-                scores[pos][last[pos]] += (int) Math.round(3 * repeatMul);
+                scores[pos][last[pos]] += 3;
             }
         }
     }
@@ -768,8 +822,7 @@ public final class RuleBasedPredictUtils {
         log.info("直选覆盖热核{}码={}", GROUP_DIGIT_POOL, Arrays.toString(hotPool));
 
         int[] groupHitProxy = new int[1000];
-        int proxyW = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
-        int from20 = Math.max(0, digits.length - proxyW);
+        int from20 = Math.max(0, digits.length - 20);
         for (int i = from20; i < digits.length; i++) {
             groupHitProxy[sortedKeyCode(digits[i][0], digits[i][1], digits[i][2])]++;
         }
@@ -1440,7 +1493,7 @@ public final class RuleBasedPredictUtils {
         return sets;
     }
 
-    /** 热号池：短期频次 + 位转移，上期只轻加，不强制占满 */
+    /** 热号池：近15频次 + 位转移，上期只轻加，不强制占满 */
     private static int[] buildHotPool(int[][] digits, int[] global, RecentFeatureStats feat, int size) {
         int n = digits.length;
         int[] omitScore = new int[10];
@@ -1455,31 +1508,24 @@ public final class RuleBasedPredictUtils {
             int gap = lastSeen[d] < 0 ? n : (n - 1 - lastSeen[d]);
             omitScore[d] = Math.min(gap, 12);
         }
-        int hotW = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
-        double hotMul = CURRENT_TUNE != null ? CURRENT_TUNE.hotMul : 1.0;
-        double coldMul = CURRENT_TUNE != null ? CURRENT_TUNE.coldMul : 1.0;
-        double neighMul = CURRENT_TUNE != null ? CURRENT_TUNE.neighborMul : 1.0;
-        int[] cntHot = new int[10];
-        int fromHot = Math.max(0, n - hotW);
-        for (int i = fromHot; i < n; i++) {
-            cntHot[digits[i][0]]++;
-            cntHot[digits[i][1]]++;
-            cntHot[digits[i][2]]++;
+        int[] cnt15 = new int[10];
+        int from15 = Math.max(0, n - 15);
+        for (int i = from15; i < n; i++) {
+            cnt15[digits[i][0]]++;
+            cnt15[digits[i][1]]++;
+            cnt15[digits[i][2]]++;
         }
         int[] combined = new int[10];
         for (int d = 0; d < 10; d++) {
-            combined[d] = global[d]
-                    + (int) Math.round(cntHot[d] * 10 * hotMul)
-                    + (int) Math.round(omitScore[d] * 2 * coldMul)
-                    + feat.digitBonus(0, d)
+            combined[d] = global[d] + cnt15[d] * 10 + omitScore[d] * 2 + feat.digitBonus(0, d)
                     + feat.digitBonus(1, d) + feat.digitBonus(2, d);
         }
         for (int p = 0; p < 3; p++) {
             combined[feat.last[p]] += 6;
-            combined[(feat.last[p] + 1) % 10] += (int) Math.round(10 * neighMul);
-            combined[(feat.last[p] + 9) % 10] += (int) Math.round(10 * neighMul);
-            combined[(feat.last[p] + 2) % 10] += (int) Math.round(5 * neighMul);
-            combined[(feat.last[p] + 8) % 10] += (int) Math.round(5 * neighMul);
+            combined[(feat.last[p] + 1) % 10] += 10;
+            combined[(feat.last[p] + 9) % 10] += 10;
+            combined[(feat.last[p] + 2) % 10] += 5;
+            combined[(feat.last[p] + 8) % 10] += 5;
         }
         Integer[] order = new Integer[10];
         for (int i = 0; i < 10; i++) {
@@ -1493,14 +1539,13 @@ public final class RuleBasedPredictUtils {
         return r;
     }
 
-    /** 上期同位至少匹配1位时的下期完整号，按权重取候选（转移窗跟短期自适应） */
+    /** 上期同位至少匹配1位时的下期完整号，按权重取候选 */
     private static List<int[]> broadTransferCandidates(int[][] dig, RecentFeatureStats feat) {
         int n = dig.length;
         int[] last = feat.last;
         java.util.Map<String, int[]> best = new java.util.LinkedHashMap<>();
         java.util.Map<String, Integer> wmap = new java.util.LinkedHashMap<>();
-        int lookback = CURRENT_TUNE != null ? CURRENT_TUNE.transferWindow : 25;
-        int from = Math.max(1, n - lookback);
+        int from = Math.max(1, n - 60);
         for (int i = from; i < n; i++) {
             int[] prev = dig[i - 1];
             int match = 0;
@@ -1532,9 +1577,8 @@ public final class RuleBasedPredictUtils {
         int key = sortedKeyCode(a, b, c);
         score += groupHitProxy[key] * 25;
         score += feat.shapeBonus(a, b, c);
-        // 近短期是否出现过相同组选
-        int nearW = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 10;
-        int from = Math.max(0, digits.length - nearW);
+        // 近10期是否出现过相同组选
+        int from = Math.max(0, digits.length - 10);
         for (int i = from; i < digits.length; i++) {
             if (sortedKeyCode(digits[i][0], digits[i][1], digits[i][2]) == key) {
                 score += 15;
@@ -1591,15 +1635,12 @@ public final class RuleBasedPredictUtils {
             g[d] = scores[0][d] + scores[1][d] + scores[2][d];
             g[d] += feat.digitBonus(0, d) + feat.digitBonus(1, d) + feat.digitBonus(2, d);
         }
-        // 短期窗任意位出现加分
-        int gw = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
-        double hotMul = CURRENT_TUNE != null ? CURRENT_TUNE.hotMul : 1.0;
-        int from = Math.max(0, digits.length - gw);
+        // 近20期任意位出现加分
+        int from = Math.max(0, digits.length - 20);
         for (int i = from; i < digits.length; i++) {
-            int add = (int) Math.round(2 * hotMul);
-            g[digits[i][0]] += add;
-            g[digits[i][1]] += add;
-            g[digits[i][2]] += add;
+            g[digits[i][0]] += 2;
+            g[digits[i][1]] += 2;
+            g[digits[i][2]] += 2;
         }
         return g;
     }
@@ -1701,17 +1742,9 @@ public final class RuleBasedPredictUtils {
 
     private static int[] scoreAllDigits(int[][] digits, int pos, List<HmCache.CompareDto> compares,
                                         RecentFeatureStats feat) {
-        int fw = CURRENT_TUNE != null ? CURRENT_TUNE.featureWindow : 15;
-        int half = Math.max(5, fw / 2);
-        int shortW = Math.max(3, Math.min(5, fw / 3));
-        double hotMul = CURRENT_TUNE != null ? CURRENT_TUNE.hotMul : 1.0;
-        double coldMul = CURRENT_TUNE != null ? CURRENT_TUNE.coldMul : 1.0;
-        double neighMul = CURRENT_TUNE != null ? CURRENT_TUNE.neighborMul : 1.0;
-        double repeatMul = CURRENT_TUNE != null ? CURRENT_TUNE.repeatMul : 1.0;
-
-        int[] freqShort = freq(digits, pos, shortW);
-        int[] freqHalf = freq(digits, pos, half);
-        int[] freqFull = freq(digits, pos, fw);
+        int[] freq5 = freq(digits, pos, 5);
+        int[] freq10 = freq(digits, pos, 10);
+        int[] freq20 = freq(digits, pos, 20);
         int[] omit = omission(digits, pos);
         int last = digits[digits.length - 1][pos];
 
@@ -1721,36 +1754,35 @@ public final class RuleBasedPredictUtils {
 
         int[] score = new int[10];
         for (int d = 0; d < 10; d++) {
-            int s = (int) Math.round(freqHalf[d] * 3 * hotMul + freqFull[d] * hotMul);
-            if (omit[d] >= 2 && omit[d] <= Math.max(4, fw / 2)) {
-                s += (int) Math.round(4 * coldMul);
-            } else if (omit[d] >= Math.max(5, fw / 2) && omit[d] <= fw) {
-                s += (int) Math.round(2 * coldMul);
+            int s = freq10[d] * 3 + freq20[d];
+            if (omit[d] >= 2 && omit[d] <= 6) {
+                s += 4;
+            } else if (omit[d] >= 7 && omit[d] <= 12) {
+                s += 2;
             }
-            if (freqShort[d] >= 2) {
-                s += (int) Math.round(3 * hotMul);
+            if (freq5[d] >= 2) {
+                s += 3;
             }
             if (d == last) {
                 s -= 1;
-                s += (int) Math.round((repeatMul - 1.0) * 2);
             }
             if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
-                s += (int) Math.round(2 * neighMul);
+                s += 2;
             }
             if (actual15[d] > 0 && pred15[d] <= 1) {
-                s += (int) Math.round(5 * coldMul);
+                s += 5;
             }
             if (pred15[d] >= 4 && actual15[d] == 0) {
                 s -= 8;
             }
             // 近窗重号 / 转移
-            s += (int) Math.round(feat.digitBonus(pos, d) * Math.max(repeatMul, neighMul));
+            s += feat.digitBonus(pos, d);
             score[d] = s;
         }
         return score;
     }
 
-    // ========================= 偏差诊断日志（近短期窗） =========================
+    // ========================= 偏差诊断日志（近15期） =========================
 
     private static void logBiasDiagnostics(List<HmCache.CompareDto> compares) {
         if (compares == null || compares.isEmpty()) {
@@ -1767,16 +1799,15 @@ public final class RuleBasedPredictUtils {
         if (valid.isEmpty()) {
             return;
         }
-        int look = CURRENT_TUNE != null ? CURRENT_TUNE.biasLookback : 12;
-        int start = Math.max(0, valid.size() - look);
-        List<HmCache.CompareDto> lastN = valid.subList(start, valid.size());
+        int start = Math.max(0, valid.size() - 15);
+        List<HmCache.CompareDto> last15 = valid.subList(start, valid.size());
 
         int neighborMiss = 0;
         int extremeFail = 0;
         int checked = 0;
         boolean[] posMiss3 = new boolean[3];
 
-        for (HmCache.CompareDto dto : lastN) {
+        for (HmCache.CompareDto dto : last15) {
             int[] real = parseCode(dto.getRealHm());
             if (real == null) {
                 continue;
@@ -1810,11 +1841,11 @@ public final class RuleBasedPredictUtils {
             }
         }
 
-        int from = Math.max(0, lastN.size() - 3);
+        int from = Math.max(0, last15.size() - 3);
         for (int pos = 0; pos < 3; pos++) {
-            boolean miss3 = lastN.size() >= 3;
-            for (int i = from; i < lastN.size() && miss3; i++) {
-                HmCache.CompareDto dto = lastN.get(i);
+            boolean miss3 = last15.size() >= 3;
+            for (int i = from; i < last15.size() && miss3; i++) {
+                HmCache.CompareDto dto = last15.get(i);
                 int[] real = parseCode(dto.getRealHm());
                 if (real == null) {
                     miss3 = false;
@@ -1835,10 +1866,10 @@ public final class RuleBasedPredictUtils {
             posMiss3[pos] = miss3;
         }
 
-        int recent = Math.min(5, lastN.size());
+        int recent = Math.min(5, last15.size());
         int posCoverMiss = 0;
-        for (int i = lastN.size() - recent; i < lastN.size(); i++) {
-            HmCache.CompareDto dto = lastN.get(i);
+        for (int i = last15.size() - recent; i < last15.size(); i++) {
+            HmCache.CompareDto dto = last15.get(i);
             int[] real = parseCode(dto.getRealHm());
             if (real == null) {
                 continue;
@@ -1962,7 +1993,7 @@ public final class RuleBasedPredictUtils {
                 valid.add(dto);
             }
         }
-        int start = Math.max(0, valid.size() - (CURRENT_TUNE != null ? CURRENT_TUNE.biasLookback : 12));
+        int start = Math.max(0, valid.size() - 15);
         for (int i = start; i < valid.size(); i++) {
             HmCache.CompareDto dto = valid.get(i);
             int[] real = parseCode(dto.getRealHm());
