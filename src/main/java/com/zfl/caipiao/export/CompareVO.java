@@ -24,6 +24,9 @@ public class CompareVO {
     @ExcelProperty("推荐号码")
     private String aiRecommendHm;
 
+    @ExcelProperty("过拟合五组")
+    private String aiOverfitHm;
+
     @ExcelProperty("AI组三")
     private String aiZuSanHm;
 

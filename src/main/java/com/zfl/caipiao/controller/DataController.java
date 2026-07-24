@@ -231,6 +231,7 @@ public class DataController {
             map.put("qh", dto.getQh());
             map.put("aiHm", dto.getAiHm());
             map.put("aiRecommendHm", dto.getAiRecommendHm());
+            map.put("aiOverfitHm", dto.getAiOverfitHm());
             map.put("aiZuSanHm", dto.getAiZuSanHm());
             map.put("aiDingWeiHm", dto.getAiDingWeiHm());
             map.put("realHm", dto.getRealHm());

@@ -1687,6 +1687,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合五组</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">200注大底</button>
                 </div>
@@ -1821,6 +1822,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合五组</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">200注大底</button>
                 </div>
@@ -3214,6 +3216,10 @@
             thead.innerHTML = '<tr><th>序号</th><th>200注大底</th><th>实际开奖</th></tr>';
             return;
         }
+        if (compareType === 'overfit') {
+            thead.innerHTML = '<tr><th>过拟合五组</th><th>实际开奖</th><th>直选</th><th>组选</th></tr>';
+            return;
+        }
         if (type === '3d') {
             thead.innerHTML = '<tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
         } else {
@@ -3223,6 +3229,7 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
+        if (compareType === 'overfit') return 4;
         return 3;
     }
 
@@ -3384,6 +3391,18 @@
         return bets.split(',').includes(realHm);
     }
 
+    function checkOverfitZx(overfitHm, realHm) {
+        if (!overfitHm || !realHm) return false;
+        return String(overfitHm).split(',').map(s => s.trim()).includes(realHm);
+    }
+
+    function checkOverfitGroup(overfitHm, realHm) {
+        if (!overfitHm || !realHm || realHm.length !== 3) return false;
+        const key = sortedDigitKey(realHm);
+        return String(overfitHm).split(',').map(s => s.trim()).filter(Boolean)
+            .some(p => sortedDigitKey(p.padStart(3, '0').slice(-3)) === key);
+    }
+
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
         if (!aiDingWeiHm || !realHm || realHm.length !== 3) return false;
         const baiweiMatch = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
@@ -3461,6 +3480,24 @@
             return;
         }
 
+        if (tab === 'overfit') {
+            let zx = 0, gp = 0;
+            const total = compareData.filter(i => i.aiOverfitHm).length;
+            compareData.forEach(item => {
+                if (checkOverfitZx(item.aiOverfitHm, item.realHm)) zx++;
+                if (checkOverfitGroup(item.aiOverfitHm, item.realHm)) gp++;
+            });
+            const zxRate = total > 0 ? ((zx / total) * 100).toFixed(1) : 0;
+            const gpRate = total > 0 ? ((gp / total) * 100).toFixed(1) : 0;
+            el.innerHTML = `
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有五组预测期数</div></div>
+                <div class="stat-card"><div class="stat-value">${zx}/${total}</div><div class="stat-label">直选命中</div></div>
+                <div class="stat-card"><div class="stat-value">${zxRate}%</div><div class="stat-label">直选命中率</div></div>
+                <div class="stat-card"><div class="stat-value">${gp}/${total}</div><div class="stat-label">组选命中</div></div>
+                <div class="stat-card"><div class="stat-value">${gpRate}%</div><div class="stat-label">组选命中率</div></div>`;
+            return;
+        }
+
         let sanmaSuccess = 0, qimaSuccess = 0;
         const total = compareData.length;
         const sanmaTotal = compareData.filter(i => i.aiHm).length;
@@ -3528,6 +3565,21 @@
                     const btn = row.querySelector('.qima-hit-btn');
                     btn.onclick = () => showQimaIndexPopup(seq, positions, item.aiDingWeiHm, item.realHm);
                 }
+            } else if (compareType === 'overfit') {
+                const displayHm = item.aiOverfitHm || '';
+                const zx = checkOverfitZx(displayHm, item.realHm);
+                const gp = checkOverfitGroup(displayHm, item.realHm);
+                let zxText = '<span style="color:var(--text-secondary)">待开奖</span>';
+                let gpText = '<span style="color:var(--text-secondary)">待开奖</span>';
+                if (item.realHm) {
+                    zxText = zx ? '<span class="success">✓ 直选</span>' : '<span class="fail">✗</span>';
+                    gpText = gp ? '<span class="success">✓ 组选</span>' : '<span class="fail">✗</span>';
+                }
+                row.innerHTML = `
+                    <td>${displayHm ? formatBalls(displayHm) : '-'}</td>
+                    <td>${realBalls}</td>
+                    <td>${zxText}</td>
+                    <td>${gpText}</td>`;
             } else {
                 const displayHm = topSanmaBets(item);
                 const isMatch = checkMatch(item, item.realHm);

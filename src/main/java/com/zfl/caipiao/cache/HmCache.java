@@ -87,6 +87,9 @@ public class HmCache {
                 last.setAiFullHm(compareDto.getAiFullHm());
                 last.setAiZuSanHm(compareDto.getAiZuSanHm());
                 last.setAiRecommendHm(compareDto.getAiRecommendHm());
+                if (compareDto.getAiOverfitHm() != null) {
+                    last.setAiOverfitHm(compareDto.getAiOverfitHm());
+                }
                 if (compareDto.getAiDingWeiHm() != null) {
                     last.setAiDingWeiHm(compareDto.getAiDingWeiHm());
                 }
@@ -167,6 +170,9 @@ public class HmCache {
 
         /** 展示/邮件推荐注（固定10注，基于原始200注挑选） */
         private String aiRecommendHm;
+
+        /** 近20期过拟合五组（动态覆盖算法，非硬编码） */
+        private String aiOverfitHm;
 
         private String aiDingWeiHm;
 
