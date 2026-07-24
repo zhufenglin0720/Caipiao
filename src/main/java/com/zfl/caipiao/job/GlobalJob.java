@@ -56,7 +56,7 @@ public class GlobalJob {
     @Scheduled(cron = "0 40 18 * * ?")
     public void applyTask() throws MessagingException, InterruptedException {
         // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
-        // 4) 近20期过拟合五组：仅落盘供页面展示，不发邮件
+        // 4) 近20期过拟合组合：仅落盘供页面展示，不发邮件
         // 5) 胆码（百/十/个各1码）：仅落盘供页面展示，不发邮件
         String raw200 = RuleBasedPredictUtils.get3dPredict();
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
@@ -94,7 +94,7 @@ public class GlobalJob {
                 .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Recommend))
                 .replace("{{TIMESTAMP}}", DateUtil.now());
         sendEmailCode("今日3D及排三预测（高概率10注）", msg);
-        // 过拟合五组 / 胆码仅落盘供页面展示，不发送邮件
+        // 过拟合组合 / 胆码仅落盘供页面展示，不发送邮件
     }
 
     @Scheduled(cron = "0 50 18 * * ?")

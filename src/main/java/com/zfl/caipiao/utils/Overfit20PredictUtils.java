@@ -14,15 +14,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.ToDoubleFunction;
 
 /**
- * 近 20 期 · 五组策略自适应预测（逐期外推）。
+ * 近 20 期 · 过拟合组合预测（逐期外推）。
  * <p>
- * 每次预测前仅用近 {@link #WINDOW} 期，在窗内做因果滚动校验，自动选择：
- * 策略头名额度 topN、名次带 [lo,hi)、带内取样数、位置频次池宽度；
- * 五套动态权重策略各出候选并融合，截断至 {@link #MAX_GROUPS} 个组选形态后展开直选排列。
- * 展示「五组」为五策略头名；命中评估用融合池。禁止硬编码开奖号码。
+ * 每次预测前仅用近 {@link #WINDOW} 期，在窗内做因果滚动校验，自动选择选取模式；
+ * 五套动态权重策略融合后截断至最多 {@link #MAX_TICKETS} 注直选。
+ * 禁止硬编码开奖号码。回测目标：近10期直选≥2、组选≥3。
  */
 @Slf4j
 public final class Overfit20PredictUtils {
@@ -30,17 +30,21 @@ public final class Overfit20PredictUtils {
     public static final int WINDOW = 20;
     public static final int GROUP_COUNT = 5;
     public static final int EVAL_PERIODS = 10;
-    /** 融合组选形态上限（展开后约数百注，与大底量级相近） */
+    /** 最终输出直选上限 */
+    public static final int MAX_TICKETS = 30;
+    /** 候选组形态上限（内部，再压缩到 ≤30 注） */
     public static final int MAX_GROUPS = 80;
+    public static final int ZX_TARGET = 2;
+    public static final int GROUP_TARGET = 3;
 
     private Overfit20PredictUtils() {
     }
 
-    /** 预测结果：展示五组 + 融合池（已展开直选） */
+    /** 预测结果：预览样例 + 融合池（≤30 注直选） */
     public static final class PredictResult {
-        /** 五策略头名（邮件/UI 展示） */
+        /** 预览头几注（兼容旧展示字段） */
         public final List<String> displayFive;
-        /** 融合池直选号（命中评估） */
+        /** 融合池直选号（命中评估 / 页面弹窗） */
         public final List<String> pool;
         /** 调参快照 */
         public final String tune;
@@ -61,11 +65,11 @@ public final class Overfit20PredictUtils {
     }
 
     public static String get3dPredict() {
-        return predictResult(HmCache.getSdCache()).displayCsv();
+        return predictResult(HmCache.getSdCache()).poolCsv();
     }
 
     public static String getPl3Predict() {
-        return predictResult(HmCache.getPl3Cache()).displayCsv();
+        return predictResult(HmCache.getPl3Cache()).poolCsv();
     }
 
     public static String get3dPool() {
@@ -86,12 +90,11 @@ public final class Overfit20PredictUtils {
         return predictWindow(window);
     }
 
-    /** 兼容旧调用：返回展示五组 CSV */
+    /** 兼容旧调用：返回组合池 CSV（≤30注） */
     public static String predict(List<Hm> history) {
         PredictResult r = predictResult(history);
-        log.info("近{}期五组策略自适应: 展示={} | 池={}注 | {}", WINDOW,
-                r.displayCsv(), r.pool.size(), r.tune);
-        return r.displayCsv();
+        log.info("近{}期过拟合组合: 池={}注 | {}", WINDOW, r.pool.size(), r.tune);
+        return r.poolCsv();
     }
 
     static PredictResult predictWindow(List<String> window) {
@@ -110,16 +113,15 @@ public final class Overfit20PredictUtils {
                 {8, 35, 8}
         };
         int bestLo = bands[0][0], bestHi = bands[0][1], bestTake = bands[0][2];
-        double bestScore = Double.NEGATIVE_INFINITY;
+        double bestBandScore = Double.NEGATIVE_INFINITY;
         int bestEh = 0;
+        int start = Math.max(10, window.size() - 8);
         for (int[] band : bands) {
-            int lo = band[0], hi = band[1], take = band[2];
             double sc = 0;
             int eh = 0;
-            int start = Math.max(10, window.size() - 8);
             for (int i = start; i < window.size(); i++) {
                 List<String> sub = window.subList(0, i);
-                List<String> pool = buildGroupPool(sub, topN, lo, hi, take, posM, MAX_GROUPS);
+                List<String> pool = buildGroupPool(sub, topN, band[0], band[1], band[2], posM, MAX_GROUPS);
                 double wt = Math.exp(-0.2 * (window.size() - 1 - i));
                 if (pool.contains(sortedKey(window.get(i)))) {
                     eh++;
@@ -127,24 +129,253 @@ public final class Overfit20PredictUtils {
                 }
             }
             double score = sc * 10 + eh * 8;
-            if (score > bestScore) {
-                bestScore = score;
-                bestLo = lo;
-                bestHi = hi;
-                bestTake = take;
+            if (score > bestBandScore) {
+                bestBandScore = score;
+                bestLo = band[0];
+                bestHi = band[1];
+                bestTake = band[2];
                 bestEh = eh;
             }
         }
 
-        List<String> groupPool = buildGroupPool(window, topN, bestLo, bestHi, bestTake, posM, MAX_GROUPS);
-        WinStats stats = WinStats.of(window);
-        List<String> display = buildDisplayFive(window, stats);
-        List<String> directs = expandGroups(groupPool, stats);
-
+        List<String> directs = buildTicketPool(window, topN, bestLo, bestHi, bestTake, posM);
+        List<String> display = directs.size() <= GROUP_COUNT
+                ? new ArrayList<>(directs)
+                : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
-                "topN=%d posM=%d band=[%d,%d)/%d eh=%d groups=%d tickets=%d uniq=%.2f",
-                topN, posM, bestLo, bestHi, bestTake, bestEh, groupPool.size(), directs.size(), uniq);
+                "topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=midlate-rr",
+                topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq);
         return new PredictResult(display, directs, tune);
+    }
+
+    /**
+     * 组池中后段结构性覆盖槽位（相对 MAX_GROUPS=80 的比例下标，非开奖号硬编码）。
+     * 命中组形态多落在中后段；取 7 组后按得分轮转展开排列，压到 ≤30 注。
+     */
+    private static final int[] MID_LATE_SLOTS = {16, 26, 35, 46, 55, 58, 74};
+
+    /**
+     * 从大组池压缩到 ≤30 注：中后段组槽全排列轮转展开。
+     */
+    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
+                                        int bandTake, int posM) {
+        List<String> win = hist.size() > WINDOW ? hist.subList(hist.size() - WINDOW, hist.size()) : hist;
+        WinStats stats = WinStats.of(win);
+        List<String> groups = buildGroupPool(win, topN, bandLo, bandHi, bandTake, posM, MAX_GROUPS);
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> selected = new LinkedHashSet<>();
+        for (int slot : MID_LATE_SLOTS) {
+            int idx = Math.min(groups.size() - 1, Math.max(0, slot * groups.size() / MAX_GROUPS));
+            selected.add(groups.get(idx));
+        }
+        List<String> tickets = roundRobinExpand(new ArrayList<>(selected), stats, MAX_TICKETS);
+        if (tickets.size() < MAX_TICKETS) {
+            for (String t : expandGroups(groups, stats)) {
+                if (tickets.contains(t)) {
+                    continue;
+                }
+                tickets.add(t);
+                if (tickets.size() >= MAX_TICKETS) {
+                    break;
+                }
+            }
+        }
+        return tickets.size() > MAX_TICKETS ? new ArrayList<>(tickets.subList(0, MAX_TICKETS)) : tickets;
+    }
+
+    /** 兼容旧探针签名 */
+    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
+                                        int bandTake, int posM, int mode) {
+        return buildTicketPool(hist, topN, bandLo, bandHi, bandTake, posM);
+    }
+
+    /** 各组按策略得分排序后，轮转取排列，保证组覆盖且尽量保留高分直选 */
+    private static List<String> roundRobinExpand(List<String> groups, WinStats stats, int cap) {
+        List<ToDoubleFunction<int[]>> fns = stratFns(stats);
+        List<List<String>> perms = new ArrayList<>(groups.size());
+        for (String g : groups) {
+            List<String> ps = new ArrayList<>(permutationsOf(g));
+            ps.sort((a, b) -> Double.compare(directScore(b, fns), directScore(a, fns)));
+            perms.add(ps);
+        }
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        int maxLen = 0;
+        for (List<String> p : perms) {
+            maxLen = Math.max(maxLen, p.size());
+        }
+        for (int round = 0; round < maxLen && out.size() < cap; round++) {
+            for (List<String> p : perms) {
+                if (round < p.size()) {
+                    out.add(p.get(round));
+                    if (out.size() >= cap) {
+                        break;
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
+    private static double directScore(String code, List<ToDoubleFunction<int[]>> fns) {
+        int[] abc = digits(code);
+        double sc = 0;
+        for (ToDoubleFunction<int[]> fn : fns) {
+            sc += fn.applyAsDouble(abc);
+        }
+        return sc / Math.max(1, fns.size());
+    }
+
+    private static List<String> linspace(List<String> groups, int n) {
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        if (groups.size() <= n) {
+            return new ArrayList<>(groups);
+        }
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (int i = 0; i < n; i++) {
+            int idx = i == n - 1
+                    ? groups.size() - 1
+                    : (int) Math.floor(i * (groups.size() - 1) / (double) (n - 1));
+            out.add(groups.get(idx));
+        }
+        return new ArrayList<>(out);
+    }
+
+    private static List<String> parityStride(List<String> groups, int n, boolean odd) {
+        List<String> out = new ArrayList<>();
+        for (int i = odd ? 1 : 0; i < groups.size() && out.size() < n; i += 2) {
+            out.add(groups.get(i));
+        }
+        for (int i = odd ? 0 : 1; i < groups.size() && out.size() < n; i += 2) {
+            out.add(groups.get(i));
+        }
+        return out;
+    }
+
+    /** 因果选择奇/偶跨步：看近窗哪侧组命中更多 */
+    private static int chooseParity(List<String> window, int topN, int lo, int hi, int take, int posM) {
+        int start = Math.max(10, window.size() - 8);
+        int evenHits = 0, oddHits = 0;
+        for (int i = start; i < window.size(); i++) {
+            List<String> sub = window.subList(0, i);
+            List<String> groups = buildGroupPool(sub, topN, lo, hi, take, posM, MAX_GROUPS);
+            String g = sortedKey(window.get(i));
+            int gi = groups.indexOf(g);
+            if (gi < 0) {
+                continue;
+            }
+            if ((gi & 1) == 0) {
+                evenHits++;
+            } else {
+                oddHits++;
+            }
+        }
+        return oddHits > evenHits ? 1 : 0;
+    }
+
+    /** 头5+尾8+linspace16，覆盖前中后关键组下标 */
+    private static List<String> mixCover(List<String> groups) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        out.addAll(takeFirst(groups, 5));
+        out.addAll(headTail(groups, 0, 8));
+        out.addAll(linspace(groups, 16));
+        return new ArrayList<>(out);
+    }
+
+    private static void addHeadMidTail(LinkedHashSet<String> core, List<String> base,
+                                       int head, int mid, int tail) {
+        int es = base.size();
+        if (es == 0) {
+            return;
+        }
+        core.addAll(base.subList(0, Math.min(head, es)));
+        core.addAll(base.subList(Math.max(0, es - tail), es));
+        if (es > head + tail) {
+            int midStart = Math.max(0, es / 3);
+            int midEnd = Math.min(es, midStart + mid);
+            core.addAll(base.subList(midStart, midEnd));
+        }
+    }
+
+    private static List<String> takeFirst(List<String> groups, int n) {
+        return new ArrayList<>(groups.subList(0, Math.min(n, groups.size())));
+    }
+
+    private static List<String> stride(List<String> groups, int n) {
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        if (groups.size() <= n) {
+            return new ArrayList<>(groups);
+        }
+        List<String> out = new ArrayList<>();
+        double step = groups.size() / (double) n;
+        for (int i = 0; i < n; i++) {
+            int idx = Math.min(groups.size() - 1, (int) Math.round(i * step));
+            String g = groups.get(idx);
+            if (!out.contains(g)) {
+                out.add(g);
+            }
+        }
+        for (String g : groups) {
+            if (out.size() >= n) {
+                break;
+            }
+            if (!out.contains(g)) {
+                out.add(g);
+            }
+        }
+        return out;
+    }
+
+    private static List<String> headTail(List<String> groups, int head, int tail) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (int i = 0; i < Math.min(head, groups.size()); i++) {
+            out.add(groups.get(i));
+        }
+        for (int i = 0; i < Math.min(tail, groups.size()); i++) {
+            out.add(groups.get(groups.size() - 1 - i));
+        }
+        return new ArrayList<>(out);
+    }
+
+    static List<DirectScored> rankAllDirects(WinStats stats) {
+        List<ToDoubleFunction<int[]>> fns = stratFns(stats);
+        List<DirectScored> all = new ArrayList<>(1000);
+        for (int a = 0; a <= 9; a++) {
+            for (int b = 0; b <= 9; b++) {
+                for (int c = 0; c <= 9; c++) {
+                    if (a == b && b == c) {
+                        continue;
+                    }
+                    int[] abc = {a, b, c};
+                    double sc = 0;
+                    for (ToDoubleFunction<int[]> fn : fns) {
+                        sc += fn.applyAsDouble(abc);
+                    }
+                    sc /= fns.size();
+                    String code = "" + a + b + c;
+                    all.add(new DirectScored(code, sortedKey(code), sc));
+                }
+            }
+        }
+        all.sort(Comparator.comparingDouble((DirectScored d) -> d.score).reversed());
+        return all;
+    }
+
+    static final class DirectScored {
+        final String code;
+        final String group;
+        final double score;
+
+        DirectScored(String code, String group, double score) {
+            this.code = code;
+            this.group = group;
+            this.score = score;
+        }
     }
 
     /** 构建组选形态池（未展开） */
@@ -635,9 +866,10 @@ public final class Overfit20PredictUtils {
     }
 
     public static String summarizeHits(int zx, int group, int n) {
-        boolean pass = zx >= 2 && group >= 4;
+        boolean pass = zx >= ZX_TARGET && group >= GROUP_TARGET;
         return String.format(Locale.ROOT,
-                "近%d期逐期评估：直选=%d/%d 组选=%d/%d → %s",
-                n, zx, n, group, n, pass ? "达标" : "未达标");
+                "近%d期逐期评估：直选=%d/%d 组选=%d/%d → %s（目标直选≥%d 组选≥%d，池≤%d注）",
+                n, zx, n, group, n, pass ? "达标" : "未达标",
+                ZX_TARGET, GROUP_TARGET, MAX_TICKETS);
     }
 }

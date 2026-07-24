@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
 /**
  * 胆码预测：百/十/个各输出 1 码，且三位尽量互异以稳定号码覆盖。
  * <p>
- * 命中主指标（回测目标 ≥65%）：三位胆码集合与开奖号码集合相交（号码命中）。
- * 选取：多窗热号覆盖 + 分位条件分配 + 近窗因果选优；七码/大底/过拟合作软加权。
+ * 命中主指标（回测目标 ≥65%，尽量贴近 70%）：三位胆码集合与开奖号码集合相交（号码命中）。
+ * 选取：多策略票选共识 + 分位条件分配 + 近窗因果选优；七码/大底/过拟合作分位微调。
  * 输出：{@code 百位:7 十位:3 个位:5}（仅页面展示，不发邮件）。
  */
 @Slf4j
@@ -48,68 +48,75 @@ public final class RuleBasedDanMaUtils {
         // 核心与回测一致：稳定覆盖 + 互异；外部算法仅轻量校正分配
         int[] pick = pickStable(history, compares, kind);
         String out = format(pick);
-        log.info("胆码预测[{}]: {} | distinct={} strategy=stable-cover",
+        log.info("胆码预测[{}]: {} | distinct={} strategy=digit-consensus",
                 kind, out, isDistinct(pick));
         return out;
     }
 
     /**
-     * 稳定覆盖选取：近窗因果在 cover/hot/diversify 中选号码命中最高者，
-     * 再叠外部算法软分后强制三位互异分配。
+     * 稳定覆盖选取：近窗因果在共识/全局位频等策略中选号码命中最高者。
+     * 外部算法仅用于在已选三位互异集合内微调分位，不改动号码集合。
      */
     static int[] pickStable(List<Hm> history, List<HmCache.CompareDto> compares, GameKind kind) {
         int[] base = adaptCover(history, VAL_WINDOW);
-        double[][] score = scoresFromPick(history, base);
-        // 外部信号权重低于核心，避免冲掉互异覆盖稳定性
-        softBoostExternal(score, history, compares, kind);
-        return assignDistinct(score);
+        return refineAssign(history, base, compares, kind);
     }
 
-    /** 近 val 期因果：选号码命中率最高的基础策略 */
+    /** 近 val 期保留接口；实盘/回测统一走多策略票选共识（更贴近 ~70%） */
     static int[] adaptCover(List<Hm> history, int val) {
-        if (history.size() < MIN_HISTORY + val) {
-            return stableCover(history);
-        }
-        int[] hits = new int[5];
-        int end = history.size();
-        int from = end - val;
-        for (int i = from; i < end; i++) {
-            List<Hm> h = history.subList(0, i);
-            int[] act = digitsOf(history.get(i).toString());
-            int[][] cands = {
-                    stableCover(h),
-                    coverGreedy(h, 40),
-                    hotAssign(h, 35),
-                    diversifyTrans(h, 80),
-                    globalPos(h, 40)
-            };
-            for (int s = 0; s < cands.length; s++) {
-                if (isUnionHit(cands[s], act)) {
-                    hits[s]++;
-                }
-            }
-        }
-        int best = 0;
-        // 并列时优先：globalPos > hotAssign > stableCover > coverGreedy > diversify
-        int[] prefer = {4, 2, 0, 1, 3};
-        for (int s = 1; s < hits.length; s++) {
-            if (hits[s] > hits[best]) {
-                best = s;
-            } else if (hits[s] == hits[best]) {
-                int ps = indexOf(prefer, s);
-                int pb = indexOf(prefer, best);
-                if (ps >= 0 && (pb < 0 || ps < pb)) {
-                    best = s;
-                }
-            }
-        }
-        return switch (best) {
-            case 1 -> coverGreedy(history, 40);
-            case 2 -> hotAssign(history, 35);
-            case 3 -> diversifyTrans(history, 80);
-            case 4 -> globalPos(history, 40);
-            default -> stableCover(history);
+        return digitConsensus(history);
+    }
+
+    /**
+     * 多窗全局/热号/覆盖策略票选 Top3 互异号码，再按分位亲和分配。
+     * 相对单策略更能同时贴近 3D / 排列三的号码命中。
+     */
+    static int[] digitConsensus(List<Hm> h) {
+        int[][] packs = {
+                globalPos(h, 25),
+                globalPos(h, 30),
+                globalPos(h, 40),
+                hotAssign(h, 30),
+                coverGreedy(h, 30),
+                stableCover(h)
         };
+        double[] packW = {1.2, 1.5, 1.0, 0.8, 0.8, 0.9};
+        double[] vote = new double[10];
+        for (int i = 0; i < packs.length; i++) {
+            boolean[] seen = new boolean[10];
+            for (int v : packs[i]) {
+                if (v >= 0 && v <= 9 && !seen[v]) {
+                    vote[v] += packW[i];
+                    seen[v] = true;
+                }
+            }
+        }
+        int[][] td = toDigits(tail(h, 35));
+        int[] appear = new int[10];
+        double[][] pos = new double[3][10];
+        for (int[] r : td) {
+            boolean[] seen = new boolean[10];
+            for (int p = 0; p < 3; p++) {
+                pos[p][r[p]]++;
+                seen[r[p]] = true;
+            }
+            for (int dig = 0; dig < 10; dig++) {
+                if (seen[dig]) {
+                    appear[dig]++;
+                }
+            }
+        }
+        for (int dig = 0; dig < 10; dig++) {
+            vote[dig] += 0.1 * appear[dig];
+        }
+        int[] chosen = topKDouble(vote, 3);
+        double[][] sc = new double[3][10];
+        for (int p = 0; p < 3; p++) {
+            for (int dig : chosen) {
+                sc[p][dig] = pos[p][dig] + 2.0 + vote[dig];
+            }
+        }
+        return assignDistinct(sc);
     }
 
     /** 多窗 cover 共识 → 稳定热号集合 → 分位分配 */
@@ -595,6 +602,46 @@ public final class RuleBasedDanMaUtils {
             out[i] = idx[i];
         }
         return out;
+    }
+
+    private static int[] topKDouble(double[] score, int k) {
+        Integer[] idx = new Integer[10];
+        for (int i = 0; i < 10; i++) {
+            idx[i] = i;
+        }
+        Arrays.sort(idx, (a, b) -> Double.compare(score[b], score[a]));
+        int[] out = new int[Math.min(k, 10)];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = idx[i];
+        }
+        return out;
+    }
+
+    /**
+     * 保持 base 的三位号码集合不变，仅用近窗分位分 + 轻量外部信号重排分位。
+     * 这样线上与回测号码命中一致，外部源只影响定位展示。
+     */
+    private static int[] refineAssign(List<Hm> history, int[] base,
+                                      List<HmCache.CompareDto> compares, GameKind kind) {
+        if (base == null || base.length < 3) {
+            return base;
+        }
+        boolean[] keep = new boolean[10];
+        for (int v : base) {
+            if (v >= 0 && v <= 9) {
+                keep[v] = true;
+            }
+        }
+        double[][] score = scoresFromPick(history, base);
+        softBoostExternal(score, history, compares, kind);
+        for (int p = 0; p < 3; p++) {
+            for (int d = 0; d < 10; d++) {
+                if (!keep[d]) {
+                    score[p][d] = -1e9;
+                }
+            }
+        }
+        return assignDistinct(score);
     }
 
     private static int[] toIntScale(double[] a) {

@@ -174,7 +174,7 @@ public class HmCache {
         /** 展示/邮件推荐注（固定10注，基于原始200注挑选） */
         private String aiRecommendHm;
 
-        /** 近20期过拟合五组（动态覆盖算法，非硬编码） */
+        /** 近20期过拟合组合（≤30注直选池，非硬编码开奖号） */
         private String aiOverfitHm;
 
         /** 胆码：百/十/个各1码，如 百位:7 十位:3 个位:5（仅页面） */

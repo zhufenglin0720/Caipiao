@@ -415,6 +415,17 @@
         }
 
         .dingwei-text { font-size: 13px; text-align: left; }
+        .dingwei-text.danma-horizontal {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px 14px;
+        }
+        .dingwei-text.danma-horizontal .dingwei-row {
+            margin-bottom: 0;
+            gap: 4px;
+        }
         .dingwei-row { display: flex; align-items: center; margin-bottom: 3px; flex-wrap: wrap; }
         .dingwei-label { font-weight: 600; color: var(--purple); min-width: 42px; font-size: 12px; }
         .dingwei-ball {
@@ -1687,7 +1698,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合五组</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">200注大底</button>
@@ -1823,7 +1834,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合五组</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">200注大底</button>
@@ -2842,6 +2853,39 @@
         </div>`;
     }
 
+    function getOverfitHitPosition(overfitHm, realHm) {
+        if (!overfitHm || !realHm) return 0;
+        const nums = String(overfitHm).split(',').map(s => s.trim()).filter(Boolean);
+        const idx = nums.indexOf(realHm);
+        return idx >= 0 ? idx + 1 : 0;
+    }
+
+    function formatOverfitModelStatus(overfitHm, realHm) {
+        if (!overfitHm) {
+            return '<span class="dadi-model-status empty">暂无</span>';
+        }
+        if (!realHm) {
+            return '<span class="dadi-model-status pending">待开奖</span>';
+        }
+        const zxPos = getOverfitHitPosition(overfitHm, realHm);
+        if (zxPos > 0) {
+            return `<span class="dadi-model-status hit">直选命中，第 ${zxPos} 注</span>`;
+        }
+        if (checkOverfitGroup(overfitHm, realHm)) {
+            return '<span class="dadi-model-status hit">组选命中</span>';
+        }
+        return '<span class="dadi-model-status miss">未命中</span>';
+    }
+
+    function formatOverfitModelCell(overfitHm, realHm) {
+        const preview = overfitHm ? formatDadiPreview(overfitHm, realHm) : '';
+        const status = formatOverfitModelStatus(overfitHm, realHm);
+        return `<div class="dadi-model-cell">
+            ${preview}
+            ${status}
+        </div>`;
+    }
+
     function formatZuSanModelStatus(zuSanHm, realHm) {
         if (!zuSanHm) {
             return '<span class="dadi-model-status empty">暂无</span>';
@@ -3219,7 +3263,7 @@
             return;
         }
         if (compareType === 'overfit') {
-            thead.innerHTML = '<tr><th>过拟合五组</th><th>实际开奖</th><th>直选</th><th>组选</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>过拟合组合</th><th>实际开奖</th></tr>';
             return;
         }
         if (compareType === 'danma') {
@@ -3235,7 +3279,7 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'overfit') return 4;
+        if (compareType === 'overfit') return 3;
         if (compareType === 'danma') return 4;
         return 3;
     }
@@ -3487,6 +3531,29 @@
         return html + '</div>';
     }
 
+    /** 胆码：百/十/个横向排列 */
+    function formatDanMaHorizontal(text, realHm) {
+        if (!text) return '-';
+        const hits = getDanMaPosHits(text, realHm);
+        const rows = [
+            ['百', /百位[:：]([0-9,]+)/, 0],
+            ['十', /十位[:：]([0-9,]+)/, 1],
+            ['个', /个位[:：]([0-9,]+)/, 2]
+        ];
+        let html = '<div class="dingwei-text danma-horizontal">';
+        rows.forEach(([label, regex, pos]) => {
+            const m = text.match(regex);
+            if (!m) return;
+            const trimmed = m[1].split(',')[0].trim();
+            const isHit = !!(hits && hits[pos]);
+            const unionHit = checkDanMaUnionHit(text, realHm) && realHm && realHm.includes(trimmed);
+            const cls = (isHit || unionHit) ? 'dingwei-ball highlight' : 'dingwei-ball';
+            html += `<div class="dingwei-row"><span class="dingwei-label">${label}:</span>`
+                + `<div class="dingwei-numbers"><span class="${cls}">${trimmed}</span></div></div>`;
+        });
+        return html + '</div>';
+    }
+
     function renderLatest(type, latest) {
         const el = $(type, 'latest');
         if (!latest) { el.innerHTML = '<span class="period-info">暂无</span>'; return; }
@@ -3527,7 +3594,7 @@
             const zxRate = total > 0 ? ((zx / total) * 100).toFixed(1) : 0;
             const gpRate = total > 0 ? ((gp / total) * 100).toFixed(1) : 0;
             el.innerHTML = `
-                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有五组预测期数</div></div>
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有组合预测期数</div></div>
                 <div class="stat-card"><div class="stat-value">${zx}/${total}</div><div class="stat-label">直选命中</div></div>
                 <div class="stat-card"><div class="stat-value">${zxRate}%</div><div class="stat-label">直选命中率</div></div>
                 <div class="stat-card"><div class="stat-value">${gp}/${total}</div><div class="stat-label">组选命中</div></div>
@@ -3552,7 +3619,7 @@
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有胆码预测期数</div></div>
                 <div class="stat-card"><div class="stat-value">${union}/${total}</div><div class="stat-label">号码命中</div></div>
-                <div class="stat-card"><div class="stat-value">${unionRate}%</div><div class="stat-label">号码命中率(目标≥65%)</div></div>
+                <div class="stat-card"><div class="stat-value">${unionRate}%</div><div class="stat-label">号码命中率(目标≥65%·贴近70%)</div></div>
                 <div class="stat-card"><div class="stat-value">${full}</div><div class="stat-label">三位定位全中</div></div>
                 <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位定位</div></div>
                 <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位定位</div></div>
@@ -3629,19 +3696,16 @@
                 }
             } else if (compareType === 'overfit') {
                 const displayHm = item.aiOverfitHm || '';
-                const zx = checkOverfitZx(displayHm, item.realHm);
-                const gp = checkOverfitGroup(displayHm, item.realHm);
-                let zxText = '<span style="color:var(--text-secondary)">待开奖</span>';
-                let gpText = '<span style="color:var(--text-secondary)">待开奖</span>';
-                if (item.realHm) {
-                    zxText = zx ? '<span class="success">✓ 直选</span>' : '<span class="fail">✗</span>';
-                    gpText = gp ? '<span class="success">✓ 组选</span>' : '<span class="fail">✗</span>';
-                }
                 row.innerHTML = `
-                    <td>${displayHm ? formatBalls(displayHm) : '-'}</td>
-                    <td>${realBalls}</td>
-                    <td>${zxText}</td>
-                    <td>${gpText}</td>`;
+                    <td class="seq-cell">${seq}</td>
+                    <td>${formatOverfitModelCell(displayHm, item.realHm)}</td>
+                    <td>${realBalls}</td>`;
+                if (displayHm) {
+                    const numbers = displayHm.split(',').map(s => s.trim()).filter(Boolean);
+                    row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
+                        viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '过拟合组合');
+                    });
+                }
             } else if (compareType === 'danma') {
                 const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
                 const union = checkDanMaUnionHit(item.aiDanMaHm, item.realHm);
@@ -3663,7 +3727,7 @@
                 }
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
-                    <td class="qima-predict-cell">${formatDingWei(item.aiDanMaHm, item.realHm)}</td>
+                    <td class="qima-predict-cell">${formatDanMaHorizontal(item.aiDanMaHm, item.realHm)}</td>
                     <td>${realBalls}</td>
                     <td>${matchCell}</td>`;
             } else {

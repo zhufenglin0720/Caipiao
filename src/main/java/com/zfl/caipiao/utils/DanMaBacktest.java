@@ -33,8 +33,8 @@ public final class DanMaBacktest {
         StringBuilder sb = new StringBuilder();
         sb.append("========== 胆码近").append(eval).append("期回测 ==========\n");
         sb.append("主指标：号码命中（三位胆码 ∩ 开奖号 ≠ ∅）目标≥")
-                .append((int) UNION_TARGET).append("%\n");
-        sb.append("策略：多窗热号覆盖 + 强制三位互异 + 近窗因果选优\n");
+                .append((int) UNION_TARGET).append("%（尽量贴近70%）\n");
+        sb.append("策略：多策略票选共识 + 强制三位互异\n");
         sb.append("说明：随机三位互异基线≈65.5%；重复选码会显著低于基线。\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), eval, sb);
