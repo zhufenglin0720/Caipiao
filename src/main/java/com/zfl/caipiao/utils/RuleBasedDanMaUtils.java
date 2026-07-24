@@ -11,11 +11,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 胆码预测：百/十/个各输出 1 码，且三位尽量互异以稳定号码覆盖。
+ * 胆码预测：百/十/个各输出 {@link #PER_POS} 码，按「对应位置命中」评估。
  * <p>
- * 命中主指标（回测目标 ≥65%，尽量贴近 70%）：三位胆码集合与开奖号码集合相交（号码命中）。
- * 选取：多策略票选共识 + 分位条件分配 + 近窗因果选优；七码/大底/过拟合作分位微调。
- * 输出：{@code 百位:7 十位:3 个位:5}（仅页面展示，不发邮件）。
+ * 命中定义：开奖某位数字落在该位预测列表中（不是跨位号码集合相交）。
+ * 主指标：至少 1 位定位命中，目标 ≥65%。
+ * 输出示例：{@code 百位:9,6,8 十位:2,0,3 个位:5,7,1}（仅页面展示，不发邮件）。
  */
 @Slf4j
 public final class RuleBasedDanMaUtils {
@@ -25,9 +25,9 @@ public final class RuleBasedDanMaUtils {
         PL3
     }
 
+    /** 每位候选码数量 */
+    public static final int PER_POS = 3;
     private static final int MIN_HISTORY = 30;
-    private static final int SAMPLE = 80;
-    private static final int VAL_WINDOW = 40;
     private static final Pattern POS_PAT = Pattern.compile("([百十个])位[:：]([0-9,]+)");
 
     private RuleBasedDanMaUtils() {
@@ -45,520 +45,306 @@ public final class RuleBasedDanMaUtils {
         if (history == null || history.size() < MIN_HISTORY) {
             return "";
         }
-        // 核心与回测一致：稳定覆盖 + 互异；外部算法仅轻量校正分配
-        int[] pick = pickStable(history, compares, kind);
-        String out = format(pick);
-        log.info("胆码预测[{}]: {} | distinct={} strategy=digit-consensus",
-                kind, out, isDistinct(pick));
+        int[][] pick = pickPositional(history);
+        softBoostExternal(pick, history, compares, kind);
+        String out = formatMulti(pick);
+        log.info("胆码预测[{}]: {} | perPos={} strategy=pos-topk", kind, out, PER_POS);
         return out;
     }
 
-    /**
-     * 稳定覆盖选取：近窗因果在共识/全局位频等策略中选号码命中最高者。
-     * 外部算法仅用于在已选三位互异集合内微调分位，不改动号码集合。
-     */
-    static int[] pickStable(List<Hm> history, List<HmCache.CompareDto> compares, GameKind kind) {
-        int[] base = adaptCover(history, VAL_WINDOW);
-        return refineAssign(history, base, compares, kind);
+    /** 回测入口：每位 Top-{@link #PER_POS}，不依赖外部比对缓存 */
+    static int[][] adaptCoverMulti(List<Hm> history, int ignoredVal) {
+        return pickPositional(history);
     }
 
-    /** 近 val 期保留接口；实盘/回测统一走多策略票选共识（更贴近 ~70%） */
+    /**
+     * 兼容旧单码接口：返回每位第一候选（仅探针/过渡）。
+     */
     static int[] adaptCover(List<Hm> history, int val) {
-        return digitConsensus(history);
+        int[][] m = adaptCoverMulti(history, val);
+        return new int[]{m[0][0], m[1][0], m[2][0]};
     }
 
     /**
-     * 多窗全局/热号/覆盖策略票选 Top3 互异号码，再按分位亲和分配。
-     * 相对单策略更能同时贴近 3D / 排列三的号码命中。
+     * 分位独立打分后取 Top-K：多窗频次 + 遗漏甜区 + 一位转移。
+     * 允许跨位重复（定位命中不要求三位互异）。
      */
-    static int[] digitConsensus(List<Hm> h) {
-        int[][] packs = {
-                globalPos(h, 25),
-                globalPos(h, 30),
-                globalPos(h, 40),
-                hotAssign(h, 30),
-                coverGreedy(h, 30),
-                stableCover(h)
-        };
-        double[] packW = {1.2, 1.5, 1.0, 0.8, 0.8, 0.9};
-        double[] vote = new double[10];
-        for (int i = 0; i < packs.length; i++) {
-            boolean[] seen = new boolean[10];
-            for (int v : packs[i]) {
-                if (v >= 0 && v <= 9 && !seen[v]) {
-                    vote[v] += packW[i];
-                    seen[v] = true;
-                }
-            }
+    static int[][] pickPositional(List<Hm> history) {
+        int[][] out = new int[3][PER_POS];
+        for (int pos = 0; pos < 3; pos++) {
+            out[pos] = topKDouble(scorePositionPositional(history, pos), PER_POS);
         }
-        int[][] td = toDigits(tail(h, 35));
-        int[] appear = new int[10];
-        double[][] pos = new double[3][10];
-        for (int[] r : td) {
-            boolean[] seen = new boolean[10];
-            for (int p = 0; p < 3; p++) {
-                pos[p][r[p]]++;
-                seen[r[p]] = true;
-            }
-            for (int dig = 0; dig < 10; dig++) {
-                if (seen[dig]) {
-                    appear[dig]++;
-                }
-            }
-        }
-        for (int dig = 0; dig < 10; dig++) {
-            vote[dig] += 0.1 * appear[dig];
-        }
-        int[] chosen = topKDouble(vote, 3);
-        double[][] sc = new double[3][10];
-        for (int p = 0; p < 3; p++) {
-            for (int dig : chosen) {
-                sc[p][dig] = pos[p][dig] + 2.0 + vote[dig];
-            }
-        }
-        return assignDistinct(sc);
+        return out;
     }
 
-    /** 多窗 cover 共识 → 稳定热号集合 → 分位分配 */
-    static int[] stableCover(List<Hm> h) {
-        int[] a = coverGreedy(h, 25);
-        int[] b = coverGreedy(h, 40);
-        int[] c = coverGreedy(h, 60);
-        int[] d = hotAssign(h, 35);
-        int[] e = globalPos(h, 40);
-        int[] f = diversifyTrans(h, 80);
-        int[] vote = new int[10];
-        // 热号/全局覆盖策略权重更高，转移策略仅作补充（避免重复码倾向）
-        int[][][] packs = {
-                {a, b, c},
-                {d, e},
-                {f}
-        };
-        int[] packW = {2, 3, 1};
-        for (int pi = 0; pi < packs.length; pi++) {
-            for (int[] pk : packs[pi]) {
-                boolean[] seen = new boolean[10];
-                for (int v : pk) {
-                    if (v >= 0 && v <= 9 && !seen[v]) {
-                        vote[v] += packW[pi];
-                        seen[v] = true;
-                    }
-                }
-            }
-        }
-        // 叠加全局出现率，避免票数虚高的冷号
-        int[][] td40 = toDigits(tail(h, 40));
-        int[] appear = new int[10];
-        for (int[] r : td40) {
-            boolean[] seen = new boolean[10];
-            for (int v : r) {
-                seen[v] = true;
-            }
-            for (int dig = 0; dig < 10; dig++) {
-                if (seen[dig]) {
-                    appear[dig]++;
-                }
-            }
-        }
-        int[] score = new int[10];
-        for (int dig = 0; dig < 10; dig++) {
-            score[dig] = vote[dig] * 100 + appear[dig];
-        }
-        int[] chosen = topK(score, 4);
-        double[][] sc = new double[3][10];
-        for (int[] r : td40) {
-            for (int p = 0; p < 3; p++) {
-                sc[p][r[p]]++;
-            }
-        }
-        for (int p = 0; p < 3; p++) {
-            for (int dig : chosen) {
-                sc[p][dig] += 4.0 + vote[dig] + 0.05 * appear[dig];
-            }
-            for (int dig = 0; dig < 10; dig++) {
-                sc[p][dig] += 0.35 * vote[dig] + 0.02 * appear[dig];
-            }
-        }
-        return assignDistinct(sc);
-    }
-
-    /** 全局频次 + 分位频次，强制互异 */
-    static int[] globalPos(List<Hm> h, int w) {
-        int[][] d = toDigits(tail(h, w));
-        double[][] sc = new double[3][10];
-        int[] g = new int[10];
-        for (int[] r : d) {
-            for (int p = 0; p < 3; p++) {
-                g[r[p]]++;
-                sc[p][r[p]] += 1.0;
-            }
-        }
-        for (int p = 0; p < 3; p++) {
-            for (int dig = 0; dig < 10; dig++) {
-                sc[p][dig] += 0.4 * g[dig];
-            }
-        }
-        return assignDistinct(sc);
-    }
-
-    /** 按号码出现率选 Top3，再按位置条件分配 */
-    static int[] coverGreedy(List<Hm> h, int w) {
-        int[][] d = toDigits(tail(h, w));
-        double[] appear = new double[10];
-        double[][] pos = new double[3][10];
-        for (int[] r : d) {
-            boolean[] seen = new boolean[10];
-            for (int p = 0; p < 3; p++) {
-                pos[p][r[p]]++;
-                seen[r[p]] = true;
-            }
-            for (int dig = 0; dig < 10; dig++) {
-                if (seen[dig]) {
-                    appear[dig]++;
-                }
-            }
-        }
-        double n = Math.max(1, d.length);
-        for (int dig = 0; dig < 10; dig++) {
-            appear[dig] /= n;
-            for (int p = 0; p < 3; p++) {
-                pos[p][dig] /= n;
-            }
-        }
-        int[] chosen = topK(toIntScale(appear), 3);
-        double[][] sc = new double[3][10];
-        for (int p = 0; p < 3; p++) {
-            for (int dig : chosen) {
-                sc[p][dig] = pos[p][dig] * 2.5 + appear[dig];
-            }
-        }
-        return assignDistinct(sc);
-    }
-
-    static int[] hotAssign(List<Hm> h, int w) {
-        int[][] d = toDigits(tail(h, w));
-        int[] g = new int[10];
-        int[][] pos = new int[3][10];
-        for (int[] r : d) {
-            for (int p = 0; p < 3; p++) {
-                g[r[p]]++;
-                pos[p][r[p]]++;
-            }
-        }
-        int[] tops = topK(g, 5);
-        double[][] sc = new double[3][10];
-        for (int p = 0; p < 3; p++) {
-            for (int dig : tops) {
-                sc[p][dig] = pos[p][dig] + 0.2 * g[dig];
-            }
-        }
-        return assignDistinct(sc);
-    }
-
-    /** 转移分 + 近频，强制互异 */
-    static int[] diversifyTrans(List<Hm> h, int w) {
-        int[][] d = toDigits(tail(h, w));
-        double[][] sc = new double[3][10];
-        for (int p = 0; p < 3; p++) {
-            int last = d[d.length - 1][p];
-            for (int t = 1; t < d.length; t++) {
-                if (d[t - 1][p] == last) {
-                    sc[p][d[t][p]] += 0.5 + t / (double) d.length;
-                }
-            }
-            for (int t = Math.max(0, d.length - 20); t < d.length; t++) {
-                sc[p][d[t][p]] += 0.25;
-            }
-        }
-        return assignDistinct(sc);
-    }
-
-    /** 旧版位分（探针/兼容） */
-    static double[] scorePosition(int[][] digits, int pos) {
-        int n = digits.length;
-        int[] f5 = new int[10], f10 = new int[10], f20 = new int[10], om = new int[10];
-        Arrays.fill(om, n);
-        int[] trans = new int[10];
-        for (int t = 0; t < n; t++) {
-            int d = digits[t][pos];
-            if (t >= n - 5) {
-                f5[d]++;
-            }
-            if (t >= n - 10) {
-                f10[d]++;
-            }
-            if (t >= n - 20) {
-                f20[d]++;
-            }
-            om[d] = n - 1 - t;
-        }
-        int last = digits[n - 1][pos];
-        for (int t = 1; t < n; t++) {
-            if (digits[t - 1][pos] == last) {
-                trans[digits[t][pos]]++;
-            }
-        }
-        double meanOm = 0;
-        for (int d = 0; d < 10; d++) {
-            meanOm += om[d];
-        }
-        meanOm /= 10.0;
-        int uniq = 0;
-        boolean[] seen = new boolean[10];
-        for (int t = Math.max(0, n - 12); t < n; t++) {
-            int d = digits[t][pos];
-            if (!seen[d]) {
-                seen[d] = true;
-                uniq++;
-            }
-        }
-        double hotW = 1.2 - 0.04 * uniq;
-        double coldW = 0.4 + 0.06 * uniq;
+    static double[] scorePositionPositional(List<Hm> history, int pos) {
         double[] s = new double[10];
-        for (int d = 0; d < 10; d++) {
-            s[d] = hotW * (1.4 * f5[d] + 1.0 * f10[d] + 0.6 * f20[d])
-                    + coldW * (1.0 / (1.0 + Math.abs(om[d] - meanOm)))
-                    + 1.4 * trans[d]
-                    + (d == last ? 0.5 : 0)
-                    + (minDist(d, last) == 1 ? 0.4 : 0);
-            if (f5[d] >= 3) {
-                s[d] *= 0.92;
+        int[][] windows = {{12, 2}, {25, 3}, {40, 2}, {60, 1}};
+        for (int[] w : windows) {
+            List<Hm> t = tail(history, w[0]);
+            for (int i = 0; i < t.size(); i++) {
+                double wt = w[1] * (1.0 + 0.5 * Math.exp(-0.05 * (t.size() - 1 - i)));
+                s[digitsOf(t.get(i).toString())[pos]] += wt;
             }
         }
+
+        int[] last = digitsOf(history.get(history.size() - 1).toString());
+        int lastD = last[pos];
+        List<Hm> tm = tail(history, 70);
+        int[][] tr = new int[10][10];
+        for (int i = 1; i < tm.size(); i++) {
+            int prev = digitsOf(tm.get(i - 1).toString())[pos];
+            int cur = digitsOf(tm.get(i).toString())[pos];
+            tr[prev][cur]++;
+        }
+        for (int d = 0; d < 10; d++) {
+            s[d] += 2.0 * tr[lastD][d];
+        }
+
+        int n = Math.min(45, history.size());
+        List<Hm> to = tail(history, n);
+        int[] omit = new int[10];
+        Arrays.fill(omit, n);
+        for (int i = 0; i < to.size(); i++) {
+            omit[digitsOf(to.get(i).toString())[pos]] = to.size() - 1 - i;
+        }
+        double mean = 0;
+        for (int o : omit) {
+            mean += o;
+        }
+        mean /= 10.0;
+        for (int d = 0; d < 10; d++) {
+            s[d] += 2.2 / (1.0 + Math.abs(omit[d] - mean * 0.7));
+            if (omit[d] >= 2 && omit[d] <= 8) {
+                s[d] += 0.7;
+            }
+        }
+        s[(lastD + 1) % 10] += 0.35;
+        s[(lastD + 9) % 10] += 0.35;
         return s;
     }
 
-    private static double[][] scoresFromPick(List<Hm> history, int[] base) {
-        int[][] digits = toDigits(tail(history, SAMPLE));
-        double[][] score = new double[3][10];
-        for (int pos = 0; pos < 3; pos++) {
-            score[pos] = scorePosition(digits, pos);
-            // 基础策略结果强加权，保证与回测核心一致
-            score[pos][base[pos]] += 12.0;
-        }
-        // 提升互异：略降与其他位已选相同的分数（在 assign 前再处理）
-        return score;
-    }
-
-    private static void softBoostExternal(double[][] score, List<Hm> history,
+    /** 外部信号：在不改变候选集合大小的前提下微调各位分数后重排 Top-K */
+    private static void softBoostExternal(int[][] pick, List<Hm> history,
                                           List<HmCache.CompareDto> compares, GameKind kind) {
-        double conc = avgConcentration(toDigits(tail(history, SAMPLE)));
-        double wDingWei = 0.20 + 0.10 * (1.0 - conc);
-        double wDadi = 0.12 + 0.08 * conc;
-        double wOverfit = 0.10 + 0.08 * conc;
-        boostFromDingWei(score, history, compares, kind, wDingWei);
-        boostFromDadi(score, history, compares, kind, wDadi);
-        boostFromOverfit(score, history, kind, wOverfit);
-    }
-
-    private static void boostFromDingWei(double[][] score, List<Hm> history,
-                                         List<HmCache.CompareDto> compares, GameKind kind,
-                                         double weight) {
-        try {
-            String dw = kind == GameKind.SD_3D
-                    ? RuleBasedDingWeiUtils.predict(history, compares, RuleBasedDingWeiUtils.GameKind.SD_3D)
-                    : RuleBasedDingWeiUtils.predict(history, compares, RuleBasedDingWeiUtils.GameKind.PL3);
-            String[] parts = RuleBasedDingWeiUtils.parseParts(dw);
-            if (parts == null) {
-                return;
-            }
-            for (int pos = 0; pos < 3; pos++) {
-                String[] digs = parts[pos].split(",");
-                for (int i = 0; i < Math.min(digs.length, 4); i++) {
-                    int d = digs[i].trim().charAt(0) - '0';
-                    if (d < 0 || d > 9) {
-                        continue;
-                    }
-                    double rankBoost = 1.0 - i * 0.15;
-                    score[pos][d] += weight * 1.6 * Math.max(0.4, rankBoost);
+        if (pick == null || compares == null) {
+            return;
+        }
+        for (int pos = 0; pos < 3; pos++) {
+            double[] sc = scorePositionPositional(history, pos);
+            boostPosFromDingWei(sc, compares, pos, 0.35);
+            boostPosFromDadi(sc, history, kind, pos, 0.25);
+            int[] rerank = topKDouble(sc, PER_POS);
+            // 保留原集合优先：先放原候选中仍靠前的，再补齐
+            boolean[] keep = new boolean[10];
+            for (int v : pick[pos]) {
+                if (v >= 0 && v <= 9) {
+                    keep[v] = true;
                 }
             }
-        } catch (Exception e) {
-            log.debug("胆码参考七码失败: {}", e.getMessage());
+            int[] merged = new int[PER_POS];
+            int n = 0;
+            boolean[] used = new boolean[10];
+            for (int v : rerank) {
+                if (keep[v] && !used[v]) {
+                    merged[n++] = v;
+                    used[v] = true;
+                    if (n >= PER_POS) {
+                        break;
+                    }
+                }
+            }
+            for (int v : rerank) {
+                if (n >= PER_POS) {
+                    break;
+                }
+                if (!used[v]) {
+                    merged[n++] = v;
+                    used[v] = true;
+                }
+            }
+            while (n < PER_POS) {
+                merged[n++] = pick[pos][Math.min(n, pick[pos].length - 1)];
+            }
+            pick[pos] = merged;
         }
     }
 
-    private static void boostFromDadi(double[][] score, List<Hm> history,
-                                      List<HmCache.CompareDto> compares, GameKind kind,
-                                      double weight) {
+    private static void boostPosFromDingWei(double[] sc, List<HmCache.CompareDto> compares, int pos, double w) {
+        if (compares == null || compares.isEmpty()) {
+            return;
+        }
+        for (int i = compares.size() - 1; i >= 0 && i >= compares.size() - 3; i--) {
+            String dw = compares.get(i).getAiDingWeiHm();
+            if (dw == null || dw.isBlank()) {
+                continue;
+            }
+            Matcher m = POS_PAT.matcher(dw.replace('：', ':'));
+            while (m.find()) {
+                String label = m.group(1);
+                int p = switch (label) {
+                    case "百" -> 0;
+                    case "十" -> 1;
+                    case "个" -> 2;
+                    default -> -1;
+                };
+                if (p != pos) {
+                    continue;
+                }
+                for (String part : m.group(2).split(",")) {
+                    String t = part.trim();
+                    if (t.matches("\\d")) {
+                        sc[t.charAt(0) - '0'] += w;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void boostPosFromDadi(double[] sc, List<Hm> history, GameKind kind, int pos, double w) {
         try {
-            String raw = kind == GameKind.SD_3D
-                    ? RuleBasedPredictUtils.predict(history, compares, RuleBasedPredictUtils.GameKind.SD_3D)
-                    : RuleBasedPredictUtils.predict(history, compares, RuleBasedPredictUtils.GameKind.PL3);
-            if (raw == null || raw.isBlank()) {
+            String dadi = kind == GameKind.SD_3D
+                    ? RuleBasedPredictUtils.get3dPredict()
+                    : RuleBasedPredictUtils.getPl3Predict();
+            if (dadi == null || dadi.isBlank()) {
+                // 无缓存时用历史末段模拟：跳过
                 return;
             }
-            int[][] cnt = new int[3][10];
+            int[] cnt = new int[10];
             int n = 0;
-            for (String bet : raw.split(",")) {
+            for (String bet : dadi.split(",")) {
                 String t = pad3(bet.trim());
                 if (t.length() < 3) {
                     continue;
                 }
-                for (int pos = 0; pos < 3; pos++) {
-                    int d = t.charAt(pos) - '0';
-                    if (d >= 0 && d <= 9) {
-                        cnt[pos][d]++;
-                    }
-                }
-                n++;
-                if (n >= 200) {
-                    break;
+                int d = t.charAt(pos) - '0';
+                if (d >= 0 && d <= 9) {
+                    cnt[d]++;
+                    n++;
                 }
             }
             if (n == 0) {
                 return;
             }
-            for (int pos = 0; pos < 3; pos++) {
-                for (int d = 0; d < 10; d++) {
-                    score[pos][d] += weight * 1.2 * (cnt[pos][d] / (double) n) * 10.0;
-                }
+            for (int d = 0; d < 10; d++) {
+                sc[d] += w * (cnt[d] / (double) n) * 10.0;
             }
-        } catch (Exception e) {
-            log.debug("胆码参考大底失败: {}", e.getMessage());
+        } catch (Throwable ignored) {
+            // 大底不可用时跳过
         }
     }
 
-    private static void boostFromOverfit(double[][] score, List<Hm> history, GameKind kind, double weight) {
-        try {
-            Overfit20PredictUtils.PredictResult r = Overfit20PredictUtils.predictResult(history);
-            if (r == null || r.pool == null || r.pool.isEmpty()) {
-                return;
-            }
-            int[][] cnt = new int[3][10];
-            int n = 0;
-            for (String bet : r.pool) {
-                String t = pad3(bet);
-                for (int pos = 0; pos < 3; pos++) {
-                    int d = t.charAt(pos) - '0';
-                    if (d >= 0 && d <= 9) {
-                        cnt[pos][d]++;
-                    }
-                }
-                n++;
-            }
-            if (n == 0) {
-                return;
-            }
-            for (int pos = 0; pos < 3; pos++) {
-                for (int d = 0; d < 10; d++) {
-                    score[pos][d] += weight * 1.0 * (cnt[pos][d] / (double) n) * 10.0;
-                }
-            }
-        } catch (Exception e) {
-            log.debug("胆码参考过拟合失败: {}", e.getMessage());
-        }
+    static String formatMulti(int[][] pick) {
+        return String.format(Locale.ROOT, "百位:%s 十位:%s 个位:%s",
+                join(pick[0]), join(pick[1]), join(pick[2]));
     }
 
-    /** 贪心互异分配：每轮选全局最高 (pos,digit) 且 digit 未占用 */
-    static int[] assignDistinct(double[][] sc) {
-        int[] out = new int[3];
-        Arrays.fill(out, -1);
-        boolean[] used = new boolean[10];
-        for (int round = 0; round < 3; round++) {
-            int bp = -1, bd = -1;
-            double best = -1e18;
-            for (int p = 0; p < 3; p++) {
-                if (out[p] >= 0) {
-                    continue;
-                }
-                for (int dig = 0; dig < 10; dig++) {
-                    if (used[dig]) {
-                        continue;
-                    }
-                    if (sc[p][dig] > best) {
-                        best = sc[p][dig];
-                        bp = p;
-                        bd = dig;
-                    }
-                }
-            }
-            if (bp < 0) {
-                break;
-            }
-            out[bp] = bd;
-            used[bd] = true;
-        }
-        for (int p = 0; p < 3; p++) {
-            if (out[p] < 0) {
-                out[p] = argmaxExcept(sc[p], used);
-                used[out[p]] = true;
-            }
-        }
-        return out;
-    }
-
+    /** 兼容旧单码格式化 */
     static String format(int[] pick) {
         return String.format(Locale.ROOT, "百位:%d 十位:%d 个位:%d", pick[0], pick[1], pick[2]);
     }
 
-    public static int[] parseDigits(String answer) {
+    private static String join(int[] a) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < a.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(a[i]);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 解析为每位候选列表。兼容旧单码格式。
+     *
+     * @return length-3，每位为候选数组；失败返回 null
+     */
+    public static int[][] parseMulti(String answer) {
         if (answer == null || answer.isBlank()) {
             return null;
         }
         String norm = answer.replace('：', ':');
         Matcher m = POS_PAT.matcher(norm);
-        Integer bai = null, shi = null, ge = null;
+        int[][] out = new int[3][];
         while (m.find()) {
             String label = m.group(1);
-            String body = m.group(2).trim();
-            if (body.isEmpty()) {
-                return null;
+            int pos = switch (label) {
+                case "百" -> 0;
+                case "十" -> 1;
+                case "个" -> 2;
+                default -> -1;
+            };
+            if (pos < 0) {
+                continue;
             }
-            String first = body.split(",")[0].trim();
-            if (!first.matches("\\d")) {
-                return null;
-            }
-            int d = first.charAt(0) - '0';
-            switch (label) {
-                case "百" -> bai = d;
-                case "十" -> shi = d;
-                case "个" -> ge = d;
-                default -> {
+            String[] parts = m.group(2).split(",");
+            int[] arr = new int[parts.length];
+            int n = 0;
+            for (String p : parts) {
+                String t = p.trim();
+                if (t.matches("\\d")) {
+                    arr[n++] = t.charAt(0) - '0';
                 }
             }
+            if (n == 0) {
+                return null;
+            }
+            out[pos] = Arrays.copyOf(arr, n);
         }
-        if (bai == null || shi == null || ge == null) {
+        if (out[0] == null || out[1] == null || out[2] == null) {
             return null;
         }
-        return new int[]{bai, shi, ge};
+        return out;
     }
 
-    /** 三位定位全中 */
+    /** 旧接口：取每位第一码 */
+    public static int[] parseDigits(String answer) {
+        int[][] m = parseMulti(answer);
+        if (m == null) {
+            return null;
+        }
+        return new int[]{m[0][0], m[1][0], m[2][0]};
+    }
+
+    /** 三位定位全中：开奖三位均落在对应位候选中 */
     public static boolean isFullHit(String danMa, String realHm) {
-        int[] p = parseDigits(danMa);
-        if (p == null || realHm == null || realHm.length() < 3) {
-            return false;
-        }
-        String r = pad3(realHm);
-        return p[0] == r.charAt(0) - '0'
-                && p[1] == r.charAt(1) - '0'
-                && p[2] == r.charAt(2) - '0';
+        boolean[] h = posHits(danMa, realHm);
+        return h != null && h[0] && h[1] && h[2];
     }
 
-    /**
-     * 号码命中：三位胆码集合与开奖号码集合相交（主回测指标，目标≥65%）。
-     */
-    public static boolean isUnionHit(String danMa, String realHm) {
-        int[] p = parseDigits(danMa);
-        if (p == null || realHm == null || realHm.length() < 3) {
-            return false;
-        }
-        return isUnionHit(p, digitsOf(realHm));
+    /** 至少 1 位定位命中（主指标） */
+    public static boolean isAnyPosHit(String danMa, String realHm) {
+        boolean[] h = posHits(danMa, realHm);
+        return h != null && (h[0] || h[1] || h[2]);
     }
 
-    public static boolean isUnionHit(int[] pick, int[] actual) {
+    public static boolean isAnyPosHit(int[][] pick, int[] actual) {
         if (pick == null || actual == null || pick.length < 3 || actual.length < 3) {
             return false;
         }
-        boolean[] seen = new boolean[10];
-        for (int v : actual) {
-            if (v >= 0 && v <= 9) {
-                seen[v] = true;
+        for (int p = 0; p < 3; p++) {
+            if (posContains(pick[p], actual[p])) {
+                return true;
             }
         }
-        for (int v : pick) {
-            if (v >= 0 && v <= 9 && seen[v]) {
+        return false;
+    }
+
+    /** @deprecated 旧「号码集合相交」口径，保留兼容 */
+    @Deprecated
+    public static boolean isUnionHit(String danMa, String realHm) {
+        return isAnyPosHit(danMa, realHm);
+    }
+
+    @Deprecated
+    public static boolean isUnionHit(int[] pick, int[] actual) {
+        if (pick == null || actual == null) {
+            return false;
+        }
+        // 旧单码：退化为定位任一命中
+        for (int p = 0; p < 3 && p < pick.length && p < actual.length; p++) {
+            if (pick[p] == actual[p]) {
                 return true;
             }
         }
@@ -566,42 +352,39 @@ public final class RuleBasedDanMaUtils {
     }
 
     public static boolean[] posHits(String danMa, String realHm) {
-        int[] p = parseDigits(danMa);
-        if (p == null || realHm == null || realHm.length() < 3) {
+        int[][] m = parseMulti(danMa);
+        if (m == null || realHm == null || realHm.length() < 3) {
             return null;
         }
-        String r = pad3(realHm);
+        int[] act = digitsOf(realHm);
         return new boolean[]{
-                p[0] == r.charAt(0) - '0',
-                p[1] == r.charAt(1) - '0',
-                p[2] == r.charAt(2) - '0'
+                posContains(m[0], act[0]),
+                posContains(m[1], act[1]),
+                posContains(m[2], act[2])
         };
     }
 
-    private static boolean isDistinct(int[] pick) {
-        return pick[0] != pick[1] && pick[0] != pick[2] && pick[1] != pick[2];
+    public static boolean[] posHits(int[][] pick, int[] actual) {
+        if (pick == null || actual == null) {
+            return null;
+        }
+        return new boolean[]{
+                posContains(pick[0], actual[0]),
+                posContains(pick[1], actual[1]),
+                posContains(pick[2], actual[2])
+        };
     }
 
-    private static int indexOf(int[] arr, int v) {
-        for (int i = 0; i < arr.length; i++) {
-            if (arr[i] == v) {
-                return i;
+    private static boolean posContains(int[] cands, int digit) {
+        if (cands == null) {
+            return false;
+        }
+        for (int v : cands) {
+            if (v == digit) {
+                return true;
             }
         }
-        return -1;
-    }
-
-    private static int[] topK(int[] score, int k) {
-        Integer[] idx = new Integer[10];
-        for (int i = 0; i < 10; i++) {
-            idx[i] = i;
-        }
-        Arrays.sort(idx, (a, b) -> Integer.compare(score[b], score[a]));
-        int[] out = new int[Math.min(k, 10)];
-        for (int i = 0; i < out.length; i++) {
-            out[i] = idx[i];
-        }
-        return out;
+        return false;
     }
 
     private static int[] topKDouble(double[] score, int k) {
@@ -617,90 +400,6 @@ public final class RuleBasedDanMaUtils {
         return out;
     }
 
-    /**
-     * 保持 base 的三位号码集合不变，仅用近窗分位分 + 轻量外部信号重排分位。
-     * 这样线上与回测号码命中一致，外部源只影响定位展示。
-     */
-    private static int[] refineAssign(List<Hm> history, int[] base,
-                                      List<HmCache.CompareDto> compares, GameKind kind) {
-        if (base == null || base.length < 3) {
-            return base;
-        }
-        boolean[] keep = new boolean[10];
-        for (int v : base) {
-            if (v >= 0 && v <= 9) {
-                keep[v] = true;
-            }
-        }
-        double[][] score = scoresFromPick(history, base);
-        softBoostExternal(score, history, compares, kind);
-        for (int p = 0; p < 3; p++) {
-            for (int d = 0; d < 10; d++) {
-                if (!keep[d]) {
-                    score[p][d] = -1e9;
-                }
-            }
-        }
-        return assignDistinct(score);
-    }
-
-    private static int[] toIntScale(double[] a) {
-        int[] o = new int[a.length];
-        for (int i = 0; i < a.length; i++) {
-            o[i] = (int) Math.round(a[i] * 10000);
-        }
-        return o;
-    }
-
-    private static int argmaxExcept(double[] s, boolean[] used) {
-        int b = -1;
-        for (int i = 0; i < s.length; i++) {
-            if (used[i]) {
-                continue;
-            }
-            if (b < 0 || s[i] > s[b]) {
-                b = i;
-            }
-        }
-        return b < 0 ? 0 : b;
-    }
-
-    private static int minDist(int a, int b) {
-        int d = Math.abs(a - b);
-        return Math.min(d, 10 - d);
-    }
-
-    private static double avgConcentration(int[][] digits) {
-        double sum = 0;
-        for (int pos = 0; pos < 3; pos++) {
-            int[] freq = new int[10];
-            for (int[] row : digits) {
-                freq[row[pos]]++;
-            }
-            sum += concentration(freq);
-        }
-        return sum / 3.0;
-    }
-
-    private static double concentration(int[] freq) {
-        int tot = 0;
-        for (int v : freq) {
-            tot += v;
-        }
-        if (tot <= 0) {
-            return 0;
-        }
-        double ent = 0;
-        for (int v : freq) {
-            if (v <= 0) {
-                continue;
-            }
-            double p = v / (double) tot;
-            ent -= p * Math.log(p);
-        }
-        return 1.0 - ent / Math.log(10);
-    }
-
     private static List<Hm> tail(List<Hm> list, int n) {
         if (list.size() <= n) {
             return list;
@@ -708,27 +407,19 @@ public final class RuleBasedDanMaUtils {
         return list.subList(list.size() - n, list.size());
     }
 
-    private static int[][] toDigits(List<Hm> list) {
-        int[][] d = new int[list.size()][3];
-        for (int i = 0; i < list.size(); i++) {
-            d[i] = digitsOf(list.get(i).toString());
-        }
-        return d;
-    }
-
     static int[] digitsOf(String s) {
         String t = pad3(s);
         return new int[]{t.charAt(0) - '0', t.charAt(1) - '0', t.charAt(2) - '0'};
     }
 
-    private static String pad3(String s) {
+    static String pad3(String s) {
         if (s == null) {
             return "000";
         }
         String t = s.trim();
-        while (t.length() < 3) {
-            t = "0" + t;
+        if (t.length() >= 3) {
+            return t.substring(t.length() - 3);
         }
-        return t.length() > 3 ? t.substring(t.length() - 3) : t;
+        return "0".repeat(3 - t.length()) + t;
     }
 }

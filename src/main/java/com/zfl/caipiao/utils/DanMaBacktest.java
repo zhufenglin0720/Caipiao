@@ -12,13 +12,13 @@ import java.util.Locale;
 /**
  * 胆码近 500 期回测。
  * <p>
- * 主指标「号码命中」：三位胆码集合 ∩ 开奖号码集合 ≠ ∅，目标 ≥65%。
- * 回测走稳定覆盖内核（强制互异 + 因果选优）；与线上核心一致。
+ * 命中口径：对应位置命中（开奖某位数字 ∈ 该位候选列表）。
+ * 主指标「至少 1 位定位」目标 ≥65%；每位输出 {@link RuleBasedDanMaUtils#PER_POS} 码。
  */
 public final class DanMaBacktest {
 
     private static final int EVAL_PERIODS = 500;
-    private static final double UNION_TARGET = 65.0;
+    private static final double ANY_POS_TARGET = 65.0;
 
     private DanMaBacktest() {
     }
@@ -32,21 +32,25 @@ public final class DanMaBacktest {
 
         StringBuilder sb = new StringBuilder();
         sb.append("========== 胆码近").append(eval).append("期回测 ==========\n");
-        sb.append("主指标：号码命中（三位胆码 ∩ 开奖号 ≠ ∅）目标≥")
-                .append((int) UNION_TARGET).append("%（尽量贴近70%）\n");
-        sb.append("策略：多策略票选共识 + 强制三位互异\n");
-        sb.append("说明：随机三位互异基线≈65.5%；重复选码会显著低于基线。\n\n");
+        sb.append("命中口径：对应位置命中（开奖位数字落在该位候选中，跨位不算）\n");
+        sb.append("主指标：至少1位定位 目标≥").append((int) ANY_POS_TARGET)
+                .append("% | 每位").append(RuleBasedDanMaUtils.PER_POS).append("码\n");
+        sb.append("策略：分位独立打分（多窗频次+遗漏甜区+一位转移）取 Top")
+                .append(RuleBasedDanMaUtils.PER_POS).append('\n');
+        sb.append("说明：随机基线≈").append(String.format(Locale.ROOT, "%.1f",
+                        (1 - Math.pow(1 - RuleBasedDanMaUtils.PER_POS / 10.0, 3)) * 100))
+                .append("%（至少1位）。\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), eval, sb);
         sb.append('\n');
         Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(), eval, sb);
 
         sb.append("\n========== 汇总 ==========\n");
-        sb.append(String.format(Locale.ROOT, "%-8s | 号码命中 | 分位均 | 至少1位定位 | 三位全中 | 结果%n", "彩种"));
+        sb.append(String.format(Locale.ROOT, "%-8s | 至少1位定位 | 分位均 | 百/十/个 | 三位全中 | 结果%n", "彩种"));
         appendRow(sb, sd);
         appendRow(sb, pl3);
         boolean pass = sd.pass && pl3.pass;
-        sb.append(pass ? "\n【全部达标】号码命中≥65%\n" : "\n【存在未达标】\n");
+        sb.append(pass ? "\n【全部达标】至少1位定位≥65%\n" : "\n【存在未达标】\n");
 
         Path out = Path.of("reports/danma_backtest_500.txt");
         Files.createDirectories(out.getParent());
@@ -61,10 +65,10 @@ public final class DanMaBacktest {
 
     private static void appendRow(StringBuilder sb, Result r) {
         sb.append(String.format(Locale.ROOT,
-                "%-8s | %4d/%d (%5.1f%%) | %5.2f%% | %4d/%d (%5.1f%%) | %3d/%d | %s%n",
-                r.name, r.union, r.n, pct(r.union, r.n),
+                "%-8s | %4d/%d (%5.1f%%) | %5.2f%% | %d/%d/%d | %3d/%d | %s%n",
+                r.name, r.anyPos, r.n, pct(r.anyPos, r.n),
                 r.posSum * 100.0 / (r.n * 3.0),
-                r.anyPos, r.n, pct(r.anyPos, r.n),
+                r.pos[0], r.pos[1], r.pos[2],
                 r.full, r.n,
                 r.pass ? "达标" : "未达标"));
     }
@@ -85,20 +89,14 @@ public final class DanMaBacktest {
 
         Result r = new Result(name, eval);
         long t0 = System.currentTimeMillis();
-        int distinctCount = 0;
         for (int i = start; i < all.size(); i++) {
             List<Hm> hist = all.subList(0, i);
-            int[] pick = RuleBasedDanMaUtils.adaptCover(hist, 40);
+            int[][] pick = RuleBasedDanMaUtils.adaptCoverMulti(hist, 40);
             int[] act = RuleBasedDanMaUtils.digitsOf(all.get(i).toString());
-            if (pick[0] != pick[1] && pick[0] != pick[2] && pick[1] != pick[2]) {
-                distinctCount++;
-            }
-            if (RuleBasedDanMaUtils.isUnionHit(pick, act)) {
-                r.union++;
-            }
+            boolean[] hits = RuleBasedDanMaUtils.posHits(pick, act);
             int hp = 0;
             for (int p = 0; p < 3; p++) {
-                if (pick[p] == act[p]) {
+                if (hits != null && hits[p]) {
                     r.posSum++;
                     r.pos[p]++;
                     hp++;
@@ -111,20 +109,20 @@ public final class DanMaBacktest {
                 r.full++;
             }
             if ((i - start + 1) % 100 == 0) {
-                System.out.printf(Locale.ROOT, "%s 进度 %d/%d 号码命中=%d%n",
-                        name, i - start + 1, eval, r.union);
+                System.out.printf(Locale.ROOT, "%s 进度 %d/%d 至少1位=%d%n",
+                        name, i - start + 1, eval, r.anyPos);
             }
         }
         long cost = System.currentTimeMillis() - t0;
-        r.pass = pct(r.union, r.n) >= UNION_TARGET;
-        out.append(String.format(Locale.ROOT, "回测完成：%d期 耗时=%dms 三位互异=%d/%d%n",
-                r.n, cost, distinctCount, r.n));
+        r.pass = pct(r.anyPos, r.n) >= ANY_POS_TARGET;
+        out.append(String.format(Locale.ROOT, "回测完成：%d期 耗时=%dms 每位%d码%n",
+                r.n, cost, RuleBasedDanMaUtils.PER_POS));
         out.append(String.format(Locale.ROOT,
-                "号码命中=%d/%d (%.2f%%) %s  目标≥%.0f%%%n",
-                r.union, r.n, pct(r.union, r.n), r.pass ? "达标" : "未达标", UNION_TARGET));
+                "至少1位定位=%d/%d (%.2f%%) %s  目标≥%.0f%%%n",
+                r.anyPos, r.n, pct(r.anyPos, r.n), r.pass ? "达标" : "未达标", ANY_POS_TARGET));
         out.append(String.format(Locale.ROOT,
-                "分位命中：均=%.2f%% 百=%d 十=%d 个=%d | 至少1位定位=%d | 三位全中=%d%n",
-                r.posSum * 100.0 / (r.n * 3.0), r.pos[0], r.pos[1], r.pos[2], r.anyPos, r.full));
+                "分位命中：均=%.2f%% 百=%d 十=%d 个=%d | 三位全中=%d%n",
+                r.posSum * 100.0 / (r.n * 3.0), r.pos[0], r.pos[1], r.pos[2], r.full));
         return r;
     }
 
@@ -146,7 +144,6 @@ public final class DanMaBacktest {
     static final class Result {
         final String name;
         final int n;
-        int union;
         int posSum;
         final int[] pos = new int[3];
         int anyPos;
