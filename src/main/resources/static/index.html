@@ -3424,9 +3424,20 @@
         ];
     }
 
+    /** 号码命中：三位胆码集合与开奖号码相交（主指标，目标≥65%） */
+    function checkDanMaUnionHit(danMaHm, realHm) {
+        if (!danMaHm || !realHm || realHm.length !== 3) return false;
+        const bai = danMaHm.match(/百位[:：]([0-9,]+)/);
+        const shi = danMaHm.match(/十位[:：]([0-9,]+)/);
+        const ge = danMaHm.match(/个位[:：]([0-9,]+)/);
+        if (!bai || !shi || !ge) return false;
+        const first = (s) => String(s).split(',')[0].trim();
+        const picks = new Set([first(bai[1]), first(shi[1]), first(ge[1])]);
+        return picks.has(realHm[0]) || picks.has(realHm[1]) || picks.has(realHm[2]);
+    }
+
     function checkDanMaMatch(danMaHm, realHm) {
-        const hits = getDanMaPosHits(danMaHm, realHm);
-        return !!(hits && hits[0] && hits[1] && hits[2]);
+        return checkDanMaUnionHit(danMaHm, realHm);
     }
 
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
@@ -3525,9 +3536,11 @@
         }
 
         if (tab === 'danma') {
-            let full = 0, bai = 0, shi = 0, ge = 0;
+            let union = 0, full = 0, bai = 0, shi = 0, ge = 0;
             const total = compareData.filter(i => i.aiDanMaHm).length;
             compareData.forEach(item => {
+                if (!item.realHm) return;
+                if (checkDanMaUnionHit(item.aiDanMaHm, item.realHm)) union++;
                 const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
                 if (!hits) return;
                 if (hits[0] && hits[1] && hits[2]) full++;
@@ -3535,14 +3548,15 @@
                 if (hits[1]) shi++;
                 if (hits[2]) ge++;
             });
-            const fullRate = total > 0 ? ((full / total) * 100).toFixed(1) : 0;
+            const unionRate = total > 0 ? ((union / total) * 100).toFixed(1) : 0;
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有胆码预测期数</div></div>
-                <div class="stat-card"><div class="stat-value">${full}/${total}</div><div class="stat-label">三位全中</div></div>
-                <div class="stat-card"><div class="stat-value">${fullRate}%</div><div class="stat-label">全中率</div></div>
-                <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位命中</div></div>
-                <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位命中</div></div>
-                <div class="stat-card"><div class="stat-value">${ge}</div><div class="stat-label">个位命中</div></div>`;
+                <div class="stat-card"><div class="stat-value">${union}/${total}</div><div class="stat-label">号码命中</div></div>
+                <div class="stat-card"><div class="stat-value">${unionRate}%</div><div class="stat-label">号码命中率(目标≥65%)</div></div>
+                <div class="stat-card"><div class="stat-value">${full}</div><div class="stat-label">三位定位全中</div></div>
+                <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位定位</div></div>
+                <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位定位</div></div>
+                <div class="stat-card"><div class="stat-value">${ge}</div><div class="stat-label">个位定位</div></div>`;
             return;
         }
 
@@ -3630,19 +3644,20 @@
                     <td>${gpText}</td>`;
             } else if (compareType === 'danma') {
                 const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
+                const union = checkDanMaUnionHit(item.aiDanMaHm, item.realHm);
                 let matchCell;
                 if (!item.realHm) {
                     matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
                 } else if (hits && hits[0] && hits[1] && hits[2]) {
-                    matchCell = '<span class="success">✓ 全中</span>';
-                } else if (hits) {
+                    matchCell = '<span class="success">✓ 定位全中</span>';
+                } else if (union) {
                     const parts = [];
-                    if (hits[0]) parts.push('百');
-                    if (hits[1]) parts.push('十');
-                    if (hits[2]) parts.push('个');
+                    if (hits && hits[0]) parts.push('百');
+                    if (hits && hits[1]) parts.push('十');
+                    if (hits && hits[2]) parts.push('个');
                     matchCell = parts.length
-                        ? `<span class="success">部分中(${parts.join('')})</span>`
-                        : '<span class="fail">✗ 未命中</span>';
+                        ? `<span class="success">✓ 号码命中 · 定位(${parts.join('')})</span>`
+                        : '<span class="success">✓ 号码命中</span>';
                 } else {
                     matchCell = '<span class="fail">✗ 未命中</span>';
                 }
