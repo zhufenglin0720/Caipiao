@@ -90,6 +90,9 @@ public class HmCache {
                 if (compareDto.getAiOverfitHm() != null) {
                     last.setAiOverfitHm(compareDto.getAiOverfitHm());
                 }
+                if (compareDto.getAiDanMaHm() != null) {
+                    last.setAiDanMaHm(compareDto.getAiDanMaHm());
+                }
                 if (compareDto.getAiDingWeiHm() != null) {
                     last.setAiDingWeiHm(compareDto.getAiDingWeiHm());
                 }
@@ -173,6 +176,9 @@ public class HmCache {
 
         /** 近20期过拟合五组（动态覆盖算法，非硬编码） */
         private String aiOverfitHm;
+
+        /** 胆码：百/十/个各1码，如 百位:7 十位:3 个位:5（仅页面） */
+        private String aiDanMaHm;
 
         private String aiDingWeiHm;
 

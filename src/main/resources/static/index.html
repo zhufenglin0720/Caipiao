@@ -1688,6 +1688,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合五组</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">200注大底</button>
                 </div>
@@ -1823,6 +1824,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合五组</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">200注大底</button>
                 </div>
@@ -2610,7 +2612,7 @@
         const container = document.getElementById(domPrefix(type) + '-predict-table');
         if (!container || !$(type, 'predict').classList.contains('active')) return;
 
-        const isQima = compareTabs[type] === 'qima';
+        const isQima = compareTabs[type] === 'qima' || compareTabs[type] === 'danma';
         const isDadi = compareTabs[type] === 'dadi';
         const count = filters[type];
         container.classList.toggle('qima-mode', isQima);
@@ -3220,6 +3222,10 @@
             thead.innerHTML = '<tr><th>过拟合五组</th><th>实际开奖</th><th>直选</th><th>组选</th></tr>';
             return;
         }
+        if (compareType === 'danma') {
+            thead.innerHTML = '<tr><th>序号</th><th>胆码预测</th><th>实际开奖</th><th>命中</th></tr>';
+            return;
+        }
         if (type === '3d') {
             thead.innerHTML = '<tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
         } else {
@@ -3230,6 +3236,7 @@
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
         if (compareType === 'overfit') return 4;
+        if (compareType === 'danma') return 4;
         return 3;
     }
 
@@ -3403,6 +3410,25 @@
             .some(p => sortedDigitKey(p.padStart(3, '0').slice(-3)) === key);
     }
 
+    function getDanMaPosHits(danMaHm, realHm) {
+        if (!danMaHm || !realHm || realHm.length !== 3) return null;
+        const bai = danMaHm.match(/百位[:：]([0-9,]+)/);
+        const shi = danMaHm.match(/十位[:：]([0-9,]+)/);
+        const ge = danMaHm.match(/个位[:：]([0-9,]+)/);
+        if (!bai || !shi || !ge) return null;
+        const first = (s) => String(s).split(',')[0].trim();
+        return [
+            first(bai[1]) === realHm[0],
+            first(shi[1]) === realHm[1],
+            first(ge[1]) === realHm[2]
+        ];
+    }
+
+    function checkDanMaMatch(danMaHm, realHm) {
+        const hits = getDanMaPosHits(danMaHm, realHm);
+        return !!(hits && hits[0] && hits[1] && hits[2]);
+    }
+
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
         if (!aiDingWeiHm || !realHm || realHm.length !== 3) return false;
         const baiweiMatch = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
@@ -3498,6 +3524,28 @@
             return;
         }
 
+        if (tab === 'danma') {
+            let full = 0, bai = 0, shi = 0, ge = 0;
+            const total = compareData.filter(i => i.aiDanMaHm).length;
+            compareData.forEach(item => {
+                const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
+                if (!hits) return;
+                if (hits[0] && hits[1] && hits[2]) full++;
+                if (hits[0]) bai++;
+                if (hits[1]) shi++;
+                if (hits[2]) ge++;
+            });
+            const fullRate = total > 0 ? ((full / total) * 100).toFixed(1) : 0;
+            el.innerHTML = `
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有胆码预测期数</div></div>
+                <div class="stat-card"><div class="stat-value">${full}/${total}</div><div class="stat-label">三位全中</div></div>
+                <div class="stat-card"><div class="stat-value">${fullRate}%</div><div class="stat-label">全中率</div></div>
+                <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位命中</div></div>
+                <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位命中</div></div>
+                <div class="stat-card"><div class="stat-value">${ge}</div><div class="stat-label">个位命中</div></div>`;
+            return;
+        }
+
         let sanmaSuccess = 0, qimaSuccess = 0;
         const total = compareData.length;
         const sanmaTotal = compareData.filter(i => i.aiHm).length;
@@ -3580,6 +3628,29 @@
                     <td>${realBalls}</td>
                     <td>${zxText}</td>
                     <td>${gpText}</td>`;
+            } else if (compareType === 'danma') {
+                const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
+                let matchCell;
+                if (!item.realHm) {
+                    matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
+                } else if (hits && hits[0] && hits[1] && hits[2]) {
+                    matchCell = '<span class="success">✓ 全中</span>';
+                } else if (hits) {
+                    const parts = [];
+                    if (hits[0]) parts.push('百');
+                    if (hits[1]) parts.push('十');
+                    if (hits[2]) parts.push('个');
+                    matchCell = parts.length
+                        ? `<span class="success">部分中(${parts.join('')})</span>`
+                        : '<span class="fail">✗ 未命中</span>';
+                } else {
+                    matchCell = '<span class="fail">✗ 未命中</span>';
+                }
+                row.innerHTML = `
+                    <td class="seq-cell">${seq}</td>
+                    <td class="qima-predict-cell">${formatDingWei(item.aiDanMaHm, item.realHm)}</td>
+                    <td>${realBalls}</td>
+                    <td>${matchCell}</td>`;
             } else {
                 const displayHm = topSanmaBets(item);
                 const isMatch = checkMatch(item, item.realHm);

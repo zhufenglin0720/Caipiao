@@ -13,6 +13,7 @@ import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.utils.DateUtils;
 import com.zfl.caipiao.utils.Overfit20PredictUtils;
 import com.zfl.caipiao.utils.RecommendBetUtils;
+import com.zfl.caipiao.utils.RuleBasedDanMaUtils;
 import com.zfl.caipiao.utils.RuleBasedDingWeiUtils;
 import com.zfl.caipiao.utils.RuleBasedPredictUtils;
 import jakarta.annotation.Resource;
@@ -56,17 +57,20 @@ public class GlobalJob {
     public void applyTask() throws MessagingException, InterruptedException {
         // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
         // 4) 近20期过拟合五组：仅落盘供页面展示，不发邮件
+        // 5) 胆码（百/十/个各1码）：仅落盘供页面展示，不发邮件
         String raw200 = RuleBasedPredictUtils.get3dPredict();
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
         String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache());
         String sdOverfitPool = Overfit20PredictUtils.get3dPool();
+        String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
         if (StrUtil.isNotBlank(sdDadi)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
                     .setAiHm(sdDadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(sdRecommend)
                     .setAiOverfitHm(sdOverfitPool)
+                    .setAiDanMaHm(sdDanMa)
                     .setAiZuSanHm(zuSan));
         }
 
@@ -75,12 +79,14 @@ public class GlobalJob {
         zuSan = RecommendBetUtils.extractZuSanGroups(pl3Dadi);
         String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache());
         String pl3OverfitPool = Overfit20PredictUtils.getPl3Pool();
+        String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
         if (StrUtil.isNotBlank(pl3Dadi)) {
             HmCache.addPl3CompareCache(new HmCache.CompareDto()
                     .setAiHm(pl3Dadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(pl3Recommend)
                     .setAiOverfitHm(pl3OverfitPool)
+                    .setAiDanMaHm(pl3DanMa)
                     .setAiZuSanHm(zuSan));
         }
         String msg = EmailConstant.EMAIL_TEMPLATE
@@ -88,7 +94,7 @@ public class GlobalJob {
                 .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Recommend))
                 .replace("{{TIMESTAMP}}", DateUtil.now());
         sendEmailCode("今日3D及排三预测（高概率10注）", msg);
-        // 过拟合五组仅落盘供页面展示，不发送邮件
+        // 过拟合五组 / 胆码仅落盘供页面展示，不发送邮件
     }
 
     @Scheduled(cron = "0 50 18 * * ?")
@@ -270,6 +276,7 @@ public class GlobalJob {
                     .aiHm(compareDto.getAiHm())
                     .aiRecommendHm(compareDto.getAiRecommendHm())
                     .aiOverfitHm(compareDto.getAiOverfitHm())
+                    .aiDanMaHm(compareDto.getAiDanMaHm())
                     .aiZuSanHm(StrUtil.blankToDefault(compareDto.getAiZuSanHm(),
                             RecommendBetUtils.extractZuSanGroups(compareDto.getAiHm())))
                     .realHm(compareDto.getRealHm())
@@ -282,6 +289,7 @@ public class GlobalJob {
                     .aiHm(compareDto.getAiHm())
                     .aiRecommendHm(compareDto.getAiRecommendHm())
                     .aiOverfitHm(compareDto.getAiOverfitHm())
+                    .aiDanMaHm(compareDto.getAiDanMaHm())
                     .aiZuSanHm(StrUtil.blankToDefault(compareDto.getAiZuSanHm(),
                             RecommendBetUtils.extractZuSanGroups(compareDto.getAiHm())))
                     .realHm(compareDto.getRealHm())
