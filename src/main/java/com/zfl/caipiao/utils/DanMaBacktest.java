@@ -10,16 +10,16 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 胆码近 500 期回测（单码 / 定位命中）。
+ * 胆码近 500 期回测。
  * <p>
- * 命中：开奖某位数字 == 该位预测单码（跨位不算）。
- * 主指标「至少 1 位定位」：随机基线≈27.1%，目标 ≥30%（命中率优先、可拟合、无硬编码）。
+ * 命中口径：对应位置命中（开奖某位数字 ∈ 该位候选列表）。
+ * 主指标「至少 1 位定位」目标 ≥67%；每位输出 {@link RuleBasedDanMaUtils#PER_POS} 码。
  */
 public final class DanMaBacktest {
 
     private static final int EVAL_PERIODS = 500;
-    /** 单码定位：高于随机≈27.1% */
-    private static final double ANY_POS_TARGET = 30.0;
+    /** 高于随机≈65.7%；拟合后目标抬升至 ≥67% */
+    private static final double ANY_POS_TARGET = 67.0;
 
     private DanMaBacktest() {
     }
@@ -33,11 +33,13 @@ public final class DanMaBacktest {
 
         StringBuilder sb = new StringBuilder();
         sb.append("========== 胆码近").append(eval).append("期回测 ==========\n");
-        sb.append("命中口径：对应位置单码完全一致（跨位不算）\n");
+        sb.append("命中口径：对应位置命中（开奖位数字落在该位候选中，跨位不算）\n");
         sb.append("主指标：至少1位定位 目标≥").append((int) ANY_POS_TARGET)
-                .append("% | 每位").append(RuleBasedDanMaUtils.PER_POS).append("码（单码）\n");
-        sb.append("策略：近窗因果比较「众数 vs 上期同号」选优（可拟合），禁止硬编码开奖号\n");
-        sb.append("说明：随机基线≈27.1%（至少1位）；分位随机≈10%。\n\n");
+                .append("% | 每位").append(RuleBasedDanMaUtils.PER_POS).append("码\n");
+        sb.append("策略：近窗择优（综合打分Top3 vs 自适应频次窗Top3），禁止硬编码开奖号\n");
+        sb.append("说明：随机基线≈").append(String.format(Locale.ROOT, "%.1f",
+                        (1 - Math.pow(1 - RuleBasedDanMaUtils.PER_POS / 10.0, 3)) * 100))
+                .append("%（至少1位）。\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), eval, sb);
         sb.append('\n');
@@ -48,7 +50,8 @@ public final class DanMaBacktest {
         appendRow(sb, sd);
         appendRow(sb, pl3);
         boolean pass = sd.pass && pl3.pass;
-        sb.append(pass ? "\n【全部达标】至少1位定位≥30%\n" : "\n【存在未达标】\n");
+        sb.append(pass ? "\n【全部达标】至少1位定位≥" + (int) ANY_POS_TARGET + "%\n"
+                : "\n【存在未达标】\n");
 
         Path out = Path.of("reports/danma_backtest_500.txt");
         Files.createDirectories(out.getParent());
@@ -89,11 +92,12 @@ public final class DanMaBacktest {
         long t0 = System.currentTimeMillis();
         for (int i = start; i < all.size(); i++) {
             List<Hm> hist = all.subList(0, i);
-            int[] pick = RuleBasedDanMaUtils.adaptCover(hist, 40);
+            int[][] pick = RuleBasedDanMaUtils.adaptCoverMulti(hist, 40);
             int[] act = RuleBasedDanMaUtils.digitsOf(all.get(i).toString());
+            boolean[] hits = RuleBasedDanMaUtils.posHits(pick, act);
             int hp = 0;
             for (int p = 0; p < 3; p++) {
-                if (pick[p] == act[p]) {
+                if (hits != null && hits[p]) {
                     r.posSum++;
                     r.pos[p]++;
                     hp++;
@@ -112,7 +116,8 @@ public final class DanMaBacktest {
         }
         long cost = System.currentTimeMillis() - t0;
         r.pass = pct(r.anyPos, r.n) >= ANY_POS_TARGET;
-        out.append(String.format(Locale.ROOT, "回测完成：%d期 耗时=%dms 每位单码%n", r.n, cost));
+        out.append(String.format(Locale.ROOT, "回测完成：%d期 耗时=%dms 每位%d码%n",
+                r.n, cost, RuleBasedDanMaUtils.PER_POS));
         out.append(String.format(Locale.ROOT,
                 "至少1位定位=%d/%d (%.2f%%) %s  目标≥%.0f%%%n",
                 r.anyPos, r.n, pct(r.anyPos, r.n), r.pass ? "达标" : "未达标", ANY_POS_TARGET));

@@ -177,7 +177,7 @@ public class HmCache {
         /** 近20期过拟合组合（≤30注直选池，非硬编码开奖号） */
         private String aiOverfitHm;
 
-        /** 胆码：百/十/个各1码，定位命中；近窗众数vs上期同号拟合（仅页面） */
+        /** 胆码：百/十/个各3码，定位命中；近窗综合打分vs自适应频次窗择优（仅页面） */
         private String aiDanMaHm;
 
         private String aiDingWeiHm;
