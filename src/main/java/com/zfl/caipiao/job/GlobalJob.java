@@ -60,13 +60,14 @@ public class GlobalJob {
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
         String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache());
-        String sdOverfit = Overfit20PredictUtils.get3dPredict();
+        String sdOverfitDisplay = Overfit20PredictUtils.get3dPredict();
+        String sdOverfitPool = Overfit20PredictUtils.get3dPool();
         if (StrUtil.isNotBlank(sdDadi)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
                     .setAiHm(sdDadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(sdRecommend)
-                    .setAiOverfitHm(sdOverfit)
+                    .setAiOverfitHm(StrUtil.blankToDefault(sdOverfitPool, sdOverfitDisplay))
                     .setAiZuSanHm(zuSan));
         }
 
@@ -74,13 +75,14 @@ public class GlobalJob {
         String pl3Dadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         zuSan = RecommendBetUtils.extractZuSanGroups(pl3Dadi);
         String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache());
-        String pl3Overfit = Overfit20PredictUtils.getPl3Predict();
+        String pl3OverfitDisplay = Overfit20PredictUtils.getPl3Predict();
+        String pl3OverfitPool = Overfit20PredictUtils.getPl3Pool();
         if (StrUtil.isNotBlank(pl3Dadi)) {
             HmCache.addPl3CompareCache(new HmCache.CompareDto()
                     .setAiHm(pl3Dadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(pl3Recommend)
-                    .setAiOverfitHm(pl3Overfit)
+                    .setAiOverfitHm(StrUtil.blankToDefault(pl3OverfitPool, pl3OverfitDisplay))
                     .setAiZuSanHm(zuSan));
         }
         String msg = EmailConstant.EMAIL_TEMPLATE
@@ -89,12 +91,12 @@ public class GlobalJob {
                 .replace("{{TIMESTAMP}}", DateUtil.now());
         sendEmailCode("今日3D及排三预测（高概率10注）", msg);
 
-        if (StrUtil.isNotBlank(sdOverfit) || StrUtil.isNotBlank(pl3Overfit)) {
+        if (StrUtil.isNotBlank(sdOverfitDisplay) || StrUtil.isNotBlank(pl3OverfitDisplay)) {
             String overfitMsg = EmailConstant.EMAIL_TEMPLATE
-                    .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdOverfit))
-                    .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Overfit))
+                    .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdOverfitDisplay))
+                    .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3OverfitDisplay))
                     .replace("{{TIMESTAMP}}", DateUtil.now());
-            sendEmailCode("今日3D及排三过拟合五组（近20期）", overfitMsg);
+            sendEmailCode("今日3D及排三过拟合五组（近20期自适应）", overfitMsg);
         }
     }
 

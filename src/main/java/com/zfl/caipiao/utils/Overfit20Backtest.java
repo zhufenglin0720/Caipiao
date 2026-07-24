@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 近 20 期过拟合五组 · 近 10 期命中回测。
+ * 近 20 期五组策略自适应 · 近 10 期逐期回测。
  * <p>
- * 评估方式（过拟合）：用最近 20 期拟合出 5 组，再在这 20 期内最近 10 期上统计直选/组选。
+ * 每期仅用该期之前近 20 期，预测前自动调参；命中按融合池统计。
  * 达标：直选 ≥ 2 且 组选 ≥ 4。
  */
 public final class Overfit20Backtest {
@@ -27,13 +27,13 @@ public final class Overfit20Backtest {
     public static void main(String[] args) throws Exception {
         muteLogs();
         StringBuilder sb = new StringBuilder();
-        sb.append("========== 近20期过拟合五组 · 近10期回测 ==========\n");
-        sb.append("规则：仅用近").append(Overfit20PredictUtils.WINDOW)
-                .append("期拟合恰好").append(Overfit20PredictUtils.GROUP_COUNT)
-                .append("组；在窗内近").append(Overfit20PredictUtils.EVAL_PERIODS)
-                .append("期评估；目标直选≥").append(ZX_TARGET)
-                .append("、组选≥").append(GROUP_TARGET).append('\n');
-        sb.append("禁止硬编码开奖号码；权重/候选均由窗口数据动态计算。\n\n");
+        sb.append("========== 近20期五组策略自适应 · 近10期逐期回测 ==========\n");
+        sb.append("规则：每期仅用之前近").append(Overfit20PredictUtils.WINDOW)
+                .append("期；预测前窗内因果校验自动调参；五策略融合池≤")
+                .append(Overfit20PredictUtils.MAX_GROUPS)
+                .append("组形态并展开直选；展示五组=五策略头名\n");
+        sb.append("目标：直选≥").append(ZX_TARGET).append("、组选≥").append(GROUP_TARGET).append('\n');
+        sb.append("禁止硬编码开奖号码。\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), sb);
         sb.append('\n');
@@ -68,27 +68,24 @@ public final class Overfit20Backtest {
             out.append("无数据\n");
             return Result.fail(name);
         }
-        if (all.size() < Overfit20PredictUtils.WINDOW) {
-            out.append("历史不足 ").append(Overfit20PredictUtils.WINDOW).append(" 期\n");
+        if (all.size() < Overfit20PredictUtils.WINDOW + Overfit20PredictUtils.EVAL_PERIODS) {
+            out.append("历史不足\n");
             return Result.fail(name);
         }
 
-        List<Hm> windowHm = all.subList(all.size() - Overfit20PredictUtils.WINDOW, all.size());
-        List<String> window = Overfit20PredictUtils.toCodes(windowHm);
-        List<String> pred = Overfit20PredictUtils.fitFiveGroups(window);
-        out.append("拟合窗期号=").append(windowHm.get(0).getQh())
-                .append(" ~ ").append(windowHm.get(windowHm.size() - 1).getQh()).append('\n');
-        out.append("过拟合五组=").append(String.join(",", pred)).append('\n');
-
-        int evalFrom = window.size() - Overfit20PredictUtils.EVAL_PERIODS;
-        int zx = 0;
-        int group = 0;
+        int eval = Overfit20PredictUtils.EVAL_PERIODS;
+        int zx = 0, group = 0;
         List<String> details = new ArrayList<>();
-        for (int i = evalFrom; i < window.size(); i++) {
-            String actual = window.get(i);
-            String qh = windowHm.get(i).getQh();
-            boolean hitZx = Overfit20PredictUtils.isZxHit(pred, actual);
-            boolean hitGp = Overfit20PredictUtils.isGroupHit(pred, actual);
+        long t0 = System.currentTimeMillis();
+
+        for (int i = all.size() - eval; i < all.size(); i++) {
+            List<Hm> hist = all.subList(Math.max(0, i - Overfit20PredictUtils.WINDOW), i);
+            Overfit20PredictUtils.PredictResult pred = Overfit20PredictUtils.predictResult(hist);
+            String actual = Overfit20PredictUtils.pad3(all.get(i).toString());
+            String qh = all.get(i).getQh();
+
+            boolean hitZx = Overfit20PredictUtils.isZxHit(pred.pool, actual);
+            boolean hitGp = Overfit20PredictUtils.isGroupHit(pred.pool, actual);
             if (hitZx) {
                 zx++;
             }
@@ -96,20 +93,23 @@ public final class Overfit20Backtest {
                 group++;
             }
             details.add(String.format(Locale.ROOT,
-                    "期号=%s 开奖=%s 直选=%s 组选=%s",
-                    qh, actual, hitZx ? "是" : "否", hitGp ? "是" : "否"));
+                    "期号=%s 展示五组=%s 开奖=%s 直选=%s 组选=%s | 池=%d注 %s",
+                    qh, pred.displayCsv(), actual,
+                    hitZx ? "是" : "否", hitGp ? "是" : "否",
+                    pred.pool.size(), pred.tune));
         }
 
-        int n = Overfit20PredictUtils.EVAL_PERIODS;
+        long cost = System.currentTimeMillis() - t0;
         boolean pass = zx >= ZX_TARGET && group >= GROUP_TARGET;
-        out.append(Overfit20PredictUtils.summarizeHits(zx, group, n)).append('\n');
-        out.append("--- 近").append(n).append("期明细 ---\n");
+        out.append(String.format(Locale.ROOT, "回测完成：评估=%d期 耗时=%dms%n", eval, cost));
+        out.append(Overfit20PredictUtils.summarizeHits(zx, group, eval)).append('\n');
+        out.append("--- 逐期明细（展示五组 / 开奖 / 融合池命中）---\n");
         for (String d : details) {
             out.append(d).append('\n');
         }
         out.append(String.format(Locale.ROOT, "【%s】直选%d 组选%d %s%n",
                 name, zx, group, pass ? "达标" : "未达标"));
-        return new Result(name, zx, group, n, pass);
+        return new Result(name, zx, group, eval, pass);
     }
 
     private static void muteLogs() {
