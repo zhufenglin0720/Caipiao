@@ -55,19 +55,18 @@ public class GlobalJob {
     @Scheduled(cron = "0 40 18 * * ?")
     public void applyTask() throws MessagingException, InterruptedException {
         // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
-        // 4) 近20期过拟合五组（动态覆盖，非硬编码）
+        // 4) 近20期过拟合五组：仅落盘供页面展示，不发邮件
         String raw200 = RuleBasedPredictUtils.get3dPredict();
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
         String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache());
-        String sdOverfitDisplay = Overfit20PredictUtils.get3dPredict();
         String sdOverfitPool = Overfit20PredictUtils.get3dPool();
         if (StrUtil.isNotBlank(sdDadi)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
                     .setAiHm(sdDadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(sdRecommend)
-                    .setAiOverfitHm(StrUtil.blankToDefault(sdOverfitPool, sdOverfitDisplay))
+                    .setAiOverfitHm(sdOverfitPool)
                     .setAiZuSanHm(zuSan));
         }
 
@@ -75,14 +74,13 @@ public class GlobalJob {
         String pl3Dadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         zuSan = RecommendBetUtils.extractZuSanGroups(pl3Dadi);
         String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache());
-        String pl3OverfitDisplay = Overfit20PredictUtils.getPl3Predict();
         String pl3OverfitPool = Overfit20PredictUtils.getPl3Pool();
         if (StrUtil.isNotBlank(pl3Dadi)) {
             HmCache.addPl3CompareCache(new HmCache.CompareDto()
                     .setAiHm(pl3Dadi)
                     .setAiFullHm(raw200)
                     .setAiRecommendHm(pl3Recommend)
-                    .setAiOverfitHm(StrUtil.blankToDefault(pl3OverfitPool, pl3OverfitDisplay))
+                    .setAiOverfitHm(pl3OverfitPool)
                     .setAiZuSanHm(zuSan));
         }
         String msg = EmailConstant.EMAIL_TEMPLATE
@@ -90,14 +88,7 @@ public class GlobalJob {
                 .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3Recommend))
                 .replace("{{TIMESTAMP}}", DateUtil.now());
         sendEmailCode("今日3D及排三预测（高概率10注）", msg);
-
-        if (StrUtil.isNotBlank(sdOverfitDisplay) || StrUtil.isNotBlank(pl3OverfitDisplay)) {
-            String overfitMsg = EmailConstant.EMAIL_TEMPLATE
-                    .replace("{{3D_NUMBERS}}", EmailConstant.buildNumbersHtml(sdOverfitDisplay))
-                    .replace("{{PL3_NUMBERS}}", EmailConstant.buildNumbersHtml(pl3OverfitDisplay))
-                    .replace("{{TIMESTAMP}}", DateUtil.now());
-            sendEmailCode("今日3D及排三过拟合五组（近20期自适应）", overfitMsg);
-        }
+        // 过拟合五组仅落盘供页面展示，不发送邮件
     }
 
     @Scheduled(cron = "0 50 18 * * ?")
