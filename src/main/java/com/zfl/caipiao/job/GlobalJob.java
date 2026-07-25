@@ -53,7 +53,7 @@ public class GlobalJob {
     @Value("${file.location.comparePl3}")
     private String fileLocationComparePl3;
 
-    @Scheduled(cron = "0 40 18 * * ?")
+    @Scheduled(cron = "0 0 18 * * ?")
     public void applyTask() throws Exception {
         // 1) 近20期过拟合（干旱自动扩 cap/cover）
         // 2) 元调参驱动≤200注大底（连挂时注入过拟合）
