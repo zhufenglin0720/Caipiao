@@ -3530,7 +3530,7 @@
         return html + '</div>';
     }
 
-    /** 胆码：百/十/个横向排列，每位可多码；高亮对应位置命中 */
+    /** 胆码：百/十/个横向排列，每位3码；高亮对应位置命中 */
     function formatDanMaHorizontal(text, realHm) {
         if (!text) return '-';
         const hits = getDanMaPosHits(text, realHm);
@@ -3621,7 +3621,7 @@
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有胆码预测期数</div></div>
                 <div class="stat-card"><div class="stat-value">${anyPos}/${total}</div><div class="stat-label">至少1位定位</div></div>
-                <div class="stat-card"><div class="stat-value">${anyRate}%</div><div class="stat-label">定位命中率(目标≥65%)</div></div>
+                <div class="stat-card"><div class="stat-value">${anyRate}%</div><div class="stat-label">定位命中率(3码·目标≥67%)</div></div>
                 <div class="stat-card"><div class="stat-value">${full}</div><div class="stat-label">三位定位全中</div></div>
                 <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位定位</div></div>
                 <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位定位</div></div>

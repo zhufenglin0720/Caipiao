@@ -11,10 +11,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 胆码预测：百/十/个各输出 {@link #PER_POS} 码，按「对应位置命中」评估。
+ * 胆码预测：百/十/个各输出 {@link #PER_POS} 码（3 码），按「对应位置命中」评估。
  * <p>
- * 命中定义：开奖某位数字落在该位预测列表中（不是跨位号码集合相交）。
- * 主指标：至少 1 位定位命中，目标 ≥65%。
+ * 命中定义：开奖某位数字落在该位预测列表中（跨位不算）。
+ * 选取：近窗因果比较「综合打分 Top3」与「自适应频次窗 Top3」的至少 1 位定位，
+ * 择优输出（可拟合、无硬编码开奖号）。命中率优先。
  * 输出示例：{@code 百位:9,6,8 十位:2,0,3 个位:5,7,1}（仅页面展示，不发邮件）。
  */
 @Slf4j
@@ -27,6 +28,11 @@ public final class RuleBasedDanMaUtils {
 
     /** 每位候选码数量 */
     public static final int PER_POS = 3;
+    /** 全局策略切换近窗（至少 1 位定位） */
+    public static final int SWITCH_META = 50;
+    /** 自适应频次窗的验证长度 */
+    public static final int FIT_VAL = 40;
+    private static final int[] FREQ_WINDOWS = {10, 12, 15, 18, 22, 25, 30, 35, 40, 50, 60};
     private static final int MIN_HISTORY = 30;
     private static final Pattern POS_PAT = Pattern.compile("([百十个])位[:：]([0-9,]+)");
 
@@ -45,36 +51,118 @@ public final class RuleBasedDanMaUtils {
         if (history == null || history.size() < MIN_HISTORY) {
             return "";
         }
+        // 与回测一致：不引入外部硬偏置，保持可拟合口径
         int[][] pick = pickPositional(history);
-        softBoostExternal(pick, history, compares, kind);
         String out = formatMulti(pick);
-        log.info("胆码预测[{}]: {} | perPos={} strategy=pos-topk", kind, out, PER_POS);
+        log.info("胆码预测[{}]: {} | perPos={} strategy=base-vs-fitFreq-switch meta={} val={}",
+                kind, out, PER_POS, SWITCH_META, FIT_VAL);
         return out;
     }
 
-    /** 回测入口：每位 Top-{@link #PER_POS}，不依赖外部比对缓存 */
+    /** 回测入口：每位 Top-{@link #PER_POS} */
     static int[][] adaptCoverMulti(List<Hm> history, int ignoredVal) {
         return pickPositional(history);
     }
 
-    /**
-     * 兼容旧单码接口：返回每位第一候选（仅探针/过渡）。
-     */
+    /** 兼容旧单码接口：返回每位第一候选 */
     static int[] adaptCover(List<Hm> history, int val) {
         int[][] m = adaptCoverMulti(history, val);
         return new int[]{m[0][0], m[1][0], m[2][0]};
     }
 
     /**
-     * 分位独立打分后取 Top-K：多窗频次 + 遗漏甜区 + 一位转移。
-     * 允许跨位重复（定位命中不要求三位互异）。
+     * 近 {@link #SWITCH_META} 期比较基础打分与自适应频次窗的至少 1 位定位，择优。
      */
     static int[][] pickPositional(List<Hm> history) {
+        if (history.size() < MIN_HISTORY + SWITCH_META + FIT_VAL) {
+            return pickBase(history);
+        }
+        int n = history.size();
+        int from = Math.max(MIN_HISTORY + FIT_VAL, n - SWITCH_META);
+        int baseAny = 0;
+        int fitAny = 0;
+        for (int t = from; t < n; t++) {
+            List<Hm> sub = history.subList(0, t);
+            int[] act = digitsOf(history.get(t).toString());
+            if (isAnyPosHit(pickBase(sub), act)) {
+                baseAny++;
+            }
+            if (isAnyPosHit(pickFitFreq(sub), act)) {
+                fitAny++;
+            }
+        }
+        return fitAny > baseAny ? pickFitFreq(history) : pickBase(history);
+    }
+
+    static int[][] pickBase(List<Hm> history) {
         int[][] out = new int[3][PER_POS];
         for (int pos = 0; pos < 3; pos++) {
             out[pos] = topKDouble(scorePositionPositional(history, pos), PER_POS);
         }
         return out;
+    }
+
+    static int[][] pickFitFreq(List<Hm> history) {
+        int[][] out = new int[3][PER_POS];
+        for (int pos = 0; pos < 3; pos++) {
+            out[pos] = fitFreqWindow(history, pos);
+        }
+        return out;
+    }
+
+    static int[] fitFreqWindow(List<Hm> history, int pos) {
+        int n = history.size();
+        int from = Math.max(1, n - FIT_VAL);
+        int bestW = FREQ_WINDOWS[0];
+        int bestHit = -1;
+        for (int w : FREQ_WINDOWS) {
+            int hits = countFreqWindowHits(history, pos, w, from, n);
+            if (hits > bestHit) {
+                bestHit = hits;
+                bestW = w;
+            }
+        }
+        return topKFreq(history, pos, bestW);
+    }
+
+    /** 滑动窗口统计：频次 Top3 在 [from, n) 上的定位命中次数 */
+    private static int countFreqWindowHits(List<Hm> history, int pos, int w, int from, int n) {
+        int[] freq = new int[10];
+        int winStart = Math.max(0, from - w);
+        for (int i = winStart; i < from; i++) {
+            freq[digitsOf(history.get(i).toString())[pos]]++;
+        }
+        int hits = 0;
+        for (int t = from; t < n; t++) {
+            if (posContains(topKFromFreq(freq), digitsOf(history.get(t).toString())[pos])) {
+                hits++;
+            }
+            // 滑到以 t+1 为终点的近 w 窗
+            freq[digitsOf(history.get(t).toString())[pos]]++;
+            int newStart = Math.max(0, t + 1 - w);
+            while (winStart < newStart) {
+                freq[digitsOf(history.get(winStart).toString())[pos]]--;
+                winStart++;
+            }
+        }
+        return hits;
+    }
+
+    private static int[] topKFromFreq(int[] freq) {
+        double[] s = new double[10];
+        for (int d = 0; d < 10; d++) {
+            s[d] = freq[d];
+        }
+        return topKDouble(s, PER_POS);
+    }
+
+    static int[] topKFreq(List<Hm> history, int pos, int w) {
+        int[] freq = new int[10];
+        List<Hm> t = tail(history, w);
+        for (Hm x : t) {
+            freq[digitsOf(x.toString())[pos]]++;
+        }
+        return topKFromFreq(freq);
     }
 
     static double[] scorePositionPositional(List<Hm> history, int pos) {
@@ -124,122 +212,11 @@ public final class RuleBasedDanMaUtils {
         return s;
     }
 
-    /** 外部信号：在不改变候选集合大小的前提下微调各位分数后重排 Top-K */
-    private static void softBoostExternal(int[][] pick, List<Hm> history,
-                                          List<HmCache.CompareDto> compares, GameKind kind) {
-        if (pick == null || compares == null) {
-            return;
-        }
-        for (int pos = 0; pos < 3; pos++) {
-            double[] sc = scorePositionPositional(history, pos);
-            boostPosFromDingWei(sc, compares, pos, 0.35);
-            boostPosFromDadi(sc, history, kind, pos, 0.25);
-            int[] rerank = topKDouble(sc, PER_POS);
-            // 保留原集合优先：先放原候选中仍靠前的，再补齐
-            boolean[] keep = new boolean[10];
-            for (int v : pick[pos]) {
-                if (v >= 0 && v <= 9) {
-                    keep[v] = true;
-                }
-            }
-            int[] merged = new int[PER_POS];
-            int n = 0;
-            boolean[] used = new boolean[10];
-            for (int v : rerank) {
-                if (keep[v] && !used[v]) {
-                    merged[n++] = v;
-                    used[v] = true;
-                    if (n >= PER_POS) {
-                        break;
-                    }
-                }
-            }
-            for (int v : rerank) {
-                if (n >= PER_POS) {
-                    break;
-                }
-                if (!used[v]) {
-                    merged[n++] = v;
-                    used[v] = true;
-                }
-            }
-            while (n < PER_POS) {
-                merged[n++] = pick[pos][Math.min(n, pick[pos].length - 1)];
-            }
-            pick[pos] = merged;
-        }
-    }
-
-    private static void boostPosFromDingWei(double[] sc, List<HmCache.CompareDto> compares, int pos, double w) {
-        if (compares == null || compares.isEmpty()) {
-            return;
-        }
-        for (int i = compares.size() - 1; i >= 0 && i >= compares.size() - 3; i--) {
-            String dw = compares.get(i).getAiDingWeiHm();
-            if (dw == null || dw.isBlank()) {
-                continue;
-            }
-            Matcher m = POS_PAT.matcher(dw.replace('：', ':'));
-            while (m.find()) {
-                String label = m.group(1);
-                int p = switch (label) {
-                    case "百" -> 0;
-                    case "十" -> 1;
-                    case "个" -> 2;
-                    default -> -1;
-                };
-                if (p != pos) {
-                    continue;
-                }
-                for (String part : m.group(2).split(",")) {
-                    String t = part.trim();
-                    if (t.matches("\\d")) {
-                        sc[t.charAt(0) - '0'] += w;
-                    }
-                }
-            }
-        }
-    }
-
-    private static void boostPosFromDadi(double[] sc, List<Hm> history, GameKind kind, int pos, double w) {
-        try {
-            String dadi = kind == GameKind.SD_3D
-                    ? RuleBasedPredictUtils.get3dPredict()
-                    : RuleBasedPredictUtils.getPl3Predict();
-            if (dadi == null || dadi.isBlank()) {
-                // 无缓存时用历史末段模拟：跳过
-                return;
-            }
-            int[] cnt = new int[10];
-            int n = 0;
-            for (String bet : dadi.split(",")) {
-                String t = pad3(bet.trim());
-                if (t.length() < 3) {
-                    continue;
-                }
-                int d = t.charAt(pos) - '0';
-                if (d >= 0 && d <= 9) {
-                    cnt[d]++;
-                    n++;
-                }
-            }
-            if (n == 0) {
-                return;
-            }
-            for (int d = 0; d < 10; d++) {
-                sc[d] += w * (cnt[d] / (double) n) * 10.0;
-            }
-        } catch (Throwable ignored) {
-            // 大底不可用时跳过
-        }
-    }
-
     static String formatMulti(int[][] pick) {
         return String.format(Locale.ROOT, "百位:%s 十位:%s 个位:%s",
                 join(pick[0]), join(pick[1]), join(pick[2]));
     }
 
-    /** 兼容旧单码格式化 */
     static String format(int[] pick) {
         return String.format(Locale.ROOT, "百位:%d 十位:%d 个位:%d", pick[0], pick[1], pick[2]);
     }
@@ -255,11 +232,6 @@ public final class RuleBasedDanMaUtils {
         return sb.toString();
     }
 
-    /**
-     * 解析为每位候选列表。兼容旧单码格式。
-     *
-     * @return length-3，每位为候选数组；失败返回 null
-     */
     public static int[][] parseMulti(String answer) {
         if (answer == null || answer.isBlank()) {
             return null;
@@ -298,7 +270,6 @@ public final class RuleBasedDanMaUtils {
         return out;
     }
 
-    /** 旧接口：取每位第一码 */
     public static int[] parseDigits(String answer) {
         int[][] m = parseMulti(answer);
         if (m == null) {
@@ -307,13 +278,11 @@ public final class RuleBasedDanMaUtils {
         return new int[]{m[0][0], m[1][0], m[2][0]};
     }
 
-    /** 三位定位全中：开奖三位均落在对应位候选中 */
     public static boolean isFullHit(String danMa, String realHm) {
         boolean[] h = posHits(danMa, realHm);
         return h != null && h[0] && h[1] && h[2];
     }
 
-    /** 至少 1 位定位命中（主指标） */
     public static boolean isAnyPosHit(String danMa, String realHm) {
         boolean[] h = posHits(danMa, realHm);
         return h != null && (h[0] || h[1] || h[2]);
@@ -342,7 +311,6 @@ public final class RuleBasedDanMaUtils {
         if (pick == null || actual == null) {
             return false;
         }
-        // 旧单码：退化为定位任一命中
         for (int p = 0; p < 3 && p < pick.length && p < actual.length; p++) {
             if (pick[p] == actual[p]) {
                 return true;
@@ -392,7 +360,10 @@ public final class RuleBasedDanMaUtils {
         for (int i = 0; i < 10; i++) {
             idx[i] = i;
         }
-        Arrays.sort(idx, (a, b) -> Double.compare(score[b], score[a]));
+        Arrays.sort(idx, (a, b) -> {
+            int c = Double.compare(score[b], score[a]);
+            return c != 0 ? c : Integer.compare(a, b);
+        });
         int[] out = new int[Math.min(k, 10)];
         for (int i = 0; i < out.length; i++) {
             out[i] = idx[i];

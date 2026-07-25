@@ -13,12 +13,13 @@ import java.util.Locale;
  * 胆码近 500 期回测。
  * <p>
  * 命中口径：对应位置命中（开奖某位数字 ∈ 该位候选列表）。
- * 主指标「至少 1 位定位」目标 ≥65%；每位输出 {@link RuleBasedDanMaUtils#PER_POS} 码。
+ * 主指标「至少 1 位定位」目标 ≥67%；每位输出 {@link RuleBasedDanMaUtils#PER_POS} 码。
  */
 public final class DanMaBacktest {
 
     private static final int EVAL_PERIODS = 500;
-    private static final double ANY_POS_TARGET = 65.0;
+    /** 高于随机≈65.7%；拟合后目标抬升至 ≥67% */
+    private static final double ANY_POS_TARGET = 67.0;
 
     private DanMaBacktest() {
     }
@@ -35,8 +36,7 @@ public final class DanMaBacktest {
         sb.append("命中口径：对应位置命中（开奖位数字落在该位候选中，跨位不算）\n");
         sb.append("主指标：至少1位定位 目标≥").append((int) ANY_POS_TARGET)
                 .append("% | 每位").append(RuleBasedDanMaUtils.PER_POS).append("码\n");
-        sb.append("策略：分位独立打分（多窗频次+遗漏甜区+一位转移）取 Top")
-                .append(RuleBasedDanMaUtils.PER_POS).append('\n');
+        sb.append("策略：近窗择优（综合打分Top3 vs 自适应频次窗Top3），禁止硬编码开奖号\n");
         sb.append("说明：随机基线≈").append(String.format(Locale.ROOT, "%.1f",
                         (1 - Math.pow(1 - RuleBasedDanMaUtils.PER_POS / 10.0, 3)) * 100))
                 .append("%（至少1位）。\n\n");
@@ -50,7 +50,8 @@ public final class DanMaBacktest {
         appendRow(sb, sd);
         appendRow(sb, pl3);
         boolean pass = sd.pass && pl3.pass;
-        sb.append(pass ? "\n【全部达标】至少1位定位≥65%\n" : "\n【存在未达标】\n");
+        sb.append(pass ? "\n【全部达标】至少1位定位≥" + (int) ANY_POS_TARGET + "%\n"
+                : "\n【存在未达标】\n");
 
         Path out = Path.of("reports/danma_backtest_500.txt");
         Files.createDirectories(out.getParent());
