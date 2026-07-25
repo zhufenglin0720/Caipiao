@@ -54,7 +54,7 @@ public class GlobalJob {
     private String fileLocationComparePl3;
 
     @Scheduled(cron = "0 40 18 * * ?")
-    public void applyTask() throws MessagingException, InterruptedException {
+    public void applyTask() throws Exception {
         // 1) 近20期过拟合（干旱自动扩 cap/cover）
         // 2) 元调参驱动≤200注大底（连挂时注入过拟合）
         // 3) 组选去重落盘  4) 邮件10注：干旱时优先过拟合槽+动态密集带
@@ -108,9 +108,9 @@ public class GlobalJob {
                 .replace("{{TIMESTAMP}}", DateUtil.now());
         sendEmailCode("今日3D及排三预测（高概率10注）", msg);
         // 过拟合组合 / 胆码仅落盘供页面展示，不发送邮件
+        applyDingWeiTask();
     }
 
-    @Scheduled(cron = "0 50 18 * * ?")
     public void applyDingWeiTask() throws Exception {
         // 七码定位改为纯规则引擎，不再调用 AI
         String aiAnswer = RuleBasedDingWeiUtils.get3dDingWei();
