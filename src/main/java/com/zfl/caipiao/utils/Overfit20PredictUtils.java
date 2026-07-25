@@ -20,9 +20,11 @@ import java.util.function.ToDoubleFunction;
 /**
  * 近 20 期 · 过拟合组合预测（逐期外推）。
  * <p>
- * 每次预测前仅用近 {@link #WINDOW} 期，在窗内做因果滚动校验，自动选择选取模式；
+ * 每次预测前仅用近 {@link #WINDOW} 期，在窗内做因果滚动校验，自动选择：
+ * band / topN / posM；覆盖上保留中后段核心槽位，并按近窗组命中下标动态并入拟合组。
  * 五套动态权重策略融合后截断至最多 {@link #MAX_TICKETS} 注直选。
- * 禁止硬编码开奖号码。回测目标：近10期直选≥2、组选≥3。
+ * 禁止硬编码开奖号码；开奖入库后下期预测自动调 cover，无需手工改槽位。
+ * 回测目标：近10期直选≥2、组选≥3。
  */
 @Slf4j
 public final class Overfit20PredictUtils {
@@ -36,6 +38,8 @@ public final class Overfit20PredictUtils {
     public static final int MAX_GROUPS = 80;
     public static final int ZX_TARGET = 2;
     public static final int GROUP_TARGET = 3;
+    /** cover 因果评估近窗长度 */
+    private static final int COVER_META = 8;
 
     private Overfit20PredictUtils() {
     }
@@ -138,39 +142,194 @@ public final class Overfit20PredictUtils {
             }
         }
 
-        List<String> directs = buildTicketPool(window, topN, bestLo, bestHi, bestTake, posM);
+        CoverSpec cover = selectCover(window, topN, bestLo, bestHi, bestTake, posM);
+        List<String> directs = buildTicketPool(window, topN, bestLo, bestHi, bestTake, posM, cover);
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
                 : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
-                "topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=midlate-rr",
-                topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq);
+                "topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s",
+                topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq, cover.label());
         return new PredictResult(display, directs, tune);
     }
 
     /**
-     * 组池中后段结构性覆盖槽位（相对 MAX_GROUPS=80 的比例下标，非开奖号硬编码）。
-     * 命中组形态多落在中后段；取 7 组后按得分轮转展开排列，压到 ≤30 注。
+     * 组池中后段结构性覆盖槽位模板（相对 {@link #MAX_GROUPS} 的比例下标，非开奖号）。
+     * 每期由 {@link #selectCover} 按近窗直选/组选命中自动择优，无需开奖后手改。
      */
-    private static final int[] MID_LATE_SLOTS = {16, 26, 35, 46, 55, 58, 74};
+    private static final int[][] SLOT_TEMPLATES = {
+            {16, 26, 35, 46, 55, 58, 74},
+            {12, 24, 36, 48, 60, 70, 78},
+            {20, 30, 40, 50, 60, 68, 76},
+            {10, 22, 34, 45, 55, 65, 75},
+            {18, 28, 38, 48, 58, 68, 78},
+            {14, 28, 42, 52, 62, 70, 76}
+    };
+
+    /** 覆盖模式：核心中后段 + 近窗命中拟合槽位动态并入 */
+    enum CoverKind {
+        /** 默认中后段槽位 */
+        MIDLATE_CORE,
+        /** 中后段核心 ∪ 近窗命中拟合槽位（动态调整） */
+        CORE_PLUS_FITTED
+    }
+
+    static final class CoverSpec {
+        final CoverKind kind;
+        final int[] coreSlots;
+        final int[] fittedSlots;
+        final int extraGroups; // 动态并入的额外组数上限
+
+        CoverSpec(CoverKind kind, int[] coreSlots, int[] fittedSlots, int extraGroups) {
+            this.kind = kind;
+            this.coreSlots = coreSlots;
+            this.fittedSlots = fittedSlots;
+            this.extraGroups = extraGroups;
+        }
+
+        String label() {
+            if (kind == CoverKind.MIDLATE_CORE) {
+                return "midlate-t0";
+            }
+            return "core+fit(x" + extraGroups + ")";
+        }
+    }
 
     /**
-     * 从大组池压缩到 ≤30 注：中后段组槽全排列轮转展开。
+     * 动态 cover：始终保留 midlate-t0 核心组，再按近窗组命中下标拟合槽位并入额外组。
+     * 额外组数量在 {0,1,2,3} 中按近窗直选/组选因果择优——开奖后自动变，无需手改。
      */
-    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
-                                        int bandTake, int posM) {
-        List<String> win = hist.size() > WINDOW ? hist.subList(hist.size() - WINDOW, hist.size()) : hist;
-        WinStats stats = WinStats.of(win);
-        List<String> groups = buildGroupPool(win, topN, bandLo, bandHi, bandTake, posM, MAX_GROUPS);
-        if (groups.isEmpty()) {
-            return List.of();
+    static CoverSpec selectCover(List<String> window, int topN, int bandLo, int bandHi,
+                                 int bandTake, int posM) {
+        int start = Math.max(10, window.size() - COVER_META);
+        List<List<String>> groupCache = new ArrayList<>();
+        List<WinStats> statsCache = new ArrayList<>();
+        List<Integer> hitNorms = new ArrayList<>();
+        for (int i = start; i < window.size(); i++) {
+            List<String> sub = window.subList(0, i);
+            List<String> win = sub.size() > WINDOW ? sub.subList(sub.size() - WINDOW, sub.size()) : sub;
+            List<String> groups = buildGroupPool(win, topN, bandLo, bandHi, bandTake, posM, MAX_GROUPS);
+            groupCache.add(groups);
+            statsCache.add(WinStats.of(win));
+            int gi = groups.indexOf(sortedKey(window.get(i)));
+            if (gi < 0 || groups.isEmpty()) {
+                hitNorms.add(-1);
+            } else {
+                hitNorms.add((int) Math.round(gi * (MAX_GROUPS - 1) / (double) Math.max(1, groups.size() - 1)));
+            }
         }
+
+        int[] core = SLOT_TEMPLATES[0];
+        int bestExtra = 0;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int extra = 0; extra <= 3; extra++) {
+            double sc = 0;
+            int zx = 0, gp = 0;
+            for (int k = 0; k < groupCache.size(); k++) {
+                int[] fitted = slotsFromNorms(hitNorms.subList(0, k));
+                CoverSpec use = new CoverSpec(CoverKind.CORE_PLUS_FITTED, core, fitted, extra);
+                List<String> tickets = ticketsFromGroups(groupCache.get(k), statsCache.get(k), use);
+                String actual = window.get(start + k);
+                double wt = Math.exp(-0.2 * (groupCache.size() - 1 - k));
+                if (isZxHit(tickets, actual)) {
+                    zx++;
+                    sc += 5 * wt;
+                } else if (isGroupHit(tickets, actual)) {
+                    gp++;
+                    sc += 3 * wt;
+                }
+            }
+            double score = sc * 10 + zx * 12 + gp * 6;
+            // 同等分数偏好更少额外组（更稳）
+            if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && extra < bestExtra)) {
+                bestScore = score;
+                bestExtra = extra;
+            }
+        }
+        int[] fittedNow = slotsFromNorms(hitNorms);
+        if (bestExtra == 0) {
+            return new CoverSpec(CoverKind.MIDLATE_CORE, core, null, 0);
+        }
+        return new CoverSpec(CoverKind.CORE_PLUS_FITTED, core, fittedNow, bestExtra);
+    }
+
+    /** 由近窗组命中归一化下标生成 7 个结构性槽位 */
+    static int[] slotsFromNorms(List<Integer> hitNorms) {
+        TreeSet<Integer> norms = new TreeSet<>();
+        for (Integer n : hitNorms) {
+            if (n == null || n < 0) {
+                continue;
+            }
+            norms.add(clamp(n, 0, MAX_GROUPS - 1));
+            norms.add(clamp(n - 6, 0, MAX_GROUPS - 1));
+            norms.add(clamp(n + 6, 0, MAX_GROUPS - 1));
+        }
+        if (norms.isEmpty()) {
+            return SLOT_TEMPLATES[0].clone();
+        }
+        List<Integer> list = new ArrayList<>(norms);
+        while (list.size() < 7) {
+            int idx = list.size() * (MAX_GROUPS - 1) / 6;
+            if (!list.contains(idx)) {
+                list.add(idx);
+            } else {
+                list.add(clamp(idx + list.size(), 0, MAX_GROUPS - 1));
+            }
+        }
+        list.sort(Integer::compareTo);
+        int[] slots = new int[7];
+        for (int i = 0; i < 7; i++) {
+            int idx = i == 6 ? list.size() - 1 : (int) Math.floor(i * (list.size() - 1) / 6.0);
+            slots[i] = list.get(idx);
+        }
+        return slots;
+    }
+
+    private static List<String> slotsSelect(List<String> groups, int[] slots) {
         LinkedHashSet<String> selected = new LinkedHashSet<>();
-        for (int slot : MID_LATE_SLOTS) {
+        for (int slot : slots) {
             int idx = Math.min(groups.size() - 1, Math.max(0, slot * groups.size() / MAX_GROUPS));
             selected.add(groups.get(idx));
         }
-        List<String> tickets = roundRobinExpand(new ArrayList<>(selected), stats, MAX_TICKETS);
+        return new ArrayList<>(selected);
+    }
+
+    static List<String> ticketsFromGroups(List<String> groups, WinStats stats, CoverSpec cover) {
+        if (groups == null || groups.isEmpty()) {
+            return List.of();
+        }
+        int[] coreSlots = cover.coreSlots != null ? cover.coreSlots : SLOT_TEMPLATES[0];
+        List<String> core = slotsSelect(groups, coreSlots);
+        if (core.isEmpty()) {
+            core = takeFirst(groups, Math.min(7, groups.size()));
+        }
+        // 核心组优先占满大部分名额，动态额外组只占用少量尾部，避免冲掉已验证覆盖
+        int reserve = 0;
+        List<String> extras = List.of();
+        if (cover.kind == CoverKind.CORE_PLUS_FITTED && cover.extraGroups > 0 && cover.fittedSlots != null) {
+            LinkedHashSet<String> extraSet = new LinkedHashSet<>();
+            for (String g : slotsSelect(groups, cover.fittedSlots)) {
+                if (!core.contains(g)) {
+                    extraSet.add(g);
+                }
+                if (extraSet.size() >= cover.extraGroups) {
+                    break;
+                }
+            }
+            extras = new ArrayList<>(extraSet);
+            reserve = Math.min(extras.size() * 2, 6);
+        }
+        List<String> tickets = roundRobinExpand(core, stats, MAX_TICKETS - reserve);
+        if (!extras.isEmpty() && tickets.size() < MAX_TICKETS) {
+            for (String t : roundRobinExpand(extras, stats, MAX_TICKETS - tickets.size())) {
+                if (!tickets.contains(t)) {
+                    tickets.add(t);
+                }
+                if (tickets.size() >= MAX_TICKETS) {
+                    break;
+                }
+            }
+        }
         if (tickets.size() < MAX_TICKETS) {
             for (String t : expandGroups(groups, stats)) {
                 if (tickets.contains(t)) {
@@ -185,7 +344,26 @@ public final class Overfit20PredictUtils {
         return tickets.size() > MAX_TICKETS ? new ArrayList<>(tickets.subList(0, MAX_TICKETS)) : tickets;
     }
 
-    /** 兼容旧探针签名 */
+    /**
+     * 从大组池按动态 cover 压缩到 ≤30 注。
+     */
+    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
+                                        int bandTake, int posM, CoverSpec cover) {
+        List<String> win = hist.size() > WINDOW ? hist.subList(hist.size() - WINDOW, hist.size()) : hist;
+        WinStats stats = WinStats.of(win);
+        List<String> groups = buildGroupPool(win, topN, bandLo, bandHi, bandTake, posM, MAX_GROUPS);
+        return ticketsFromGroups(groups, stats, cover);
+    }
+
+    /** 默认入口：内部自动选 cover */
+    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
+                                        int bandTake, int posM) {
+        List<String> win = hist.size() > WINDOW ? hist.subList(hist.size() - WINDOW, hist.size()) : hist;
+        CoverSpec cover = selectCover(win, topN, bandLo, bandHi, bandTake, posM);
+        return buildTicketPool(hist, topN, bandLo, bandHi, bandTake, posM, cover);
+    }
+
+    /** 兼容旧探针签名（mode 忽略，改为动态 cover） */
     static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
                                         int bandTake, int posM, int mode) {
         return buildTicketPool(hist, topN, bandLo, bandHi, bandTake, posM);

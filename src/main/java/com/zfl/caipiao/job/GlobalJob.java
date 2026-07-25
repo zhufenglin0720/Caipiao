@@ -56,8 +56,8 @@ public class GlobalJob {
     @Scheduled(cron = "0 40 18 * * ?")
     public void applyTask() throws MessagingException, InterruptedException {
         // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
-        // 4) 近20期过拟合组合：仅落盘供页面展示，不发邮件
-        // 5) 胆码（百/十/个各1码）：仅落盘供页面展示，不发邮件
+        // 4) 近20期过拟合组合：窗内因果自动调 cover/槽位后落盘（仅页面，不发邮件）
+        // 5) 胆码：仅落盘供页面展示，不发邮件
         String raw200 = RuleBasedPredictUtils.get3dPredict();
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
@@ -176,6 +176,20 @@ public class GlobalJob {
                 .replace("{{str3}}", sdAiHm)
                 .replace("{{str4}}", sdRealHm))
         ;
+
+        // 开奖入库后预演下期过拟合：cover/槽位按近窗命中自动切换，无需手工改参
+        try {
+            Overfit20PredictUtils.PredictResult sdNext =
+                    Overfit20PredictUtils.predictResult(HmCache.getSdCache());
+            Overfit20PredictUtils.PredictResult pl3Next =
+                    Overfit20PredictUtils.predictResult(HmCache.getPl3Cache());
+            System.out.println("过拟合动态调参预演[3D] tickets=" + sdNext.pool.size()
+                    + " | " + sdNext.tune);
+            System.out.println("过拟合动态调参预演[排列三] tickets=" + pl3Next.pool.size()
+                    + " | " + pl3Next.tune);
+        } catch (Exception e) {
+            System.out.println("过拟合动态调参预演失败: " + e.getMessage());
+        }
     }
 
     /** 开奖通知比对用推荐注 */

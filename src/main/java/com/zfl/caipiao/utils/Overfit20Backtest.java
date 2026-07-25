@@ -13,8 +13,8 @@ import java.util.Locale;
 /**
  * 近 20 期过拟合组合 · 近 10 期逐期回测。
  * <p>
- * 每期仅用该期之前近 20 期，预测前窗内因果校验自动调参；命中按 ≤30 注组合池统计。
- * 达标：直选 ≥ 2 且 组选 ≥ 3。
+ * 每期仅用该期之前近 20 期，预测前窗内因果校验自动调参（band / cover / 槽位模板）；
+ * 命中按 ≤30 注组合池统计。达标：直选 ≥ 2 且 组选 ≥ 3。
  */
 public final class Overfit20Backtest {
 
@@ -29,11 +29,11 @@ public final class Overfit20Backtest {
         StringBuilder sb = new StringBuilder();
         sb.append("========== 近20期过拟合组合 · 近10期逐期回测 ==========\n");
         sb.append("规则：每期仅用之前近").append(Overfit20PredictUtils.WINDOW)
-                .append("期；预测前窗内因果校验自动调参；组合池≤")
+                .append("期；窗内因果自动调 band/cover/槽位；组合池≤")
                 .append(Overfit20PredictUtils.MAX_TICKETS)
                 .append("注直选\n");
         sb.append("目标：直选≥").append(ZX_TARGET).append("、组选≥").append(GROUP_TARGET).append('\n');
-        sb.append("禁止硬编码开奖号码。\n\n");
+        sb.append("禁止硬编码开奖号码；开奖后无需手工改 cover/槽位。\n\n");
 
         Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), sb);
         sb.append('\n');
