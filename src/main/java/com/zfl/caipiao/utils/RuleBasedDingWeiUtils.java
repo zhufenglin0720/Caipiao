@@ -171,38 +171,76 @@ public final class RuleBasedDingWeiUtils {
         }
         GameKind gameKind = kind == null ? GameKind.SD_3D : kind;
         PosProfile[] profiles = gameKind == GameKind.PL3 ? PROFILE_PL3 : PROFILE_3D;
-        PosTune[] tunes = gameKind == GameKind.PL3 ? TUNE_PL3 : TUNE_3D;
+        PosTune[] baseTunes = gameKind == GameKind.PL3 ? TUNE_PL3 : TUNE_3D;
         double[][] linear = gameKind == GameKind.PL3 ? LINEAR_PL3 : LINEAR_3D;
+
+        // 元调参：只微调名次带 / 软加权倍率，不重拟合 LINEAR·PROFILE
+        HitRateMetaTuner.Snapshot meta = HitRateMetaTuner.analyze(compares, gameKind == GameKind.PL3);
+        PosTune[] tunes = applyMetaBand(baseTunes, meta);
 
         int[][] digits = toDigitMatrix(tail(history, Math.max(MAX_SAMPLE, needSample(profiles))));
 
         int[][] top7 = new int[3][TOP7];
         for (int pos = 0; pos < 3; pos++) {
             double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
-            // 排三：在原标定分上轻量抬邻号/中遗漏，抬全中覆盖（3D 不加，避免反向）
+            // 排三：在原标定分上轻量抬邻号/中遗漏；干旱时倍率由元调参抬高
             if (gameKind == GameKind.PL3) {
-                applyPl3SoftHitBoost(digits, pos, score);
+                applyPl3SoftHitBoost(digits, pos, score, meta.softNeighMul, meta.softOmitMul);
+            } else if (meta.droughtLevel >= 2 || meta.missDingWei >= 3) {
+                // 3D 七码连挂：极轻量邻号抬分（不改线性标定）
+                applySoftNeighBoost(digits, pos, score, meta.softNeighMul);
             }
             top7[pos] = pickBandAwareTop7(score, tunes[pos]);
-            log.info("七码定位[{}] {} Top7={} 命中带{}-{}", gameKind, posName(pos),
-                    Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi);
+            log.info("七码定位[{}] {} Top7={} 命中带{}-{} (base{}-{})", gameKind, posName(pos),
+                    Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi,
+                    baseTunes[pos].bandLo, baseTunes[pos].bandHi);
         }
 
         String result = format(top7);
-        log.info("七码定位结果: {}", result);
+        log.info("七码定位结果: {} | {}", result, meta.describe());
         return result;
     }
 
+    /** 按元调参偏移各位命中带，钳制在 1..10 且 lo≤hi */
+    private static PosTune[] applyMetaBand(PosTune[] base, HitRateMetaTuner.Snapshot meta) {
+        PosTune[] out = new PosTune[base.length];
+        for (int p = 0; p < base.length; p++) {
+            PosTune t = base[p];
+            int lo = Math.max(1, Math.min(8, t.bandLo + meta.dwBandLoDelta[p]));
+            int hi = Math.max(lo, Math.min(10, t.bandHi + meta.dwBandHiDelta[p]));
+            // 带宽至少覆盖 4 个名次，避免过窄丢号
+            if (hi - lo < 3) {
+                hi = Math.min(10, lo + 3);
+            }
+            out[p] = new PosTune(t.wLinear, t.wProfile, t.wRepeat, t.wCross,
+                    t.wAb, t.wNeigh, lo, hi);
+        }
+        return out;
+    }
+
     /** 排三专用软加权：不改线性/画像参数，只在最终分上微调 */
-    private static void applyPl3SoftHitBoost(int[][] h, int pos, double[] score) {
+    private static void applyPl3SoftHitBoost(int[][] h, int pos, double[] score,
+                                             double neighMul, double omitMul) {
         int[] om = omission(h, pos);
         int last = h[h.length - 1][pos];
+        double neigh = PL3_SOFT_NEIGH * (neighMul <= 0 ? 1.0 : neighMul);
+        double omit = PL3_SOFT_OMIT_MID * (omitMul <= 0 ? 1.0 : omitMul);
         for (int d = 0; d < 10; d++) {
             if (om[d] >= 3 && om[d] <= 10) {
-                score[d] += PL3_SOFT_OMIT_MID;
+                score[d] += omit;
             }
             if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
-                score[d] += PL3_SOFT_NEIGH;
+                score[d] += neigh;
+            }
+        }
+    }
+
+    private static void applySoftNeighBoost(int[][] h, int pos, double[] score, double neighMul) {
+        int last = h[h.length - 1][pos];
+        double boost = 0.85 * (neighMul <= 0 ? 1.0 : neighMul);
+        for (int d = 0; d < 10; d++) {
+            if (d == neighbor(last, -1) || d == neighbor(last, 1)) {
+                score[d] += boost;
             }
         }
     }

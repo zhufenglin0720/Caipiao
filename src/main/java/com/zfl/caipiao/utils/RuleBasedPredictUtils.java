@@ -14,7 +14,8 @@ import java.util.Set;
 /**
  * 纯规则预测。3D / 排列三分专项配置；注数最多 200。
  * 纠偏：近窗最频繁偏差 ± 因子；命中名次带优先；按开奖走势加权。
- * 目标：近100期直选≥20、组选≥50。
+ * 动态：{@link HitRateMetaTuner} 按连挂/短窗命中抬配额与名次带；干旱时注入过拟合直选。
+ * 目标：近100期直选≥20、组选≥50；连挂期优先恢复短期命中。
  */
 @Slf4j
 public final class RuleBasedPredictUtils {
@@ -62,19 +63,29 @@ public final class RuleBasedPredictUtils {
 
     public static String get3dPredict() {
         CURRENT_KIND = GameKind.SD_3D;
-        return predict(HmCache.getSdCache(), HmCache.getSdCompareCache(), GameKind.SD_3D);
+        String overfit = Overfit20PredictUtils.get3dPool();
+        return predict(HmCache.getSdCache(), HmCache.getSdCompareCache(), GameKind.SD_3D, overfit);
     }
 
     public static String getPl3Predict() {
         CURRENT_KIND = GameKind.PL3;
-        return predict(HmCache.getPl3Cache(), HmCache.getPl3CompareCache(), GameKind.PL3);
+        String overfit = Overfit20PredictUtils.getPl3Pool();
+        return predict(HmCache.getPl3Cache(), HmCache.getPl3CompareCache(), GameKind.PL3, overfit);
     }
 
     public static String predict(List<Hm> history, List<HmCache.CompareDto> compares) {
-        return predict(history, compares, GameKind.SD_3D);
+        return predict(history, compares, GameKind.SD_3D, null);
     }
 
     public static String predict(List<Hm> history, List<HmCache.CompareDto> compares, GameKind kind) {
+        return predict(history, compares, kind, null);
+    }
+
+    /**
+     * @param overfitPool 近窗过拟合直选池；干旱时注入大底尾部替换弱票（可空）
+     */
+    public static String predict(List<Hm> history, List<HmCache.CompareDto> compares, GameKind kind,
+                                 String overfitPool) {
         if (history == null || history.size() < 20) {
             log.warn("历史数据不足，无法规则预测，size={}", history == null ? 0 : history.size());
             return null;
@@ -82,9 +93,11 @@ public final class RuleBasedPredictUtils {
         applyGameProfile(kind == null ? GameKind.SD_3D : kind);
 
         // 排三：历史对比纠偏会显著拉低近100期直选，评分与选号均不使用 compares
-        // 连挂配额仍可用 compares（只调配额、不进位分/纠偏种子）
+        // 连挂/元调参仍可用 compares（只调配额、不进位分/纠偏种子）
         List<HmCache.CompareDto> streakCompares = compares;
-        if (CURRENT_KIND == GameKind.PL3) {
+        boolean pl3 = CURRENT_KIND == GameKind.PL3;
+        HitRateMetaTuner.Snapshot meta = HitRateMetaTuner.analyze(streakCompares, pl3);
+        if (pl3) {
             compares = null;
         }
 
@@ -98,7 +111,7 @@ public final class RuleBasedPredictUtils {
         RecentFeatureStats feat = RecentFeatureStats.of(digits);
         BiasSeedCorrector seeds = BiasSeedCorrector.of(compares);
         HitRankStats hitRank = HitRankStats.of(digits);
-        if (CURRENT_KIND == GameKind.PL3) {
+        if (pl3) {
             // 排三：默认带与统计带取并集，扩大覆盖（近500期消融直选 88→103）
             RANK_BAND_LO = Math.min(hitRank.bandLo, RANK_BAND_LO);
             RANK_BAND_HI = Math.max(hitRank.bandHi, RANK_BAND_HI);
@@ -109,6 +122,9 @@ public final class RuleBasedPredictUtils {
             RANK_BAND_LO = Math.max(hitRank.bandLo, RANK_BAND_LO);
             RANK_BAND_HI = Math.min(hitRank.bandHi, RANK_BAND_HI);
         }
+        // 元调参：干旱时略扩名次带（在 profile∩统计 之后）
+        RANK_BAND_LO = Math.max(1, RANK_BAND_LO + meta.rankBandLoDelta);
+        RANK_BAND_HI = Math.min(10, RANK_BAND_HI + meta.rankBandHiDelta);
         if (RANK_BAND_LO > RANK_BAND_HI) {
             RANK_BAND_LO = hitRank.bandLo;
             RANK_BAND_HI = hitRank.bandHi;
@@ -130,8 +146,9 @@ public final class RuleBasedPredictUtils {
 
         // 按走势动态微调配额
         adjustQuotasByShape(shapeProb);
-        // 命中率优先：根据近窗对比连挂，小幅抬升覆盖配额（不改打分主链路）
+        // 命中率优先：近窗连挂小幅抬升 + 元调参干旱配额（可过拟合注入）
         applyMissStreakQuotaBoost(streakCompares);
+        applyMetaQuotaBoost(meta);
 
         List<int[]> selected = selectGroupFirst(digits, scores, topPos, feat, seeds);
         if (selected == null || selected.size() < MIN_BET) {
@@ -144,19 +161,33 @@ public final class RuleBasedPredictUtils {
         }
 
         selected = applyBiasCorrectTickets(selected, scores, feat, seeds);
-        if (CURRENT_KIND == GameKind.PL3) {
+        if (pl3) {
             if (TUNE_SCATTER <= 0) {
-                TUNE_SCATTER = 70;
+                TUNE_SCATTER = 70 + meta.pl3ScatterBoost;
             }
             if (TUNE_EXPAND <= 0) {
-                TUNE_EXPAND = 22;
+                TUNE_EXPAND = 22 + meta.pl3ExpandBoost;
             }
             selected = fillWithTopGroupPerms(selected, scores, feat);
             // 已有约70散组时仍继续用多余排列换更高覆盖的新组
-            int needGroups = TARGET_BET >= 200 ? 110 : 95;
+            int needGroups = TARGET_BET >= 200 ? 110 + Math.min(20, meta.groupUniqueBoost / 2) : 95;
             selected = ensureGroupCoverageKeepPerms(selected, scores, feat, needGroups, 2);
             TUNE_SCATTER = 0;
             TUNE_EXPAND = 0;
+        }
+
+        // 先截断到目标注数，再重排——避免「先重排再截断」改变票集、回撤直选覆盖
+        if (selected.size() > TARGET_BET) {
+            selected = new ArrayList<>(selected.subList(0, TARGET_BET));
+        }
+        // 位次前移：保留选号原序，仅有限上浮过拟合/转移全号票
+        selected = rerankPromoteEarlierHits(selected, feat, overfitPool);
+
+        // 极端 L3 才尾部注入（收紧后通常为 0）
+        if (meta.overfitInject > 0 && overfitPool != null && !overfitPool.isBlank()) {
+            selected = injectOverfitTickets(selected, overfitPool, meta.overfitInject);
+            log.info("{} 过拟合注入{}注 → 大底共{}注 drought=L{}",
+                    CURRENT_KIND, meta.overfitInject, selected.size(), meta.droughtLevel);
         }
 
         StringBuilder sb = new StringBuilder();
@@ -169,8 +200,150 @@ public final class RuleBasedPredictUtils {
             sb.append(t[0]).append(t[1]).append(t[2]);
         }
         String result = sb.toString();
-        log.info("{} 规则预测结果(≤{}注): {}", CURRENT_KIND, TARGET_BET, result);
+        log.info("{} 规则预测结果(≤{}注) meta={}", CURRENT_KIND, TARGET_BET, meta.describe());
         return result;
+    }
+
+    /**
+     * 把强信号票推到大底前部（不增删票集）。
+     * <p>
+     * 选号管线的天然顺序对命中名次已优于纯 ticketScore 重排；这里<strong>保留原序</strong>，
+     * 仅把过拟合相交 / 转移全号票稳定上浮到更前位置。
+     */
+    private static List<int[]> rerankPromoteEarlierHits(List<int[]> selected, RecentFeatureStats feat,
+                                                        String overfitPool) {
+        if (selected == null || selected.isEmpty()) {
+            return selected;
+        }
+        Set<String> of = new LinkedHashSet<>();
+        if (overfitPool != null && !overfitPool.isBlank()) {
+            for (int[] t : parseTicketList(overfitPool)) {
+                of.add("" + t[0] + t[1] + t[2]);
+            }
+        }
+        java.util.Map<String, Integer> nextFullW = new java.util.HashMap<>();
+        for (int i = 0; i < feat.nextFullCount; i++) {
+            int[] nf = feat.nextFullCodes[i];
+            nextFullW.put("" + nf[0] + nf[1] + nf[2], nf[3]);
+        }
+
+        // 原序键 = 下标；信号票向前「挪」有限格，避免整段插到最前挤坏天然靠前的命中
+        final int OF_SHIFT = 90;
+        final int NF_SHIFT = 45;
+        List<int[]> keyed = new ArrayList<>(selected.size());
+        int ofHit = 0;
+        int nfHit = 0;
+        for (int i = 0; i < selected.size(); i++) {
+            int[] t = selected.get(i);
+            String key = "" + t[0] + t[1] + t[2];
+            int shift = 0;
+            if (of.contains(key)) {
+                shift += OF_SHIFT;
+                ofHit++;
+            }
+            if (nextFullW.containsKey(key)) {
+                shift += NF_SHIFT;
+                nfHit++;
+            }
+            keyed.add(new int[]{t[0], t[1], t[2], i - shift, i});
+        }
+        keyed.sort((a, b) -> {
+            int c = Integer.compare(a[3], b[3]);
+            return c != 0 ? c : Integer.compare(a[4], b[4]);
+        });
+        List<int[]> out = new ArrayList<>(keyed.size());
+        for (int[] s : keyed) {
+            out.add(new int[]{s[0], s[1], s[2]});
+        }
+        log.info("位次前移: n={} overfit相交={} 转移全号={} shift={}/{}",
+                out.size(), ofHit, nfHit, OF_SHIFT, NF_SHIFT);
+        return out;
+    }
+
+    /** 元调参配额：在连挂抬升之后再叠加，上限按彩种钳制 */
+    private static void applyMetaQuotaBoost(HitRateMetaTuner.Snapshot meta) {
+        if (meta == null) {
+            return;
+        }
+        if (meta.groupUniqueBoost <= 0 && meta.pairQuotaBoost <= 0 && meta.permExpandBoost <= 0) {
+            return;
+        }
+        int groupCap = CURRENT_KIND == GameKind.PL3 ? 125 : 110;
+        int pairCap = CURRENT_KIND == GameKind.PL3 ? 28 : 50;
+        int permCap = CURRENT_KIND == GameKind.PL3 ? 50 : 75;
+        GROUP_UNIQUE_TARGET = Math.min(groupCap, GROUP_UNIQUE_TARGET + meta.groupUniqueBoost);
+        PAIR_GROUP_QUOTA = Math.min(pairCap, PAIR_GROUP_QUOTA + meta.pairQuotaBoost);
+        PERM_EXPAND_GROUPS = Math.min(permCap, PERM_EXPAND_GROUPS + meta.permExpandBoost);
+        log.info("元调参配额 → 散组={} 组三={} 排列展开={} drought=L{}",
+                GROUP_UNIQUE_TARGET, PAIR_GROUP_QUOTA, PERM_EXPAND_GROUPS, meta.droughtLevel);
+    }
+
+    /**
+     * 把过拟合池直选接到大底<strong>尾部</strong>（保序去重），挤掉末尾弱票，保持 ≤TARGET_BET。
+     * 仅极端干旱启用且注数很少，避免冲掉前部标定高分直选。
+     */
+    private static List<int[]> injectOverfitTickets(List<int[]> selected, String overfitPool, int inject) {
+        if (selected == null || selected.isEmpty() || inject <= 0) {
+            return selected;
+        }
+        List<int[]> of = parseTicketList(overfitPool);
+        if (of.isEmpty()) {
+            return selected;
+        }
+        LinkedHashSet<String> used = new LinkedHashSet<>();
+        List<int[]> out = new ArrayList<>(TARGET_BET);
+        for (int[] t : selected) {
+            String key = "" + t[0] + t[1] + t[2];
+            if (used.add(key)) {
+                out.add(t);
+            }
+        }
+        int taken = 0;
+        for (int[] t : of) {
+            if (taken >= inject) {
+                break;
+            }
+            String key = "" + t[0] + t[1] + t[2];
+            if (!used.add(key)) {
+                continue;
+            }
+            if (out.size() >= TARGET_BET) {
+                out.remove(out.size() - 1);
+            }
+            out.add(t);
+            taken++;
+        }
+        if (out.size() > TARGET_BET) {
+            return new ArrayList<>(out.subList(0, TARGET_BET));
+        }
+        return out;
+    }
+
+    private static List<int[]> parseTicketList(String csv) {
+        List<int[]> list = new ArrayList<>();
+        if (csv == null || csv.isBlank()) {
+            return list;
+        }
+        for (String p : csv.split(",")) {
+            String t = p.trim();
+            while (t.length() < 3) {
+                t = "0" + t;
+            }
+            if (t.length() > 3) {
+                t = t.substring(t.length() - 3);
+            }
+            if (t.length() != 3) {
+                continue;
+            }
+            int a = t.charAt(0) - '0';
+            int b = t.charAt(1) - '0';
+            int c = t.charAt(2) - '0';
+            if (a < 0 || a > 9 || b < 0 || b > 9 || c < 0 || c > 9) {
+                continue;
+            }
+            list.add(new int[]{a, b, c});
+        }
+        return list;
     }
 
     /** 3D / 排三专项参数（面向近100期：直选≥20、组选≥50） */

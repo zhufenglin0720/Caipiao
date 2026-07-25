@@ -114,7 +114,11 @@ public final class Overfit20PredictUtils {
                 {12, 45, 10},
                 {15, 50, 10},
                 {20, 60, 12},
-                {8, 35, 8}
+                {8, 35, 8},
+                // 干旱候选：更宽带/更多取样（短窗过拟合）
+                {6, 55, 14},
+                {15, 70, 16},
+                {5, 45, 12}
         };
         int bestLo = bands[0][0], bestHi = bands[0][1], bestTake = bands[0][2];
         double bestBandScore = Double.NEGATIVE_INFINITY;
@@ -142,14 +146,24 @@ public final class Overfit20PredictUtils {
             }
         }
 
-        CoverSpec cover = selectCover(window, topN, bestLo, bestHi, bestTake, posM);
-        List<String> directs = buildTicketPool(window, topN, bestLo, bestHi, bestTake, posM, cover);
+        // 近窗组命中枯竭：抬直选上限 + 扩 cover 额外组搜索
+        boolean drought = bestEh == 0;
+        int ticketCap = drought ? 40 : MAX_TICKETS;
+        int maxExtra = drought ? 5 : 3;
+        if (drought) {
+            topN = Math.min(9, topN + 1);
+            posM = Math.min(7, posM + 1);
+        }
+
+        CoverSpec cover = selectCover(window, topN, bestLo, bestHi, bestTake, posM, maxExtra);
+        List<String> directs = buildTicketPool(window, topN, bestLo, bestHi, bestTake, posM, cover, ticketCap);
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
                 : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
-                "topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s",
-                topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq, cover.label());
+                "topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s drought=%s cap=%d",
+                topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq, cover.label(),
+                drought, ticketCap);
         return new PredictResult(display, directs, tune);
     }
 
@@ -197,10 +211,15 @@ public final class Overfit20PredictUtils {
 
     /**
      * 动态 cover：始终保留 midlate-t0 核心组，再按近窗组命中下标拟合槽位并入额外组。
-     * 额外组数量在 {0,1,2,3} 中按近窗直选/组选因果择优——开奖后自动变，无需手改。
+     * 额外组数量按近窗直选/组选因果择优；干旱时可扩到 5——开奖后自动变，无需手改。
      */
     static CoverSpec selectCover(List<String> window, int topN, int bandLo, int bandHi,
                                  int bandTake, int posM) {
+        return selectCover(window, topN, bandLo, bandHi, bandTake, posM, 3);
+    }
+
+    static CoverSpec selectCover(List<String> window, int topN, int bandLo, int bandHi,
+                                 int bandTake, int posM, int maxExtra) {
         int start = Math.max(10, window.size() - COVER_META);
         List<List<String>> groupCache = new ArrayList<>();
         List<WinStats> statsCache = new ArrayList<>();
@@ -222,13 +241,14 @@ public final class Overfit20PredictUtils {
         int[] core = SLOT_TEMPLATES[0];
         int bestExtra = 0;
         double bestScore = Double.NEGATIVE_INFINITY;
-        for (int extra = 0; extra <= 3; extra++) {
+        int extraHi = Math.max(0, Math.min(5, maxExtra));
+        for (int extra = 0; extra <= extraHi; extra++) {
             double sc = 0;
             int zx = 0, gp = 0;
             for (int k = 0; k < groupCache.size(); k++) {
                 int[] fitted = slotsFromNorms(hitNorms.subList(0, k));
                 CoverSpec use = new CoverSpec(CoverKind.CORE_PLUS_FITTED, core, fitted, extra);
-                List<String> tickets = ticketsFromGroups(groupCache.get(k), statsCache.get(k), use);
+                List<String> tickets = ticketsFromGroups(groupCache.get(k), statsCache.get(k), use, MAX_TICKETS);
                 String actual = window.get(start + k);
                 double wt = Math.exp(-0.2 * (groupCache.size() - 1 - k));
                 if (isZxHit(tickets, actual)) {
@@ -240,8 +260,9 @@ public final class Overfit20PredictUtils {
                 }
             }
             double score = sc * 10 + zx * 12 + gp * 6;
-            // 同等分数偏好更少额外组（更稳）
-            if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && extra < bestExtra)) {
+            // 同等分数偏好更少额外组（更稳）；干旱时略偏好更多覆盖
+            boolean preferLess = extra < bestExtra;
+            if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && preferLess)) {
                 bestScore = score;
                 bestExtra = extra;
             }
@@ -295,9 +316,14 @@ public final class Overfit20PredictUtils {
     }
 
     static List<String> ticketsFromGroups(List<String> groups, WinStats stats, CoverSpec cover) {
+        return ticketsFromGroups(groups, stats, cover, MAX_TICKETS);
+    }
+
+    static List<String> ticketsFromGroups(List<String> groups, WinStats stats, CoverSpec cover, int maxTickets) {
         if (groups == null || groups.isEmpty()) {
             return List.of();
         }
+        int cap = maxTickets > 0 ? maxTickets : MAX_TICKETS;
         int[] coreSlots = cover.coreSlots != null ? cover.coreSlots : SLOT_TEMPLATES[0];
         List<String> core = slotsSelect(groups, coreSlots);
         if (core.isEmpty()) {
@@ -317,42 +343,47 @@ public final class Overfit20PredictUtils {
                 }
             }
             extras = new ArrayList<>(extraSet);
-            reserve = Math.min(extras.size() * 2, 6);
+            reserve = Math.min(extras.size() * 2, Math.max(6, cover.extraGroups * 2));
         }
-        List<String> tickets = roundRobinExpand(core, stats, MAX_TICKETS - reserve);
-        if (!extras.isEmpty() && tickets.size() < MAX_TICKETS) {
-            for (String t : roundRobinExpand(extras, stats, MAX_TICKETS - tickets.size())) {
+        List<String> tickets = roundRobinExpand(core, stats, cap - reserve);
+        if (!extras.isEmpty() && tickets.size() < cap) {
+            for (String t : roundRobinExpand(extras, stats, cap - tickets.size())) {
                 if (!tickets.contains(t)) {
                     tickets.add(t);
                 }
-                if (tickets.size() >= MAX_TICKETS) {
+                if (tickets.size() >= cap) {
                     break;
                 }
             }
         }
-        if (tickets.size() < MAX_TICKETS) {
+        if (tickets.size() < cap) {
             for (String t : expandGroups(groups, stats)) {
                 if (tickets.contains(t)) {
                     continue;
                 }
                 tickets.add(t);
-                if (tickets.size() >= MAX_TICKETS) {
+                if (tickets.size() >= cap) {
                     break;
                 }
             }
         }
-        return tickets.size() > MAX_TICKETS ? new ArrayList<>(tickets.subList(0, MAX_TICKETS)) : tickets;
+        return tickets.size() > cap ? new ArrayList<>(tickets.subList(0, cap)) : tickets;
     }
 
     /**
-     * 从大组池按动态 cover 压缩到 ≤30 注。
+     * 从大组池按动态 cover 压缩到 ≤maxTickets 注。
      */
     static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
                                         int bandTake, int posM, CoverSpec cover) {
+        return buildTicketPool(hist, topN, bandLo, bandHi, bandTake, posM, cover, MAX_TICKETS);
+    }
+
+    static List<String> buildTicketPool(List<String> hist, int topN, int bandLo, int bandHi,
+                                        int bandTake, int posM, CoverSpec cover, int maxTickets) {
         List<String> win = hist.size() > WINDOW ? hist.subList(hist.size() - WINDOW, hist.size()) : hist;
         WinStats stats = WinStats.of(win);
         List<String> groups = buildGroupPool(win, topN, bandLo, bandHi, bandTake, posM, MAX_GROUPS);
-        return ticketsFromGroups(groups, stats, cover);
+        return ticketsFromGroups(groups, stats, cover, maxTickets);
     }
 
     /** 默认入口：内部自动选 cover */

@@ -55,14 +55,21 @@ public class GlobalJob {
 
     @Scheduled(cron = "0 40 18 * * ?")
     public void applyTask() throws MessagingException, InterruptedException {
-        // 1) 算出≤200注  2) 组选去重后落盘  3) 邮件10注基于原始200注（回测直选更高）
-        // 4) 近20期过拟合组合：窗内因果自动调 cover/槽位后落盘（仅页面，不发邮件）
-        // 5) 胆码：仅落盘供页面展示，不发邮件
-        String raw200 = RuleBasedPredictUtils.get3dPredict();
+        // 1) 近20期过拟合（干旱自动扩 cap/cover）
+        // 2) 元调参驱动≤200注大底（连挂时注入过拟合）
+        // 3) 组选去重落盘  4) 邮件10注：干旱时优先过拟合槽+动态密集带
+        // 5) 胆码仅落盘
+        Overfit20PredictUtils.PredictResult sdOf =
+                Overfit20PredictUtils.predictResult(HmCache.getSdCache());
+        String sdOverfitPool = sdOf.poolCsv();
+        System.out.println("过拟合[3D] " + sdOf.tune);
+        String raw200 = RuleBasedPredictUtils.predict(
+                HmCache.getSdCache(), HmCache.getSdCompareCache(),
+                RuleBasedPredictUtils.GameKind.SD_3D, sdOverfitPool);
         String sdDadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         String zuSan = RecommendBetUtils.extractZuSanGroups(sdDadi);
-        String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache());
-        String sdOverfitPool = Overfit20PredictUtils.get3dPool();
+        String sdRecommend = RecommendBetUtils.pickRecommendBets(
+                raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
         String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
         if (StrUtil.isNotBlank(sdDadi)) {
             HmCache.addSdCompareCache(new HmCache.CompareDto()
@@ -74,11 +81,17 @@ public class GlobalJob {
                     .setAiZuSanHm(zuSan));
         }
 
-        raw200 = RuleBasedPredictUtils.getPl3Predict();
+        Overfit20PredictUtils.PredictResult pl3Of =
+                Overfit20PredictUtils.predictResult(HmCache.getPl3Cache());
+        String pl3OverfitPool = pl3Of.poolCsv();
+        System.out.println("过拟合[排列三] " + pl3Of.tune);
+        raw200 = RuleBasedPredictUtils.predict(
+                HmCache.getPl3Cache(), HmCache.getPl3CompareCache(),
+                RuleBasedPredictUtils.GameKind.PL3, pl3OverfitPool);
         String pl3Dadi = RecommendBetUtils.dedupeByGroupKeepFirst(raw200);
         zuSan = RecommendBetUtils.extractZuSanGroups(pl3Dadi);
-        String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache());
-        String pl3OverfitPool = Overfit20PredictUtils.getPl3Pool();
+        String pl3Recommend = RecommendBetUtils.pickRecommendBets(
+                raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
         String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
         if (StrUtil.isNotBlank(pl3Dadi)) {
             HmCache.addPl3CompareCache(new HmCache.CompareDto()

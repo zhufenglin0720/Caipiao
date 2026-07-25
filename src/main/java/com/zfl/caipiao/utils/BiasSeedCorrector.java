@@ -154,6 +154,7 @@ final class BiasSeedCorrector {
     private static int[] closestBet(String aiHm, int[] real) {
         int[] best = null;
         int bestDist = Integer.MAX_VALUE;
+        int bestKey = Integer.MAX_VALUE;
         for (String p : aiHm.split(",")) {
             int[] bet = parse(p.trim());
             if (bet == null) {
@@ -164,8 +165,11 @@ final class BiasSeedCorrector {
                 int d = Math.abs(bet[pos] - real[pos]);
                 dist += Math.min(d, 10 - d);
             }
-            if (dist < bestDist) {
+            // 同距按号码字典序决胜，避免大底重排改变纠偏种子、回灌伤覆盖
+            int key = bet[0] * 100 + bet[1] * 10 + bet[2];
+            if (dist < bestDist || (dist == bestDist && key < bestKey)) {
                 bestDist = dist;
+                bestKey = key;
                 best = bet;
             }
         }
