@@ -60,7 +60,7 @@ public class GlobalJob {
         // 3) 组选去重落盘  4) 邮件10注：干旱时优先过拟合槽+动态密集带
         // 5) 胆码仅落盘
         Overfit20PredictUtils.PredictResult sdOf =
-                Overfit20PredictUtils.predictResult(HmCache.getSdCache());
+                Overfit20PredictUtils.predictResult(HmCache.getSdCache(), Overfit20PredictUtils.GameKind.SD);
         String sdOverfitPool = sdOf.poolCsv();
         System.out.println("过拟合[3D] " + sdOf.tune);
         String raw200 = RuleBasedPredictUtils.predict(
@@ -82,7 +82,7 @@ public class GlobalJob {
         }
 
         Overfit20PredictUtils.PredictResult pl3Of =
-                Overfit20PredictUtils.predictResult(HmCache.getPl3Cache());
+                Overfit20PredictUtils.predictResult(HmCache.getPl3Cache(), Overfit20PredictUtils.GameKind.PL3);
         String pl3OverfitPool = pl3Of.poolCsv();
         System.out.println("过拟合[排列三] " + pl3Of.tune);
         raw200 = RuleBasedPredictUtils.predict(
@@ -193,9 +193,9 @@ public class GlobalJob {
         // 开奖入库后预演下期过拟合：cover/槽位按近窗命中自动切换，无需手工改参
         try {
             Overfit20PredictUtils.PredictResult sdNext =
-                    Overfit20PredictUtils.predictResult(HmCache.getSdCache());
+                    Overfit20PredictUtils.predictResult(HmCache.getSdCache(), Overfit20PredictUtils.GameKind.SD);
             Overfit20PredictUtils.PredictResult pl3Next =
-                    Overfit20PredictUtils.predictResult(HmCache.getPl3Cache());
+                    Overfit20PredictUtils.predictResult(HmCache.getPl3Cache(), Overfit20PredictUtils.GameKind.PL3);
             System.out.println("过拟合动态调参预演[3D] tickets=" + sdNext.pool.size()
                     + " | " + sdNext.tune);
             System.out.println("过拟合动态调参预演[排列三] tickets=" + pl3Next.pool.size()

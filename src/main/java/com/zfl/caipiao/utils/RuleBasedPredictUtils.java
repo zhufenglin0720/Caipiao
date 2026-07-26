@@ -176,11 +176,13 @@ public final class RuleBasedPredictUtils {
             TUNE_EXPAND = 0;
         }
 
-        // 先截断到目标注数，再重排——避免「先重排再截断」改变票集、回撤直选覆盖
+        // 先截断到目标注数，再注入「单位置±1」邻号，最后重排
         if (selected.size() > TARGET_BET) {
             selected = new ArrayList<>(selected.subList(0, TARGET_BET));
         }
-        // 位次前移：保留选号原序，仅有限上浮过拟合/转移全号票
+        // 近失模式：只对高频近失名次带+过拟合展开邻号（见 reports/neighbor_seed_rank_dist.txt）
+        int neighborCap = CURRENT_KIND == GameKind.PL3 ? 28 : 16;
+        selected = injectSinglePosNeighbors(selected, scores, feat, overfitPool, neighborCap);
         selected = rerankPromoteEarlierHits(selected, feat, overfitPool);
 
         // 极端 L3 才尾部注入（收紧后通常为 0）
@@ -203,6 +205,9 @@ public final class RuleBasedPredictUtils {
         log.info("{} 规则预测结果(≤{}注) meta={}", CURRENT_KIND, TARGET_BET, meta.describe());
         return result;
     }
+
+    /** 回测消融：false 时关闭邻号注入 */
+    static volatile boolean ENABLE_NEIGHBOR_INJECT = true;
 
     /**
      * 把强信号票推到大底前部（不增删票集）。
@@ -258,6 +263,161 @@ public final class RuleBasedPredictUtils {
         log.info("位次前移: n={} overfit相交={} 转移全号={} shift={}/{}",
                 out.size(), ofHit, nfHit, OF_SHIFT, NF_SHIFT);
         return out;
+    }
+
+    /**
+     * 单位置±1邻号注入：对过拟合种子与大底靠前票展开邻号，按强度排序后替换尾部。
+     * <p>
+     * 动机：近窗多次出现「池内有 409、开奖 419」这类单差一位；邻号救援可覆盖大量未中期。
+     */
+    private static List<int[]> injectSinglePosNeighbors(List<int[]> selected, int[][] scores,
+                                                        RecentFeatureStats feat, String overfitPool,
+                                                        int maxInject) {
+        if (!ENABLE_NEIGHBOR_INJECT || selected == null || selected.isEmpty() || maxInject <= 0) {
+            return selected;
+        }
+        LinkedHashSet<String> have = new LinkedHashSet<>();
+        for (int[] t : selected) {
+            have.add(ticketKey(t));
+        }
+        Set<String> ofSeeds = new LinkedHashSet<>();
+        List<int[]> ofList = new ArrayList<>();
+        if (overfitPool != null && !overfitPool.isBlank()) {
+            for (int[] t : parseTicketList(overfitPool)) {
+                String k = ticketKey(t);
+                ofSeeds.add(k);
+                ofList.add(t);
+            }
+        }
+
+        // key -> [a,b,c,score]
+        java.util.Map<String, int[]> cands = new java.util.HashMap<>();
+        // 1) 过拟合种子邻号（最强，样本外也常能救）
+        for (int[] seed : ofList) {
+            addNeighborCands(cands, have, seed, 220, scores, feat);
+        }
+        // 2) 高频近失名次带（1-based），双峰：前簇 + 中后密度峰；不用整池
+        //    3D 全部近失种子：26-50 与 101-150 最密；最早中位~112
+        //    排三：76-125 最密；最早中位~92
+        int[][] bands = CURRENT_KIND == GameKind.PL3
+                ? new int[][]{{55, 130}}
+                : new int[][]{{25, 55}, {100, 155}};
+        int bandSeedN = 0;
+        for (int[] band : bands) {
+            int from = Math.max(0, band[0] - 1);
+            int to = Math.min(selected.size(), band[1]);
+            int mid = (band[0] + band[1]) / 2;
+            for (int i = from; i < to; i++) {
+                int[] seed = selected.get(i);
+                if (ofSeeds.contains(ticketKey(seed))) {
+                    continue;
+                }
+                int rank1 = i + 1;
+                int w = 75 + Math.max(0, 35 - Math.abs(rank1 - mid) / 2);
+                // 带内票分过低的不做种子，减少噪声邻号
+                if (ticketScore(seed, scores, feat) < 0) {
+                    w = Math.max(20, w / 2);
+                }
+                addNeighborCands(cands, have, seed, w, scores, feat);
+                bandSeedN++;
+            }
+        }
+        log.info("邻号种子带: {} ofSeeds={} bandSeeds={}",
+                CURRENT_KIND == GameKind.PL3 ? "55-130" : "25-55∪100-155",
+                ofList.size(), bandSeedN);
+        if (cands.isEmpty()) {
+            return selected;
+        }
+        List<int[]> ranked = new ArrayList<>(cands.values());
+        ranked.sort((a, b) -> Integer.compare(b[3], a[3]));
+        int take = Math.min(maxInject, ranked.size());
+        if (take <= 0) {
+            return selected;
+        }
+
+        List<int[]> out = new ArrayList<>(selected);
+        // 保护头部；在尾部中优先替换 ticketScore 最低者
+        int protectHead = Math.min(out.size(), CURRENT_KIND == GameKind.PL3 ? 40 : 60);
+        int[] weakScore = new int[out.size()];
+        for (int j = 0; j < out.size(); j++) {
+            weakScore[j] = ticketScore(out.get(j), scores, feat);
+        }
+        int replaced = 0;
+        for (int i = 0; i < take; i++) {
+            int[] n = ranked.get(i);
+            String nk = ticketKey(n);
+            if (have.contains(nk)) {
+                continue;
+            }
+            int victim = -1;
+            int victimSc = Integer.MAX_VALUE;
+            for (int j = protectHead; j < out.size(); j++) {
+                String vk = ticketKey(out.get(j));
+                if (ofSeeds.contains(vk)) {
+                    continue;
+                }
+                if (weakScore[j] < victimSc) {
+                    victimSc = weakScore[j];
+                    victim = j;
+                }
+            }
+            if (victim < 0) {
+                break;
+            }
+            have.remove(ticketKey(out.get(victim)));
+            out.set(victim, new int[]{n[0], n[1], n[2]});
+            have.add(nk);
+            weakScore[victim] = ticketScore(out.get(victim), scores, feat);
+            replaced++;
+        }
+        if (out.size() > TARGET_BET) {
+            out = new ArrayList<>(out.subList(0, TARGET_BET));
+        }
+        log.info("单位置±1邻号注入: 候选={} 替换={} cap={} protectHead={}",
+                cands.size(), replaced, maxInject, protectHead);
+        return out;
+    }
+
+    private static void addNeighborCands(java.util.Map<String, int[]> cands, Set<String> have,
+                                         int[] seed, int seedWeight, int[][] scores,
+                                         RecentFeatureStats feat) {
+        for (int[] n : singlePosPlusMinus1Neighbors(seed)) {
+            String nk = ticketKey(n);
+            if (have.contains(nk)) {
+                continue;
+            }
+            int sc = seedWeight + ticketScore(n, scores, feat) / 4;
+            // 被改动位：新数字位分越高越优先（更像「差一点就中」的修正）
+            for (int pos = 0; pos < 3; pos++) {
+                if (n[pos] != seed[pos]) {
+                    sc += scores[pos][n[pos]] / 3;
+                    sc += feat.digitBonus(pos, n[pos]);
+                }
+            }
+            int[] old = cands.get(nk);
+            if (old == null || sc > old[3]) {
+                cands.put(nk, new int[]{n[0], n[1], n[2], sc});
+            } else {
+                old[3] = Math.min(9999, old[3] + Math.max(6, seedWeight / 5));
+            }
+        }
+    }
+
+    /** 恰好改一个位置 ±1（模10）得到的 6 个邻号 */
+    static List<int[]> singlePosPlusMinus1Neighbors(int[] t) {
+        List<int[]> out = new ArrayList<>(6);
+        for (int pos = 0; pos < 3; pos++) {
+            for (int delta : new int[]{1, 9}) { // +1 / -1 mod10
+                int[] n = {t[0], t[1], t[2]};
+                n[pos] = (n[pos] + delta) % 10;
+                out.add(n);
+            }
+        }
+        return out;
+    }
+
+    private static String ticketKey(int[] t) {
+        return "" + t[0] + t[1] + t[2];
     }
 
     /** 元调参配额：在连挂抬升之后再叠加，上限按彩种钳制 */

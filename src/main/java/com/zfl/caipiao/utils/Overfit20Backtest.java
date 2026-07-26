@@ -11,10 +11,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 近 20 期过拟合组合 · 近 10 期逐期回测。
+ * 近 {@link Overfit20PredictUtils#WINDOW} 期过拟合 · 只回测近 {@link Overfit20PredictUtils#EVAL_PERIODS} 期。
  * <p>
- * 每期仅用该期之前近 20 期，预测前窗内因果校验自动调参（band / cover / 槽位模板）；
- * 命中按 ≤30 注组合池统计。达标：直选 ≥ 2 且 组选 ≥ 3。
+ * 每期仅用该期之前近窗开奖；从最新期往前 Java 动态调参（含单位置±1）；只推 {@link Overfit20PredictUtils#MAX_TICKETS} 组。
+ * 不做更长往期回测。达标：直选 ≥ {@link Overfit20PredictUtils#ZX_TARGET} 且 组选 ≥ {@link Overfit20PredictUtils#GROUP_TARGET}。
  */
 public final class Overfit20Backtest {
 
@@ -27,17 +27,20 @@ public final class Overfit20Backtest {
     public static void main(String[] args) throws Exception {
         muteLogs();
         StringBuilder sb = new StringBuilder();
-        sb.append("========== 近20期过拟合组合 · 近10期逐期回测 ==========\n");
+        sb.append("========== 近").append(Overfit20PredictUtils.WINDOW)
+                .append("期开奖过拟合 · 只回测近").append(Overfit20PredictUtils.EVAL_PERIODS)
+                .append("期（不做往期） ==========\n");
         sb.append("规则：每期仅用之前近").append(Overfit20PredictUtils.WINDOW)
-                .append("期；窗内因果自动调 band/cover/槽位；组合池≤")
+                .append("期开奖；从最新期往前、只在近").append(Overfit20PredictUtils.EVAL_PERIODS)
+                .append("期上动态调参（band/配额/预测单位置±1）；只推")
                 .append(Overfit20PredictUtils.MAX_TICKETS)
-                .append("注直选\n");
+                .append("组\n");
         sb.append("目标：直选≥").append(ZX_TARGET).append("、组选≥").append(GROUP_TARGET).append('\n');
-        sb.append("禁止硬编码开奖号码；开奖后无需手工改 cover/槽位。\n\n");
+        sb.append("禁止硬编码开奖号与写死 band/槽位表。\n\n");
 
-        Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), sb);
+        Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), Overfit20PredictUtils.GameKind.SD, sb);
         sb.append('\n');
-        Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(), sb);
+        Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(), Overfit20PredictUtils.GameKind.PL3, sb);
 
         sb.append("\n========== 汇总 ==========\n");
         sb.append(String.format(Locale.ROOT, "%-8s | 直选 | 组选 | 结果%n", "彩种"));
@@ -62,7 +65,7 @@ public final class Overfit20Backtest {
                 r.name, r.zx, r.n, r.group, r.n, r.pass ? "达标" : "未达标"));
     }
 
-    static Result runOne(String name, List<Hm> all, StringBuilder out) {
+    static Result runOne(String name, List<Hm> all, Overfit20PredictUtils.GameKind kind, StringBuilder out) {
         out.append("---------- ").append(name).append(" ----------\n");
         if (all == null || all.isEmpty()) {
             out.append("无数据\n");
@@ -78,14 +81,16 @@ public final class Overfit20Backtest {
         List<String> details = new ArrayList<>();
         long t0 = System.currentTimeMillis();
 
+        // 只评估最新近 eval 期，不做更长往期回测
         for (int i = all.size() - eval; i < all.size(); i++) {
             List<Hm> hist = all.subList(Math.max(0, i - Overfit20PredictUtils.WINDOW), i);
-            Overfit20PredictUtils.PredictResult pred = Overfit20PredictUtils.predictResult(hist);
+            Overfit20PredictUtils.PredictResult pred = Overfit20PredictUtils.predictResult(hist, kind);
             String actual = Overfit20PredictUtils.pad3(all.get(i).toString());
             String qh = all.get(i).getQh();
 
             boolean hitZx = Overfit20PredictUtils.isZxHit(pred.pool, actual);
             boolean hitGp = Overfit20PredictUtils.isGroupHit(pred.pool, actual);
+            boolean near = Overfit20PredictUtils.isPlusMinus1NearMiss(pred.pool, actual);
             if (hitZx) {
                 zx++;
             }
@@ -93,11 +98,11 @@ public final class Overfit20Backtest {
                 group++;
             }
             details.add(String.format(Locale.ROOT,
-                    "期号=%s 组合池(%d注)=%s 开奖=%s 直选=%s 组选=%s | %s",
+                    "期号=%s 组合池(%d注)=%s 开奖=%s 直选=%s 组选=%s ±1近失=%s | %s",
                     qh, pred.pool.size(),
-                    pred.pool.size() <= 8 ? pred.poolCsv() : pred.poolCsv().substring(0, Math.min(40, pred.poolCsv().length())) + "…",
+                    pred.poolCsv(),
                     actual,
-                    hitZx ? "是" : "否", hitGp ? "是" : "否",
+                    hitZx ? "是" : "否", hitGp ? "是" : "否", near ? "是" : "否",
                     pred.tune));
         }
 
