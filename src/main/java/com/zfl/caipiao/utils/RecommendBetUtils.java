@@ -57,6 +57,12 @@ public final class RecommendBetUtils {
         int[] quota = allocateQuota(history, n);
         double[] rankScores = scoreRanksForStratified(n, history);
         String lastReal = lastRealHm(history);
+        Set<String> banned = PrevPeriodDedup.ticketSet(PrevPeriodDedup.lastField(history, dto -> {
+            if (dto.getAiRecommendHm() != null && !dto.getAiRecommendHm().isBlank()) {
+                return dto.getAiRecommendHm();
+            }
+            return dto.getAiHm();
+        }));
         Set<String> overfitSet = new LinkedHashSet<>();
         if (overfitPool != null && !overfitPool.isBlank()) {
             overfitSet.addAll(parseBets(overfitPool));
@@ -79,6 +85,9 @@ public final class RecommendBetUtils {
                 }
             }
             if (rank < 1) {
+                continue;
+            }
+            if (banned.contains(bet)) {
                 continue;
             }
             String key = digitKey(bet);
@@ -151,7 +160,7 @@ public final class RecommendBetUtils {
                     continue;
                 }
                 String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3) {
+                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
                     continue;
                 }
                 String key = digitKey(bet);
@@ -168,7 +177,7 @@ public final class RecommendBetUtils {
                     break;
                 }
                 String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3) {
+                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
                     continue;
                 }
                 String key = digitKey(bet);
@@ -195,7 +204,7 @@ public final class RecommendBetUtils {
                     break;
                 }
                 String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3) {
+                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
                     continue;
                 }
                 String key = digitKey(bet);
@@ -208,6 +217,24 @@ public final class RecommendBetUtils {
             for (String bet : fillUniqueDigitSets(all, MAX_PICK)) {
                 if (picked.size() >= MAX_PICK) {
                     break;
+                }
+                if (banned.contains(bet)) {
+                    continue;
+                }
+                String key = digitKey(bet);
+                if (usedDigitKeys.add(key)) {
+                    picked.add(bet);
+                }
+            }
+        }
+        // 实在凑不齐才回退上期号，保证仍有 10 注
+        if (picked.size() < MIN_PICK) {
+            for (String bet : all) {
+                if (picked.size() >= MAX_PICK) {
+                    break;
+                }
+                if (bet == null || bet.length() != 3) {
+                    continue;
                 }
                 String key = digitKey(bet);
                 if (usedDigitKeys.add(key)) {

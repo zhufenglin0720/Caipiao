@@ -181,6 +181,7 @@ public final class RuleBasedDingWeiUtils {
         int[][] digits = toDigitMatrix(tail(history, Math.max(MAX_SAMPLE, needSample(profiles))));
         DrawHabit habit = DrawHabit.of(digits);
 
+        int[][] prev = lastDingWeiPick(compares);
         int[][] top7 = new int[3][TOP7];
         for (int pos = 0; pos < 3; pos++) {
             double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
@@ -188,6 +189,11 @@ public final class RuleBasedDingWeiUtils {
             for (int d = 0; d < 10; d++) {
                 score[d] += habit.posBonus(pos, d);
             }
+            // 强制上期同位 + 双侧邻号进候选，提高命中期数
+            int lastD = habit.last[pos];
+            score[lastD] += 36;
+            score[neighbor(lastD, 1)] += 18;
+            score[neighbor(lastD, -1)] += 18;
             // 排三：在原标定分上轻量抬邻号/中遗漏；干旱时倍率由元调参抬高
             if (gameKind == GameKind.PL3) {
                 applyPl3SoftHitBoost(digits, pos, score, meta.softNeighMul, meta.softOmitMul);
@@ -196,6 +202,9 @@ public final class RuleBasedDingWeiUtils {
                 applySoftNeighBoost(digits, pos, score, meta.softNeighMul);
             }
             top7[pos] = pickBandAwareTop7(score, tunes[pos]);
+            if (prev != null && PrevPeriodDedup.sameIntSet(top7[pos], prev[pos])) {
+                top7[pos] = rotateIfSame(top7[pos], score);
+            }
             log.info("七码定位[{}] {} Top7={} 命中带{}-{} (base{}-{})", gameKind, posName(pos),
                     Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi,
                     baseTunes[pos].bandLo, baseTunes[pos].bandHi);
@@ -350,6 +359,55 @@ public final class RuleBasedDingWeiUtils {
         int n = 0;
         for (int d : set) {
             out[n++] = d;
+        }
+        return out;
+    }
+
+    private static int[] rotateIfSame(int[] keep, double[] score) {
+        boolean[] used = new boolean[10];
+        for (int d : keep) {
+            used[d] = true;
+        }
+        int best = -1;
+        double bestSc = Double.NEGATIVE_INFINITY;
+        for (int d = 0; d < 10; d++) {
+            if (used[d]) {
+                continue;
+            }
+            if (score[d] > bestSc) {
+                bestSc = score[d];
+                best = d;
+            }
+        }
+        if (best < 0) {
+            return keep;
+        }
+        int[] out = Arrays.copyOf(keep, keep.length);
+        out[out.length - 1] = best;
+        return out;
+    }
+
+    private static int[][] lastDingWeiPick(List<HmCache.CompareDto> compares) {
+        String raw = PrevPeriodDedup.lastField(compares, HmCache.CompareDto::getAiDingWeiHm);
+        String[] parts = parseParts(raw);
+        if (parts == null) {
+            return null;
+        }
+        int[][] out = new int[3][];
+        for (int p = 0; p < 3; p++) {
+            String[] toks = parts[p].split(",");
+            int[] arr = new int[toks.length];
+            int n = 0;
+            for (String t : toks) {
+                String s = t.trim();
+                if (s.matches("\\d")) {
+                    arr[n++] = s.charAt(0) - '0';
+                }
+            }
+            if (n == 0) {
+                return null;
+            }
+            out[p] = Arrays.copyOf(arr, n);
         }
         return out;
     }

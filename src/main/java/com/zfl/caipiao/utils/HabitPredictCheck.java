@@ -25,6 +25,8 @@ public final class HabitPredictCheck {
         fail += check("胆码两期不同", danMaChanges(codes));
         fail += check("七码含上期同位或邻号", dingWeiNearLast(codes));
         fail += check("过拟合含近3期本体或邻号", overfitNearRecent(codes));
+        fail += check("过拟合150组", overfitSize150(codes));
+        fail += check("过拟合剔除上期原号", overfitDropsPrev(codes));
         fail += check("习惯分重号>豹子", habitPrefersChong());
         if (fail > 0) {
             System.err.println("FAILED " + fail);
@@ -92,6 +94,32 @@ public final class HabitPredictCheck {
         }
         System.out.println("overfit pool head=" + r.pool.subList(0, Math.min(8, r.pool.size())));
         return false;
+    }
+
+    private static boolean overfitSize150(List<String> codes) {
+        Overfit20PredictUtils.PredictResult r =
+                Overfit20PredictUtils.predictResult(toHm(codes), Overfit20PredictUtils.GameKind.PL3);
+        System.out.println("overfit size=" + r.pool.size() + " cap=" + Overfit20PredictUtils.MAX_TICKETS);
+        return r.pool.size() == Overfit20PredictUtils.MAX_TICKETS;
+    }
+
+    private static boolean overfitDropsPrev(List<String> codes) {
+        Overfit20PredictUtils.PredictResult a =
+                Overfit20PredictUtils.predictResult(toHm(codes), Overfit20PredictUtils.GameKind.PL3);
+        List<String> next = new ArrayList<>(codes);
+        next.add("135");
+        List<HmCache.CompareDto> cmp = List.of(new HmCache.CompareDto().setAiOverfitHm(a.poolCsv()));
+        Overfit20PredictUtils.PredictResult b =
+                Overfit20PredictUtils.predictResult(toHm(next), Overfit20PredictUtils.GameKind.PL3, cmp);
+        boolean same = PrevPeriodDedup.sameTicketSet(a.poolCsv(), b.poolCsv());
+        int overlap = 0;
+        for (String t : a.pool) {
+            if (b.pool.contains(t)) {
+                overlap++;
+            }
+        }
+        System.out.println("overfit overlap=" + overlap + "/" + a.pool.size() + " sameSet=" + same);
+        return !same && overlap < a.pool.size();
     }
 
     private static boolean habitPrefersChong() {

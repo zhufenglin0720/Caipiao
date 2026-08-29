@@ -58,7 +58,8 @@ public class GlobalJob {
         // 1) 过拟合（近窗习惯锚点） 2) 内部生成候选池仅供挑 10 注，不再落盘/展示 200 注大底
         // 3) 邮件/页面三码=10 注  4) 胆码仅落盘
         Overfit20PredictUtils.PredictResult sdOf =
-                Overfit20PredictUtils.predictResult(HmCache.getSdCache(), Overfit20PredictUtils.GameKind.SD);
+                Overfit20PredictUtils.predictResult(HmCache.getSdCache(), Overfit20PredictUtils.GameKind.SD,
+                        HmCache.getSdCompareCache());
         String sdOverfitPool = sdOf.poolCsv();
         System.out.println("过拟合[3D] " + sdOf.tune);
         String raw200 = RuleBasedPredictUtils.predict(
@@ -79,7 +80,8 @@ public class GlobalJob {
         }
 
         Overfit20PredictUtils.PredictResult pl3Of =
-                Overfit20PredictUtils.predictResult(HmCache.getPl3Cache(), Overfit20PredictUtils.GameKind.PL3);
+                Overfit20PredictUtils.predictResult(HmCache.getPl3Cache(), Overfit20PredictUtils.GameKind.PL3,
+                        HmCache.getPl3CompareCache());
         String pl3OverfitPool = pl3Of.poolCsv();
         System.out.println("过拟合[排列三] " + pl3Of.tune);
         raw200 = RuleBasedPredictUtils.predict(

@@ -33,10 +33,10 @@ public final class Overfit20PredictUtils {
     public static final int GROUP_COUNT = 5;
     /** 回测 / 因果调参只看近 10 期，不做往期回测 */
     public static final int EVAL_PERIODS = 10;
-    /** 只推直选注数上限 */
-    public static final int MAX_TICKETS = 50;
+    /** 只推直选注数上限（150 组） */
+    public static final int MAX_TICKETS = 150;
     /** 候选组形态上限（内部） */
-    public static final int MAX_GROUPS = 80;
+    public static final int MAX_GROUPS = 120;
     public static final int ZX_TARGET = 4;
     public static final int GROUP_TARGET = 3;
 
@@ -79,19 +79,19 @@ public final class Overfit20PredictUtils {
     }
 
     public static String get3dPredict() {
-        return predictResult(HmCache.getSdCache(), GameKind.SD).poolCsv();
+        return predictResult(HmCache.getSdCache(), GameKind.SD, HmCache.getSdCompareCache()).poolCsv();
     }
 
     public static String getPl3Predict() {
-        return predictResult(HmCache.getPl3Cache(), GameKind.PL3).poolCsv();
+        return predictResult(HmCache.getPl3Cache(), GameKind.PL3, HmCache.getPl3CompareCache()).poolCsv();
     }
 
     public static String get3dPool() {
-        return predictResult(HmCache.getSdCache(), GameKind.SD).poolCsv();
+        return predictResult(HmCache.getSdCache(), GameKind.SD, HmCache.getSdCompareCache()).poolCsv();
     }
 
     public static String getPl3Pool() {
-        return predictResult(HmCache.getPl3Cache(), GameKind.PL3).poolCsv();
+        return predictResult(HmCache.getPl3Cache(), GameKind.PL3, HmCache.getPl3CompareCache()).poolCsv();
     }
 
     /** 未指定彩种时按近窗组形态多样性粗分（建议显式传 {@link GameKind}） */
@@ -107,13 +107,20 @@ public final class Overfit20PredictUtils {
     }
 
     public static PredictResult predictResult(List<Hm> history, GameKind kind) {
+        return predictResult(history, kind, null);
+    }
+
+    public static PredictResult predictResult(List<Hm> history, GameKind kind,
+                                             List<HmCache.CompareDto> compares) {
         List<String> codes = toCodes(history);
         if (codes.isEmpty()) {
             return new PredictResult(List.of(), List.of(), "empty");
         }
         int from = Math.max(0, codes.size() - WINDOW);
         List<String> window = codes.subList(from, codes.size());
-        return predictWindow(window, kind == null ? GameKind.SD : kind);
+        Set<String> banned = PrevPeriodDedup.ticketSet(
+                PrevPeriodDedup.lastField(compares, HmCache.CompareDto::getAiOverfitHm));
+        return predictWindow(window, kind == null ? GameKind.SD : kind, banned);
     }
 
     /** 兼容旧调用：返回组合池 CSV（≤{@link #MAX_TICKETS}注） */
@@ -138,6 +145,10 @@ public final class Overfit20PredictUtils {
     }
 
     static PredictResult predictWindow(List<String> window, GameKind kind) {
+        return predictWindow(window, kind, Set.of());
+    }
+
+    static PredictResult predictWindow(List<String> window, GameKind kind, Set<String> banned) {
         if (window == null || window.isEmpty()) {
             return new PredictResult(List.of(), List.of(), "empty");
         }
@@ -186,29 +197,36 @@ public final class Overfit20PredictUtils {
         }
 
         CoverSpec cover = selectCover(win, topN, bestLo, bestHi, bestTake, posM, maxExtra);
-        // 策略头供 ±1 展开与画像学习
+        // 先多生成一些，去掉上期原号后再截到 150
+        int banN = banned == null ? 0 : banned.size();
+        int genCap = Math.min(280, ticketCap + Math.min(80, banN));
         List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover,
-                Math.max(40, ticketCap / 2));
+                Math.max(60, genCap / 2));
         PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
-        // 出号习惯：先钉近 3 期本体+邻号+换位，再补汉明展开（避免远锚把池拉飞）
-        LinkedHashSet<String> habitFirst = habitSeedPool(win, Math.min(18, ticketCap / 2));
+        LinkedHashSet<String> habitFirst = habitSeedPool(win, Math.min(48, genCap / 3));
         List<String> ham = kind == GameKind.PL3
-                ? buildPl3Ham1Pool(win, strategy, ticketCap)
-                : buildSdHam1Pool(win, strategy, ticketCap);
+                ? buildPl3Ham1Pool(win, strategy, genCap)
+                : buildSdHam1Pool(win, strategy, genCap);
         LinkedHashSet<String> merged = new LinkedHashSet<>(habitFirst);
         merged.addAll(ham);
-        List<String> directs = trimCap(merged, ticketCap);
+        List<String> extras = expandSinglePosNeighbors(new ArrayList<>(merged), genCap + 40);
+        List<String> directs = trimCap(merged, genCap);
+        if (ENABLE_NEIGHBOR_EXPAND && directs.size() < genCap) {
+            directs = expandSinglePosNeighbors(directs, genCap);
+        }
+        directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
         if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
             directs = expandSinglePosNeighbors(directs, ticketCap);
+            directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
         }
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
                 : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
                 "win=%d eval=%d kind=%s topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s "
-                        + "drought=%s cap=%d bands=%d pm1w=%.1f mode=habit+ham1",
+                        + "drought=%s cap=%d bands=%d pm1w=%.1f mode=habit+ham1 ban=%d",
                 win.size(), EVAL_PERIODS, kind, topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq,
-                cover.label(), drought, ticketCap, bands.size(), pm1.totalWeight());
+                cover.label(), drought, ticketCap, bands.size(), pm1.totalWeight(), banN);
         return new PredictResult(display, directs, tune);
     }
 
