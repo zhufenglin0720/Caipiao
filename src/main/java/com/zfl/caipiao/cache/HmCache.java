@@ -162,7 +162,7 @@ public class HmCache {
 
         private String qh;
 
-        /** 落盘/展示大底：组选形态去重后（同号不同序只留第一注） */
+        /** 三码 10 注（与推荐号一致；不再落盘 200 注大底） */
         private String aiHm;
 
         /** 原始≤200注大底（未去重），供邮件选号与命中位次统计 */

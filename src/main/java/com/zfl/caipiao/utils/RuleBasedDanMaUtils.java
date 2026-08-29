@@ -11,12 +11,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 胆码预测：百/十/个各输出 {@link #PER_POS} 码（3 码），按「对应位置命中」评估。
+ * 胆码：百/十/个各 {@link #PER_POS} 码，按对应位置命中评估。
  * <p>
- * 命中定义：开奖某位数字落在该位预测列表中（跨位不算）。
- * 选取：近窗因果比较「综合打分 Top3」与「自适应频次窗 Top3」的至少 1 位定位，
- * 择优输出（可拟合、无硬编码开奖号）。命中率优先。
- * 输出示例：{@code 百位:9,6,8 十位:2,0,3 个位:5,7,1}（仅页面展示，不发邮件）。
+ * 出号习惯：上期同位重号 + ±1 邻号 + 近 8 期热号/中遗漏轮换第 3 码。
+ * 跟期变化：上期号一变，三位候选必变；上期未中的码降权，避免连期同号。
  */
 @Slf4j
 public final class RuleBasedDanMaUtils {
@@ -26,13 +24,9 @@ public final class RuleBasedDanMaUtils {
         PL3
     }
 
-    /** 每位候选码数量 */
     public static final int PER_POS = 3;
-    /** 全局策略切换近窗（至少 1 位定位） */
-    public static final int SWITCH_META = 50;
-    /** 自适应频次窗的验证长度 */
-    public static final int FIT_VAL = 40;
-    private static final int[] FREQ_WINDOWS = {10, 12, 15, 18, 22, 25, 30, 35, 40, 50, 60};
+    public static final int SWITCH_META = 12;
+    public static final int FIT_VAL = 12;
     private static final int MIN_HISTORY = 30;
     private static final Pattern POS_PAT = Pattern.compile("([百十个])位[:：]([0-9,]+)");
 
@@ -51,165 +45,136 @@ public final class RuleBasedDanMaUtils {
         if (history == null || history.size() < MIN_HISTORY) {
             return "";
         }
-        // 与回测一致：不引入外部硬偏置，保持可拟合口径
-        int[][] pick = pickPositional(history);
+        int[][] pick = pickHabit(history, compares);
         String out = formatMulti(pick);
-        log.info("胆码预测[{}]: {} | perPos={} strategy=base-vs-fitFreq-switch meta={} val={}",
-                kind, out, PER_POS, SWITCH_META, FIT_VAL);
+        log.info("胆码预测[{}]: {} | habit last={} rotate-by-miss", kind, out,
+                history.get(history.size() - 1));
         return out;
     }
 
-    /** 回测入口：每位 Top-{@link #PER_POS} */
     static int[][] adaptCoverMulti(List<Hm> history, int ignoredVal) {
-        return pickPositional(history);
+        return pickHabit(history, null);
     }
 
-    /** 兼容旧单码接口：返回每位第一候选 */
     static int[] adaptCover(List<Hm> history, int val) {
         int[][] m = adaptCoverMulti(history, val);
         return new int[]{m[0][0], m[1][0], m[2][0]};
     }
 
-    /**
-     * 近 {@link #SWITCH_META} 期比较基础打分与自适应频次窗的至少 1 位定位，择优。
-     */
     static int[][] pickPositional(List<Hm> history) {
-        if (history.size() < MIN_HISTORY + SWITCH_META + FIT_VAL) {
-            return pickBase(history);
+        return pickHabit(history, null);
+    }
+
+    /** 每位：重号 / 邻号主码 / 近窗热或中遗漏轮换 */
+    static int[][] pickHabit(List<Hm> history, List<HmCache.CompareDto> compares) {
+        int[][] digits = toDigits(history);
+        DrawHabit habit = DrawHabit.of(digits);
+        int[][] prev = lastDanMaPick(compares);
+        int[][] out = new int[3][PER_POS];
+        for (int pos = 0; pos < 3; pos++) {
+            out[pos] = pickPos(habit, pos, prev == null ? null : prev[pos], digits.length);
         }
+        return out;
+    }
+
+    private static int[] pickPos(DrawHabit habit, int pos, int[] prevPick, int n) {
+        double[] s = new double[10];
+        int lastD = habit.last[pos];
+        for (int d = 0; d < 10; d++) {
+            s[d] = habit.posBonus(pos, d);
+            // 跟期：用期序把第 3 码拉开，避免连期同分锁死
+            s[d] += ((d * 7 + pos * 3 + n) % 10) * 0.08;
+        }
+        // 上期胆码未中的码降权，逼出新号
+        if (prevPick != null) {
+            for (int d : prevPick) {
+                if (d >= 0 && d <= 9 && d != lastD) {
+                    s[d] -= 4.5;
+                }
+            }
+        }
+        // 保证上期同位与较强邻号进前三
+        s[lastD] += 8;
+        int nbHi = habit.freq8[pos][(lastD + 1) % 10] >= habit.freq8[pos][(lastD + 9) % 10]
+                ? (lastD + 1) % 10 : (lastD + 9) % 10;
+        s[nbHi] += 5;
+
+        int[] top = topKDouble(s, PER_POS);
+        // 第 3 码：若与上期完全相同则换成次热中遗漏
+        if (prevPick != null && sameSet(top, prevPick)) {
+            int replace = rotateThird(habit, pos, top);
+            top[2] = replace;
+        }
+        return top;
+    }
+
+    private static int rotateThird(DrawHabit habit, int pos, int[] keep) {
+        boolean[] used = new boolean[10];
+        for (int d : keep) {
+            used[d] = true;
+        }
+        int best = -1;
+        int bestSc = Integer.MIN_VALUE;
+        for (int d = 0; d < 10; d++) {
+            if (used[d]) {
+                continue;
+            }
+            int sc = habit.freq8[pos][d] * 4;
+            int om = habit.omit[pos][d];
+            if (om >= 2 && om <= 6) {
+                sc += 6;
+            }
+            if (!habit.lastSet[d]) {
+                sc += 2;
+            }
+            if (sc > bestSc) {
+                bestSc = sc;
+                best = d;
+            }
+        }
+        return best < 0 ? (keep[2] + 1) % 10 : best;
+    }
+
+    private static boolean sameSet(int[] a, int[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+        int[] x = Arrays.copyOf(a, a.length);
+        int[] y = Arrays.copyOf(b, b.length);
+        Arrays.sort(x);
+        Arrays.sort(y);
+        return Arrays.equals(x, y);
+    }
+
+    private static int[][] lastDanMaPick(List<HmCache.CompareDto> compares) {
+        if (compares == null || compares.isEmpty()) {
+            return null;
+        }
+        for (int i = compares.size() - 1; i >= 0; i--) {
+            HmCache.CompareDto dto = compares.get(i);
+            if (dto == null || dto.getAiDanMaHm() == null || dto.getAiDanMaHm().isBlank()) {
+                continue;
+            }
+            return parseMulti(dto.getAiDanMaHm());
+        }
+        return null;
+    }
+
+    private static int[][] toDigits(List<Hm> history) {
         int n = history.size();
-        int from = Math.max(MIN_HISTORY + FIT_VAL, n - SWITCH_META);
-        int baseAny = 0;
-        int fitAny = 0;
-        for (int t = from; t < n; t++) {
-            List<Hm> sub = history.subList(0, t);
-            int[] act = digitsOf(history.get(t).toString());
-            if (isAnyPosHit(pickBase(sub), act)) {
-                baseAny++;
-            }
-            if (isAnyPosHit(pickFitFreq(sub), act)) {
-                fitAny++;
-            }
+        int[][] m = new int[n][3];
+        for (int i = 0; i < n; i++) {
+            m[i] = digitsOf(history.get(i).toString());
         }
-        return fitAny > baseAny ? pickFitFreq(history) : pickBase(history);
+        return m;
     }
 
     static int[][] pickBase(List<Hm> history) {
-        int[][] out = new int[3][PER_POS];
-        for (int pos = 0; pos < 3; pos++) {
-            out[pos] = topKDouble(scorePositionPositional(history, pos), PER_POS);
-        }
-        return out;
+        return pickHabit(history, null);
     }
 
     static int[][] pickFitFreq(List<Hm> history) {
-        int[][] out = new int[3][PER_POS];
-        for (int pos = 0; pos < 3; pos++) {
-            out[pos] = fitFreqWindow(history, pos);
-        }
-        return out;
-    }
-
-    static int[] fitFreqWindow(List<Hm> history, int pos) {
-        int n = history.size();
-        int from = Math.max(1, n - FIT_VAL);
-        int bestW = FREQ_WINDOWS[0];
-        int bestHit = -1;
-        for (int w : FREQ_WINDOWS) {
-            int hits = countFreqWindowHits(history, pos, w, from, n);
-            if (hits > bestHit) {
-                bestHit = hits;
-                bestW = w;
-            }
-        }
-        return topKFreq(history, pos, bestW);
-    }
-
-    /** 滑动窗口统计：频次 Top3 在 [from, n) 上的定位命中次数 */
-    private static int countFreqWindowHits(List<Hm> history, int pos, int w, int from, int n) {
-        int[] freq = new int[10];
-        int winStart = Math.max(0, from - w);
-        for (int i = winStart; i < from; i++) {
-            freq[digitsOf(history.get(i).toString())[pos]]++;
-        }
-        int hits = 0;
-        for (int t = from; t < n; t++) {
-            if (posContains(topKFromFreq(freq), digitsOf(history.get(t).toString())[pos])) {
-                hits++;
-            }
-            // 滑到以 t+1 为终点的近 w 窗
-            freq[digitsOf(history.get(t).toString())[pos]]++;
-            int newStart = Math.max(0, t + 1 - w);
-            while (winStart < newStart) {
-                freq[digitsOf(history.get(winStart).toString())[pos]]--;
-                winStart++;
-            }
-        }
-        return hits;
-    }
-
-    private static int[] topKFromFreq(int[] freq) {
-        double[] s = new double[10];
-        for (int d = 0; d < 10; d++) {
-            s[d] = freq[d];
-        }
-        return topKDouble(s, PER_POS);
-    }
-
-    static int[] topKFreq(List<Hm> history, int pos, int w) {
-        int[] freq = new int[10];
-        List<Hm> t = tail(history, w);
-        for (Hm x : t) {
-            freq[digitsOf(x.toString())[pos]]++;
-        }
-        return topKFromFreq(freq);
-    }
-
-    static double[] scorePositionPositional(List<Hm> history, int pos) {
-        double[] s = new double[10];
-        int[][] windows = {{12, 2}, {25, 3}, {40, 2}, {60, 1}};
-        for (int[] w : windows) {
-            List<Hm> t = tail(history, w[0]);
-            for (int i = 0; i < t.size(); i++) {
-                double wt = w[1] * (1.0 + 0.5 * Math.exp(-0.05 * (t.size() - 1 - i)));
-                s[digitsOf(t.get(i).toString())[pos]] += wt;
-            }
-        }
-
-        int[] last = digitsOf(history.get(history.size() - 1).toString());
-        int lastD = last[pos];
-        List<Hm> tm = tail(history, 70);
-        int[][] tr = new int[10][10];
-        for (int i = 1; i < tm.size(); i++) {
-            int prev = digitsOf(tm.get(i - 1).toString())[pos];
-            int cur = digitsOf(tm.get(i).toString())[pos];
-            tr[prev][cur]++;
-        }
-        for (int d = 0; d < 10; d++) {
-            s[d] += 2.0 * tr[lastD][d];
-        }
-
-        int n = Math.min(45, history.size());
-        List<Hm> to = tail(history, n);
-        int[] omit = new int[10];
-        Arrays.fill(omit, n);
-        for (int i = 0; i < to.size(); i++) {
-            omit[digitsOf(to.get(i).toString())[pos]] = to.size() - 1 - i;
-        }
-        double mean = 0;
-        for (int o : omit) {
-            mean += o;
-        }
-        mean /= 10.0;
-        for (int d = 0; d < 10; d++) {
-            s[d] += 2.2 / (1.0 + Math.abs(omit[d] - mean * 0.7));
-            if (omit[d] >= 2 && omit[d] <= 8) {
-                s[d] += 0.7;
-            }
-        }
-        s[(lastD + 1) % 10] += 0.35;
-        s[(lastD + 9) % 10] += 0.35;
-        return s;
+        return pickHabit(history, null);
     }
 
     static String formatMulti(int[][] pick) {
@@ -300,7 +265,6 @@ public final class RuleBasedDanMaUtils {
         return false;
     }
 
-    /** @deprecated 旧「号码集合相交」口径，保留兼容 */
     @Deprecated
     public static boolean isUnionHit(String danMa, String realHm) {
         return isAnyPosHit(danMa, realHm);
@@ -369,13 +333,6 @@ public final class RuleBasedDanMaUtils {
             out[i] = idx[i];
         }
         return out;
-    }
-
-    private static List<Hm> tail(List<Hm> list, int n) {
-        if (list.size() <= n) {
-            return list;
-        }
-        return list.subList(list.size() - n, list.size());
     }
 
     static int[] digitsOf(String s) {

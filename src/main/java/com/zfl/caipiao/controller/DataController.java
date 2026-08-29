@@ -2,7 +2,6 @@ package com.zfl.caipiao.controller;
 
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.Hm;
-import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.service.PnlService;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,9 +21,6 @@ import java.util.stream.Collectors;
 public class DataController {
 
     @Resource
-    private DadiService dadiService;
-
-    @Resource
     private PnlService pnlService;
 
     @GetMapping
@@ -35,15 +31,11 @@ public class DataController {
         List<Hm> pl3Cache = HmCache.getPl3Cache();
         List<HmCache.CompareDto> sdCompareCache = HmCache.getSdCompareCache();
         List<HmCache.CompareDto> pl3CompareCache = HmCache.getPl3CompareCache();
-        List<HmCache.DadiCompareDto> sdDadiCompareCache = HmCache.getSdDadiCompareCache();
-        List<HmCache.DadiCompareDto> pl3DadiCompareCache = HmCache.getPl3DadiCompareCache();
 
         result.put("sd", sdCache);
         result.put("pl3", pl3Cache);
         result.put("sdCompare", toCompareList(sdCompareCache));
         result.put("pl3Compare", toCompareList(pl3CompareCache));
-        result.put("sdDadiCompare", toDadiCompareList(sdDadiCompareCache));
-        result.put("pl3DadiCompare", toDadiCompareList(pl3DadiCompareCache));
 
         return result;
     }
@@ -154,83 +146,11 @@ public class DataController {
         return result;
     }
 
-    @PostMapping("/dadi")
-    public Map<String, Object> saveDadi(@RequestBody Map<String, String> body) {
-        Map<String, Object> result = new HashMap<>();
-        String type = body.get("type");
-        String model = body.get("model");
-        String numbers = body.get("numbers");
-        if (type == null || model == null || numbers == null) {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-        }
-        boolean is3D = "3d".equalsIgnoreCase(type);
-        if (!is3D && !"pl3".equalsIgnoreCase(type)) {
-            result.put("success", false);
-            result.put("message", "类型无效，请使用 3d 或 pl3");
-            return result;
-        }
-        try {
-            dadiService.saveDadi(is3D, model.toLowerCase(), numbers);
-            result.put("success", true);
-            result.put("message", "大底录入成功");
-        } catch (IllegalArgumentException e) {
-            result.put("success", false);
-            result.put("message", e.getMessage());
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("message", "保存失败：" + e.getMessage());
-        }
-        return result;
-    }
-
-    @PostMapping("/dadi/update")
-    public Map<String, Object> updateDadi(@RequestBody Map<String, Object> body) {
-        Map<String, Object> result = new HashMap<>();
-        String type = (String) body.get("type");
-        String model = (String) body.get("model");
-        String numbers = (String) body.get("numbers");
-        Object indexObj = body.get("index");
-        if (type == null || model == null || numbers == null || indexObj == null) {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-        }
-        boolean is3D = "3d".equalsIgnoreCase(type);
-        if (!is3D && !"pl3".equalsIgnoreCase(type)) {
-            result.put("success", false);
-            result.put("message", "类型无效，请使用 3d 或 pl3");
-            return result;
-        }
-        int index;
-        try {
-            index = Integer.parseInt(indexObj.toString());
-        } catch (NumberFormatException e) {
-            result.put("success", false);
-            result.put("message", "索引无效");
-            return result;
-        }
-        try {
-            dadiService.updateDadi(is3D, index, model.toLowerCase(), numbers);
-            result.put("success", true);
-            result.put("message", "大底修改成功");
-        } catch (IllegalArgumentException e) {
-            result.put("success", false);
-            result.put("message", e.getMessage());
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("message", "修改失败：" + e.getMessage());
-        }
-        return result;
-    }
-
     private List<Map<String, String>> toCompareList(List<HmCache.CompareDto> list) {
         return list.stream().map(dto -> {
             Map<String, String> map = new HashMap<>();
             map.put("qh", dto.getQh());
-            map.put("aiHm", dto.getAiHm());
-            map.put("aiRecommendHm", dto.getAiRecommendHm());
+            map.put("aiRecommendHm", firstRecommend(dto));
             map.put("aiOverfitHm", dto.getAiOverfitHm());
             map.put("aiDanMaHm", dto.getAiDanMaHm());
             map.put("aiZuSanHm", dto.getAiZuSanHm());
@@ -240,14 +160,30 @@ public class DataController {
         }).collect(Collectors.toList());
     }
 
-    private List<Map<String, String>> toDadiCompareList(List<HmCache.DadiCompareDto> list) {
-        return list.stream().map(dto -> {
-            Map<String, String> map = new HashMap<>();
-            map.put("qh", dto.getQh());
-            map.put("cursorDadiHm", dto.getCursorDadiHm());
-            map.put("customDadiHm", dto.getCustomDadiHm());
-            map.put("realHm", dto.getRealHm());
-            return map;
-        }).collect(Collectors.toList());
+    /** 页面只展示 10 注三码；旧 Excel 若只有大底字段则截前 10 注兼容 */
+    private static String firstRecommend(HmCache.CompareDto dto) {
+        if (dto.getAiRecommendHm() != null && !dto.getAiRecommendHm().isBlank()) {
+            return dto.getAiRecommendHm();
+        }
+        if (dto.getAiHm() == null || dto.getAiHm().isBlank()) {
+            return "";
+        }
+        String[] parts = dto.getAiHm().split(",");
+        StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (String p : parts) {
+            String t = p.trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            if (n > 0) {
+                sb.append(',');
+            }
+            sb.append(t);
+            if (++n >= 10) {
+                break;
+            }
+        }
+        return sb.toString();
     }
 }
