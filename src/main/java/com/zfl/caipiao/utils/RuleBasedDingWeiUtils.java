@@ -144,6 +144,14 @@ public final class RuleBasedDingWeiUtils {
     /** 排三命中率软加权（近500期消融：邻号1.2 + 中遗漏0.8 → 全中约202） */
     private static final double PL3_SOFT_NEIGH = 1.2;
     private static final double PL3_SOFT_OMIT_MID = 0.8;
+    /** 七码习惯分倍率：1=与原标定一致 */
+    static double HABIT_SCALE = 1.0;
+    /** 10=总是纳入上期同位 */
+    static int ENSURE_LAST_MAX_RANK = 10;
+    /** 上期其它位数字纳入该位七码（三位号码在每位七码中都出现） */
+    static boolean CROSS_LAST = true;
+    /** 上期同位未进七码时，邻号若已是高分则纳入；0=关闭 */
+    static int ENSURE_NEIGH_MAX_RANK = 0;
 
     private RuleBasedDingWeiUtils() {
     }
@@ -187,7 +195,7 @@ public final class RuleBasedDingWeiUtils {
             double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
             // 出号习惯：同位重号/邻号/近窗热号抬分，纠正「只拿中段名次」偏离
             for (int d = 0; d < 10; d++) {
-                score[d] += habit.posBonus(pos, d);
+                score[d] += habit.posBonus(pos, d) * HABIT_SCALE;
             }
             // 只保证上期同位进七码，不强行占满邻号以免挤掉标定热号
             // 排三：在原标定分上轻量抬邻号/中遗漏；干旱时倍率由元调参抬高
@@ -198,10 +206,10 @@ public final class RuleBasedDingWeiUtils {
                 applySoftNeighBoost(digits, pos, score, meta.softNeighMul);
             }
             top7[pos] = pickBandAwareTop7(score, tunes[pos]);
-            top7[pos] = ensureContains(top7[pos], habit.last[pos], score);
+            top7[pos] = applyHabitEnsures(top7[pos], pos, score, habit);
             if (prev != null && PrevPeriodDedup.sameIntSet(top7[pos], prev[pos])) {
                 top7[pos] = rotateIfSame(top7[pos], score);
-                top7[pos] = ensureContains(top7[pos], habit.last[pos], score);
+                top7[pos] = applyHabitEnsures(top7[pos], pos, score, habit);
             }
             log.info("七码定位[{}] {} Top7={} 命中带{}-{} (base{}-{})", gameKind, posName(pos),
                     Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi,
@@ -359,6 +367,62 @@ public final class RuleBasedDingWeiUtils {
             out[n++] = d;
         }
         return out;
+    }
+
+    private static int[] applyHabitEnsures(int[] pick, int pos, double[] score, DrawHabit habit) {
+        int[] out = ensureContainsIfStrong(pick, habit.last[pos], score, ENSURE_LAST_MAX_RANK);
+        if (CROSS_LAST) {
+            for (int o = 0; o < 3; o++) {
+                if (o != pos) {
+                    out = ensureContainsIfStrong(out, habit.last[o], score, ENSURE_LAST_MAX_RANK);
+                }
+            }
+        }
+        if (ENSURE_NEIGH_MAX_RANK > 0 && !containsDigit(out, habit.last[pos])) {
+            int d = habit.last[pos];
+            out = ensureContainsIfStrong(out, (d + 1) % 10, score, ENSURE_NEIGH_MAX_RANK);
+            out = ensureContainsIfStrong(out, (d + 9) % 10, score, ENSURE_NEIGH_MAX_RANK);
+        }
+        return out;
+    }
+
+    private static boolean containsDigit(int[] pick, int d) {
+        if (pick == null) {
+            return false;
+        }
+        for (int x : pick) {
+            if (x == d) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 指定数字仅在已是高分时纳入，避免用冷号挤掉标定七码 */
+    private static int[] ensureContainsIfStrong(int[] pick, int must, double[] score) {
+        return ensureContainsIfStrong(pick, must, score, ENSURE_LAST_MAX_RANK);
+    }
+
+    private static int[] ensureContainsIfStrong(int[] pick, int must, double[] score, int maxRank) {
+        if (pick == null) {
+            return pick;
+        }
+        for (int d : pick) {
+            if (d == must) {
+                return pick;
+            }
+        }
+        int better = 0;
+        for (int d = 0; d < 10; d++) {
+            if (score[d] > score[must] || (score[d] == score[must] && d < must)) {
+                better++;
+            }
+        }
+        int rank = better + 1;
+        if (maxRank <= 0 || rank > maxRank) {
+            return pick;
+        }
+        return ensureContains(pick, must, score);
     }
 
     /** 用末位换入指定数字（已在集合则不动） */

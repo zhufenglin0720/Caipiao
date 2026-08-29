@@ -6,9 +6,11 @@ import com.zfl.caipiao.cache.HmCache;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -34,6 +36,16 @@ public final class RecommendBetUtils {
     private static final int[] SEG_HI = {50, 100, 150, 200};
     /** 默认偏中后段（近窗大底直选命中常落 150+） */
     private static final int[] DEFAULT_QUOTA = {1, 2, 3, 4};
+    /** 习惯近票（上期换位/邻号/隔期组选）保留席位，与基线一致 */
+    static int HABIT_RESERVE = 3;
+    /** 过拟合号最多占槽，与基线一致 */
+    static int OF_MAX_SLOTS = 2;
+    /** 置顶大底第 1 名会换组，默认关闭以免掉组选 */
+    static boolean PIN_TOP1 = false;
+    /** 再纳入上几期开奖的组选换位（不含上期本体） */
+    static int RECENT_GRP = 0;
+    /** 同组内换成大底名次最高的排列，组选集合不变、直选可升 */
+    static boolean REALIGN_POOL_RANK = true;
 
     private RecommendBetUtils() {
     }
@@ -69,12 +81,25 @@ public final class RecommendBetUtils {
         List<String> picked = new ArrayList<>(MAX_PICK);
         Set<String> usedDigitKeys = new LinkedHashSet<>();
 
-        // 预留上期开奖换位 / ±1，提高组选命中期数
+        // 置顶大底第 1 名：模型直选最强票，且不占用上期开奖号
+        if (PIN_TOP1 && n >= 1) {
+            String top = all.get(0);
+            if (top != null && top.length() == 3 && !banned.contains(top)) {
+                usedDigitKeys.add(digitKey(top));
+                picked.add(top);
+                int seg = segmentOf(1);
+                if (seg >= 0 && quota[seg] > 0) {
+                    quota[seg]--;
+                }
+            }
+        }
+
+        // 预留上期开奖换位 / ±1 / 隔期组选，提高组选命中期数
         if (lastReal != null && lastReal.length() == 3) {
-            List<String> habitCands = habitNearTickets(lastReal, all);
+            List<String> habitCands = habitNearTickets(lastReal, all, history);
             int reserved = 0;
             for (String bet : habitCands) {
-                if (reserved >= 3 || picked.size() >= MAX_PICK) {
+                if (reserved >= HABIT_RESERVE || picked.size() >= MAX_PICK) {
                     break;
                 }
                 if (banned.contains(bet)) {
@@ -94,10 +119,10 @@ public final class RecommendBetUtils {
             }
         }
 
-        // 过拟合：大底内号最多占 2 槽（条件转化优先），从所在段扣配额
+        // 过拟合：大底内号最多占 OF_MAX_SLOTS 槽（条件转化优先），从所在段扣配额
         int ofSlots = 0;
         for (String bet : overfitSet) {
-            if (ofSlots >= 2 || picked.size() >= MAX_PICK) {
+            if (ofSlots >= OF_MAX_SLOTS || picked.size() >= MAX_PICK) {
                 break;
             }
             int rank = -1;
@@ -265,7 +290,32 @@ public final class RecommendBetUtils {
                 }
             }
         }
+        if (REALIGN_POOL_RANK) {
+            picked = realignToBestPoolRank(picked, all, banned);
+        }
         return String.join(",", picked.subList(0, Math.min(MAX_PICK, picked.size())));
+    }
+
+    /** 每组保留原组选，换成大底中出现最早的排列（直选更强，组选不变） */
+    static List<String> realignToBestPoolRank(List<String> picked, List<String> pool, Set<String> banned) {
+        Map<String, String> best = new LinkedHashMap<>();
+        if (pool != null) {
+            for (String t : pool) {
+                if (t == null || t.length() != 3 || (banned != null && banned.contains(t))) {
+                    continue;
+                }
+                best.putIfAbsent(digitKey(t), t);
+            }
+        }
+        List<String> out = new ArrayList<>(picked.size());
+        for (String p : picked) {
+            if (p == null || p.length() != 3) {
+                out.add(p);
+                continue;
+            }
+            out.add(best.getOrDefault(digitKey(p), p));
+        }
+        return out;
     }
 
     /**
@@ -682,19 +732,26 @@ public final class RecommendBetUtils {
         return null;
     }
 
-    /** 上期本体、换位、单位置±1 且落在大底内的候选 */
-    static List<String> habitNearTickets(String lastReal, List<String> pool) {
+    /** 上期换位、隔期组选、单位置±1 且落在大底内的候选（不含上期开奖本体） */
+    static List<String> habitNearTickets(String lastReal, List<String> pool,
+                                         List<HmCache.CompareDto> history) {
         LinkedHashSet<String> want = new LinkedHashSet<>();
         String last = pad3(lastReal);
         if (last.length() != 3) {
             return List.of();
         }
-        char[] c = last.toCharArray();
-        want.add("" + c[0] + c[2] + c[1]);
-        want.add("" + c[1] + c[0] + c[2]);
-        want.add("" + c[1] + c[2] + c[0]);
-        want.add("" + c[2] + c[0] + c[1]);
-        want.add("" + c[2] + c[1] + c[0]);
+        addPerms(want, last);
+        if (RECENT_GRP > 0 && history != null) {
+            int got = 0;
+            for (int i = history.size() - 2; i >= 0 && got < RECENT_GRP; i--) {
+                HmCache.CompareDto dto = history.get(i);
+                if (dto == null || StrUtil.isBlank(dto.getRealHm()) || dto.getRealHm().length() != 3) {
+                    continue;
+                }
+                addPerms(want, pad3(dto.getRealHm()));
+                got++;
+            }
+        }
         for (int p = 0; p < 3; p++) {
             for (int delta : new int[]{1, 9}) {
                 char[] n = last.toCharArray();
@@ -710,6 +767,18 @@ public final class RecommendBetUtils {
             }
         }
         return out;
+    }
+
+    private static void addPerms(Set<String> want, String code) {
+        if (code == null || code.length() != 3) {
+            return;
+        }
+        char[] c = code.toCharArray();
+        want.add("" + c[0] + c[2] + c[1]);
+        want.add("" + c[1] + c[0] + c[2]);
+        want.add("" + c[1] + c[2] + c[0]);
+        want.add("" + c[2] + c[0] + c[1]);
+        want.add("" + c[2] + c[1] + c[0]);
     }
 
     /** 贴近上期重号 / 邻号 / 中和值的票加分 */

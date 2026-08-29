@@ -35,8 +35,8 @@ public final class HitPeriod50Backtest {
         sb.append("三码=10注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
                 .append("组直/组  七码=三位全中  胆码=至少1位/三位全中\n");
         sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
-        sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期同位；")
-                .append("三码预留上期换位/邻号。目标=命中期数最多。\n\n");
+        sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期三位数字进各位；")
+                .append("三码同组改用大底最高排列。目标=命中期数最多。\n\n");
 
         Game sd = runOne("福彩3D", HistoryDataLoader.load3d(),
                 RuleBasedPredictUtils.GameKind.SD_3D,
@@ -62,7 +62,7 @@ public final class HitPeriod50Backtest {
                 sd.ofZx + pl3.ofZx, sd.ofGrp + pl3.ofGrp,
                 sd.dwFull + pl3.dwFull, sd.danAny + pl3.danAny, sd.danFull + pl3.danFull));
 
-        Path out = Path.of("reports/hitperiod_50.txt");
+        Path out = Path.of("reports/hitperiod_" + eval + ".txt");
         Files.createDirectories(out.getParent());
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
         sb.append("\n结果已写入: ").append(out.toAbsolutePath()).append('\n');
