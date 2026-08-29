@@ -34,7 +34,9 @@ public final class HitPeriod50Backtest {
         sb.append("========== 近").append(eval).append("期命中期数回测 ==========\n");
         sb.append("三码=10注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
                 .append("组直/组  七码=三位全中  胆码=至少1位/三位全中\n");
-        sb.append("去重：剔除与上一期完全一致的预测号码后再评估\n\n");
+        sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
+        sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期同位；")
+                .append("三码预留上期换位/邻号。目标=命中期数最多。\n\n");
 
         Game sd = runOne("福彩3D", HistoryDataLoader.load3d(),
                 RuleBasedPredictUtils.GameKind.SD_3D,

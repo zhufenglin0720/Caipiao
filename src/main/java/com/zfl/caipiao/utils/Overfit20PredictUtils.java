@@ -197,27 +197,30 @@ public final class Overfit20PredictUtils {
         }
 
         CoverSpec cover = selectCover(win, topN, bestLo, bestHi, bestTake, posM, maxExtra);
-        // 先多生成一些，去掉上期原号后再截到 150
         int banN = banned == null ? 0 : banned.size();
-        int genCap = Math.min(280, ticketCap + Math.min(80, banN));
         List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover,
-                Math.max(60, genCap / 2));
+                Math.max(60, ticketCap / 2));
         PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
-        LinkedHashSet<String> habitFirst = habitSeedPool(win, Math.min(48, genCap / 3));
+        // 3D 钉近 2 期全汉明1；排三只钉上期，避免占满池后跟飞号
+        LinkedHashSet<String> habitFirst = recentFullHam1(win, kind == GameKind.PL3 ? 1 : 2,
+                kind == GameKind.PL3 ? 32 : 64);
+        habitFirst.addAll(habitSeedPool(win, 48));
         List<String> ham = kind == GameKind.PL3
-                ? buildPl3Ham1Pool(win, strategy, genCap)
-                : buildSdHam1Pool(win, strategy, genCap);
+                ? buildPl3Ham1Pool(win, strategy, ticketCap)
+                : buildSdHam1Pool(win, strategy, ticketCap);
         LinkedHashSet<String> merged = new LinkedHashSet<>(habitFirst);
         merged.addAll(ham);
-        List<String> extras = expandSinglePosNeighbors(new ArrayList<>(merged), genCap + 40);
-        List<String> directs = trimCap(merged, genCap);
-        if (ENABLE_NEIGHBOR_EXPAND && directs.size() < genCap) {
-            directs = expandSinglePosNeighbors(directs, genCap);
-        }
-        directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
+        List<String> extras = expandSinglePosNeighbors(new ArrayList<>(merged), ticketCap + 40);
+        List<String> directs = trimCap(merged, ticketCap);
         if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
             directs = expandSinglePosNeighbors(directs, ticketCap);
+        }
+        // 仅当整池与上期完全相同才换号，避免误伤近窗热号
+        if (banned != null && !banned.isEmpty() && banned.equals(new LinkedHashSet<>(directs))) {
             directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
+        }
+        if (directs.size() < ticketCap) {
+            directs = PrevPeriodDedup.excludeTickets(directs, Set.of(), ticketCap, extras);
         }
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
@@ -313,6 +316,30 @@ public final class Overfit20PredictUtils {
         appendStratPm1(out, strategy, 3, cap);
         appendGroupPerms(out, window, cap);
         return trimCap(out, cap);
+    }
+
+    /** 近 ageN 期：本体 + 三位全汉明1（每期最多 28 注） */
+    static LinkedHashSet<String> recentFullHam1(List<String> window, int ageN, int cap) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (window == null || window.isEmpty() || cap <= 0) {
+            return out;
+        }
+        for (int age = 0; age < ageN && window.size() > age && out.size() < cap; age++) {
+            String seed = pad3(window.get(window.size() - 1 - age));
+            out.add(seed);
+            int[] d = {seed.charAt(0) - '0', seed.charAt(1) - '0', seed.charAt(2) - '0'};
+            for (int p = 0; p < 3 && out.size() < cap; p++) {
+                for (int v = 0; v < 10 && out.size() < cap; v++) {
+                    if (v == d[p]) {
+                        continue;
+                    }
+                    int[] n = {d[0], d[1], d[2]};
+                    n[p] = v;
+                    out.add("" + n[0] + n[1] + n[2]);
+                }
+            }
+        }
+        return out;
     }
 
     /** 近 3 期开奖本体 + 单位置±1 + 组选换位，贴近出号习惯 */

@@ -189,11 +189,7 @@ public final class RuleBasedDingWeiUtils {
             for (int d = 0; d < 10; d++) {
                 score[d] += habit.posBonus(pos, d);
             }
-            // 强制上期同位 + 双侧邻号进候选，提高命中期数
-            int lastD = habit.last[pos];
-            score[lastD] += 36;
-            score[neighbor(lastD, 1)] += 18;
-            score[neighbor(lastD, -1)] += 18;
+            // 只保证上期同位进七码，不强行占满邻号以免挤掉标定热号
             // 排三：在原标定分上轻量抬邻号/中遗漏；干旱时倍率由元调参抬高
             if (gameKind == GameKind.PL3) {
                 applyPl3SoftHitBoost(digits, pos, score, meta.softNeighMul, meta.softOmitMul);
@@ -202,8 +198,10 @@ public final class RuleBasedDingWeiUtils {
                 applySoftNeighBoost(digits, pos, score, meta.softNeighMul);
             }
             top7[pos] = pickBandAwareTop7(score, tunes[pos]);
+            top7[pos] = ensureContains(top7[pos], habit.last[pos], score);
             if (prev != null && PrevPeriodDedup.sameIntSet(top7[pos], prev[pos])) {
                 top7[pos] = rotateIfSame(top7[pos], score);
+                top7[pos] = ensureContains(top7[pos], habit.last[pos], score);
             }
             log.info("七码定位[{}] {} Top7={} 命中带{}-{} (base{}-{})", gameKind, posName(pos),
                     Arrays.toString(top7[pos]), tunes[pos].bandLo, tunes[pos].bandHi,
@@ -360,6 +358,29 @@ public final class RuleBasedDingWeiUtils {
         for (int d : set) {
             out[n++] = d;
         }
+        return out;
+    }
+
+    /** 用末位换入指定数字（已在集合则不动） */
+    private static int[] ensureContains(int[] pick, int must, double[] score) {
+        if (pick == null) {
+            return pick;
+        }
+        for (int d : pick) {
+            if (d == must) {
+                return pick;
+            }
+        }
+        int worst = 0;
+        double worstSc = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < pick.length; i++) {
+            if (score[pick[i]] < worstSc) {
+                worstSc = score[pick[i]];
+                worst = i;
+            }
+        }
+        int[] out = Arrays.copyOf(pick, pick.length);
+        out[worst] = must;
         return out;
     }
 

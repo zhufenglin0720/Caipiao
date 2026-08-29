@@ -71,6 +71,31 @@ public final class RecommendBetUtils {
         List<String> picked = new ArrayList<>(MAX_PICK);
         Set<String> usedDigitKeys = new LinkedHashSet<>();
 
+        // 预留上期开奖换位 / ±1，提高组选命中期数
+        if (lastReal != null && lastReal.length() == 3) {
+            List<String> habitCands = habitNearTickets(lastReal, all);
+            int reserved = 0;
+            for (String bet : habitCands) {
+                if (reserved >= 3 || picked.size() >= MAX_PICK) {
+                    break;
+                }
+                if (banned.contains(bet)) {
+                    continue;
+                }
+                String key = digitKey(bet);
+                if (!usedDigitKeys.add(key)) {
+                    continue;
+                }
+                picked.add(bet);
+                reserved++;
+                int rank = indexOfBet(String.join(",", all), bet);
+                int seg = segmentOf(rank);
+                if (seg >= 0 && quota[seg] > 0) {
+                    quota[seg]--;
+                }
+            }
+        }
+
         // 过拟合：大底内号最多占 2 槽（条件转化优先），从所在段扣配额
         int ofSlots = 0;
         for (String bet : overfitSet) {
@@ -657,6 +682,37 @@ public final class RecommendBetUtils {
             }
         }
         return null;
+    }
+
+    /** 上期本体、换位、单位置±1 且落在大底内的候选 */
+    static List<String> habitNearTickets(String lastReal, List<String> pool) {
+        LinkedHashSet<String> want = new LinkedHashSet<>();
+        String last = pad3(lastReal);
+        if (last.length() != 3) {
+            return List.of();
+        }
+        want.add(last);
+        char[] c = last.toCharArray();
+        want.add("" + c[0] + c[2] + c[1]);
+        want.add("" + c[1] + c[0] + c[2]);
+        want.add("" + c[1] + c[2] + c[0]);
+        want.add("" + c[2] + c[0] + c[1]);
+        want.add("" + c[2] + c[1] + c[0]);
+        for (int p = 0; p < 3; p++) {
+            for (int delta : new int[]{1, 9}) {
+                char[] n = last.toCharArray();
+                n[p] = (char) ('0' + ((n[p] - '0' + delta) % 10));
+                want.add(new String(n));
+            }
+        }
+        Set<String> have = new LinkedHashSet<>(pool);
+        List<String> out = new ArrayList<>();
+        for (String w : want) {
+            if (have.contains(w)) {
+                out.add(w);
+            }
+        }
+        return out;
     }
 
     /** 贴近上期重号 / 邻号 / 中和值的票加分 */
