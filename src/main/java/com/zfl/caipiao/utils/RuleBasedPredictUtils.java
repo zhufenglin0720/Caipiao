@@ -92,11 +92,11 @@ public final class RuleBasedPredictUtils {
         }
         applyGameProfile(kind == null ? GameKind.SD_3D : kind);
 
-        // 排三：历史对比纠偏会显著拉低近100期直选，评分与选号均不使用 compares
-        // 连挂/元调参仍可用 compares（只调配额、不进位分/纠偏种子）
+        // 排三：位分统计仍不读 compares（避免历史对比拉低直选）；纠偏种子改回启用
         List<HmCache.CompareDto> streakCompares = compares;
         boolean pl3 = CURRENT_KIND == GameKind.PL3;
         HitRateMetaTuner.Snapshot meta = HitRateMetaTuner.analyze(streakCompares, pl3);
+        List<HmCache.CompareDto> biasCompares = compares;
         if (pl3) {
             compares = null;
         }
@@ -109,7 +109,8 @@ public final class RuleBasedPredictUtils {
 
         logBiasDiagnostics(compares);
         RecentFeatureStats feat = RecentFeatureStats.of(digits);
-        BiasSeedCorrector seeds = BiasSeedCorrector.of(compares);
+        DrawHabit habit = DrawHabit.of(digits);
+        BiasSeedCorrector seeds = BiasSeedCorrector.of(biasCompares);
         HitRankStats hitRank = HitRankStats.of(digits);
         if (pl3) {
             // 排三：默认带与统计带取并集，扩大覆盖（近500期消融直选 88→103）
@@ -136,6 +137,9 @@ public final class RuleBasedPredictUtils {
         int[][] topPos = new int[3][TOP_N];
         for (int pos = 0; pos < 3; pos++) {
             scores[pos] = scoreAllDigits(digits, pos, compares, feat);
+            for (int d = 0; d < 10; d++) {
+                scores[pos][d] += habit.posBonus(pos, d);
+            }
             topPos[pos] = buildBandAwareTop(scores[pos], TOP_N);
             topPos[pos] = applyBiasSeedToTop(topPos[pos], pos, seeds, scores[pos]);
             log.info("位置{} 名次池{}(命中带{}-{})={}", posName(pos), TOP_N, RANK_BAND_LO, RANK_BAND_HI,
@@ -181,7 +185,7 @@ public final class RuleBasedPredictUtils {
             selected = new ArrayList<>(selected.subList(0, TARGET_BET));
         }
         // 近失模式：只对高频近失名次带+过拟合展开邻号（见 reports/neighbor_seed_rank_dist.txt）
-        int neighborCap = CURRENT_KIND == GameKind.PL3 ? 28 : 16;
+        int neighborCap = CURRENT_KIND == GameKind.PL3 ? 12 : 8;
         selected = injectSinglePosNeighbors(selected, scores, feat, overfitPool, neighborCap);
         selected = rerankPromoteEarlierHits(selected, feat, overfitPool);
 
@@ -1710,7 +1714,7 @@ public final class RuleBasedPredictUtils {
             } else if (r == RANK_BAND_LO - 1 || r == RANK_BAND_HI + 1) {
                 sum += 40;
             } else if (r == 1 || r == 2) {
-                sum += 8; // Top1/2 降权，不作为主组合
+                sum += 70; // 出号习惯：热号本身常开，不再刻意避开 Top1/2
             }
         }
         return sum;
@@ -1730,20 +1734,15 @@ public final class RuleBasedPredictUtils {
             } else if (r == RANK_BAND_LO - 1 || r == RANK_BAND_HI + 1) {
                 bonus += 12;
             } else if (r == 1) {
-                // 排三轻降权以保留高分组合；3D 维持较强降权
-                bonus -= (CURRENT_KIND == GameKind.PL3 ? 3 : 8);
+                bonus += 18;
             } else if (r == 2) {
-                bonus -= (CURRENT_KIND == GameKind.PL3 ? 1 : 2);
+                bonus += 12;
             } else {
-                bonus -= 6;
+                bonus -= 4;
             }
         }
         if (inRankBand(r0) && inRankBand(r1) && inRankBand(r2)) {
-            bonus += 60;
-        }
-        // 过热：三位都是前2名，近窗直选偏少
-        if (r0 <= 2 && r1 <= 2 && r2 <= 2) {
-            bonus -= 70;
+            bonus += 40;
         }
         return bonus;
     }
@@ -1770,8 +1769,7 @@ public final class RuleBasedPredictUtils {
     }
 
     /**
-     * 码池构造：优先放入名次带 3~8 的码，再补 2/9，最后才是 1/10。
-     * 保证输出不是「只拿排行最前几个」。
+     * 码池：先拿高分 Top（含上期重号/邻号），再补名次带，避免故意丢掉热号。
      */
     private static int[] buildBandAwareTop(int[] score, int n) {
         Integer[] order = new Integer[10];
@@ -1780,22 +1778,19 @@ public final class RuleBasedPredictUtils {
         }
         Arrays.sort(order, (a, b) -> Integer.compare(score[b], score[a]));
         LinkedHashSet<Integer> set = new LinkedHashSet<>();
-        // pass1: 共性带
+        // pass1: 真实高分前 4（出号习惯：热号常开）
+        for (int i = 0; i < 4 && set.size() < n; i++) {
+            set.add(order[i]);
+        }
+        // pass2: 共性带
         for (int i = 0; i < 10 && set.size() < n; i++) {
             int rank = i + 1;
             if (rank >= RANK_BAND_LO && rank <= RANK_BAND_HI) {
                 set.add(order[i]);
             }
         }
-        // pass2: 次边缘 2、9
-        for (int i : new int[]{1, 8}) {
-            if (set.size() >= n) {
-                break;
-            }
-            set.add(order[i]);
-        }
-        // pass3: Top1 / 最末
-        for (int i : new int[]{0, 9}) {
+        // pass3: 次边缘 / 末位
+        for (int i : new int[]{4, 5, 8, 9}) {
             if (set.size() >= n) {
                 break;
             }

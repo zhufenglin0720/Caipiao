@@ -764,7 +764,7 @@
             font-weight: 400;
         }
 
-        /* 200注大底 */
+        /* 过拟合组合弹窗（复用号码网格） */
         .dadi-preview {
             display: flex;
             flex-direction: column;
@@ -803,12 +803,6 @@
             gap: 6px;
             flex-wrap: wrap;
             justify-content: center;
-        }
-
-        .dadi-hit-pos {
-            font-weight: 700;
-            color: var(--success);
-            font-size: 14px;
         }
 
         .dadi-model-cell {
@@ -974,65 +968,6 @@
             border-color: var(--accent);
         }
 
-        .dadi-hit-seq-panel {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            padding: 10px 12px;
-            margin-bottom: 8px;
-            flex-shrink: 0;
-        }
-
-        .dadi-hit-seq-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            margin-bottom: 8px;
-            flex-wrap: wrap;
-        }
-
-        .dadi-hit-seq-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--accent-light);
-        }
-
-        .dadi-hit-seq-meta {
-            font-size: 11px;
-            color: var(--text-secondary);
-        }
-
-        .dadi-hit-seq-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            max-height: 120px;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        .dadi-hit-seq-item {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 32px;
-            height: 28px;
-            padding: 0 8px;
-            border-radius: 14px;
-            background: rgba(34, 197, 94, 0.15);
-            border: 1px solid rgba(34, 197, 94, 0.35);
-            color: var(--success);
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        .dadi-hit-seq-empty {
-            font-size: 12px;
-            color: var(--text-secondary);
-            font-style: italic;
-        }
-
         .dadi-num-item {
             position: relative;
             display: inline-flex;
@@ -1078,10 +1013,6 @@
         .dadi-num-item.hit .dadi-num-seq {
             background: #1a1a2e;
             color: var(--accent-light);
-        }
-
-        .table-container.dadi-mode tbody tr {
-            height: auto;
         }
 
         .dingwei-ball.highlight {
@@ -1628,9 +1559,6 @@
             .compare-tabs { width: 100%; }
             .compare-tab { flex: 1; text-align: center; padding: 7px 10px; font-size: 12px; }
             .qima-pos-panel { padding: 8px 10px; margin-bottom: 6px; }
-            .dadi-hit-seq-panel { padding: 8px 10px; margin-bottom: 6px; }
-            .dadi-hit-seq-list { max-height: 96px; gap: 5px; }
-            .dadi-hit-seq-item { min-width: 28px; height: 26px; font-size: 11px; padding: 0 6px; }
             .dadi-search-hint { flex-basis: 100%; font-size: 10px; }
             .dadi-search-row .dadi-search-count { margin-left: 0; width: 100%; }
             .qima-pos-summary { gap: 8px 12px; }
@@ -1701,18 +1629,10 @@
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">200注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="sd-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="sd-qima-pos-summary"></div>
-            </div>
-            <div class="dadi-hit-seq-panel" id="sd-dadi-hit-seq" style="display:none">
-                <div class="dadi-hit-seq-header">
-                    <span class="dadi-hit-seq-title">命中序号汇总</span>
-                    <span class="dadi-hit-seq-meta" id="sd-dadi-hit-seq-meta"></span>
-                </div>
-                <div class="dadi-hit-seq-list" id="sd-dadi-hit-seq-list"></div>
             </div>
             <div class="table-container fill-mode" id="sd-predict-table">
                 <table>
@@ -1837,18 +1757,10 @@
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
-                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">200注大底</button>
                 </div>
             </div>
             <div class="qima-pos-panel" id="pl3-qima-pos" style="display:none">
                 <div class="qima-pos-summary" id="pl3-qima-pos-summary"></div>
-            </div>
-            <div class="dadi-hit-seq-panel" id="pl3-dadi-hit-seq" style="display:none">
-                <div class="dadi-hit-seq-header">
-                    <span class="dadi-hit-seq-title">命中序号汇总</span>
-                    <span class="dadi-hit-seq-meta" id="pl3-dadi-hit-seq-meta"></span>
-                </div>
-                <div class="dadi-hit-seq-list" id="pl3-dadi-hit-seq-list"></div>
             </div>
             <div class="table-container fill-mode" id="pl3-predict-table">
                 <table>
@@ -2068,7 +1980,7 @@
 </div>
 
 <script>
-    let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [], sdDadiCompare: [], pl3DadiCompare: [] };
+    let currentData = { sd: [], pl3: [], sdCompare: [], pl3Compare: [] };
     let filters = { '3d': 10, 'pl3': 10 };
     let historyFilters = { '3d': 30, 'pl3': 30 };
     let compareTabs = { '3d': 'sanma', 'pl3': 'sanma' };
@@ -2624,12 +2536,10 @@
         if (!container || !$(type, 'predict').classList.contains('active')) return;
 
         const isQima = compareTabs[type] === 'qima' || compareTabs[type] === 'danma';
-        const isDadi = compareTabs[type] === 'dadi';
         const count = filters[type];
         container.classList.toggle('qima-mode', isQima);
-        container.classList.toggle('dadi-mode', isDadi);
 
-        const useFill = count > 0 && count <= 10 && !isQima && !isDadi && !isMobileView();
+        const useFill = count > 0 && count <= 10 && !isQima && !isMobileView();
         applyTableFill(container, useFill, count || 10);
     }
 
@@ -2697,6 +2607,7 @@
     }
 
     function switchCompareTab(type, tab, el) {
+        if (tab === 'dadi') tab = 'sanma';
         compareTabs[type] = tab;
         el.parentElement.querySelectorAll('.compare-tab').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
@@ -2790,33 +2701,6 @@
         return `百${positions.bai}/十${positions.shi}/个${positions.ge}`;
     }
 
-    function getDadiData(type) {
-        // 200注大底直接取对比文件中的完整三码预测
-        const data = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
-        return Array.isArray(data) ? data : [];
-    }
-
-    /** 对比文件 aiHm 中取最多 200 注作为大底 */
-    function getDadiHm(item) {
-        if (!item || !item.aiHm) return '';
-        return item.aiHm.split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-            .slice(0, 200)
-            .join(',');
-    }
-
-    function getDadiHitPosition(aiDadiHm, realHm) {
-        if (!aiDadiHm || !realHm) return -1;
-        const numbers = aiDadiHm.split(',');
-        const idx = numbers.indexOf(realHm);
-        return idx >= 0 ? idx + 1 : -1;
-    }
-
-    function checkDadiMatch(aiDadiHm, realHm) {
-        return getDadiHitPosition(aiDadiHm, realHm) > 0;
-    }
-
     function formatDadiPreview(aiDadiHm, realHm) {
         if (!aiDadiHm) return '';
         const numbers = aiDadiHm.split(',');
@@ -2827,29 +2711,6 @@
             <div class="dadi-preview-actions">
                 <button type="button" class="dadi-view-btn">查看全部</button>
             </div>
-        </div>`;
-    }
-
-    function formatDadiModelStatus(dadiHm, realHm) {
-        if (!dadiHm) {
-            return '<span class="dadi-model-status empty">暂无</span>';
-        }
-        const hitPos = getDadiHitPosition(dadiHm, realHm);
-        if (hitPos > 0) {
-            return `<span class="dadi-model-status hit">命中，第 ${hitPos} 注</span>`;
-        }
-        if (!realHm) {
-            return '<span class="dadi-model-status pending">待开奖</span>';
-        }
-        return '<span class="dadi-model-status miss">未命中</span>';
-    }
-
-    function formatDadiModelCell(dadiHm, realHm) {
-        const preview = dadiHm ? formatDadiPreview(dadiHm, realHm) : '';
-        const status = formatDadiModelStatus(dadiHm, realHm);
-        return `<div class="dadi-model-cell">
-            ${preview}
-            ${status}
         </div>`;
     }
 
@@ -3030,39 +2891,6 @@
             });
     }
 
-    function collectDadiHitSeqNumbers(compareData) {
-        const seqs = [];
-        compareData.forEach(item => {
-            if (!item.realHm) return;
-            const cursorPos = getDadiHitPosition(getDadiHm(item), item.realHm);
-            if (cursorPos > 0) seqs.push(cursorPos);
-        });
-        return seqs.sort((a, b) => a - b);
-    }
-
-    function renderDadiHitSeqPanel(type, compareData) {
-        const panel = document.getElementById(domPrefix(type) + '-dadi-hit-seq');
-        const listEl = document.getElementById(domPrefix(type) + '-dadi-hit-seq-list');
-        const metaEl = document.getElementById(domPrefix(type) + '-dadi-hit-seq-meta');
-        if (!panel || !listEl) return;
-
-        if (compareTabs[type] !== 'dadi') {
-            panel.style.display = 'none';
-            return;
-        }
-        panel.style.display = 'block';
-
-        const seqs = collectDadiHitSeqNumbers(compareData);
-        if (metaEl) {
-            metaEl.textContent = seqs.length ? `共 ${seqs.length} 个命中序号` : '当前范围内无命中';
-        }
-        if (seqs.length === 0) {
-            listEl.innerHTML = '<span class="dadi-hit-seq-empty">暂无命中</span>';
-            return;
-        }
-        listEl.innerHTML = seqs.map(n => `<span class="dadi-hit-seq-item">${n}</span>`).join('');
-    }
-
     function renderDadiPopupGrid(numbers, realHm, filters, matchMode) {
         let hitPos = 0;
         if (realHm) {
@@ -3202,16 +3030,6 @@
         });
     }
 
-    function bindDadiRowEvents(row, item, seq) {
-        row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
-            const dadiHm = getDadiHm(item);
-            if (dadiHm) {
-                const numbers = dadiHm.split(',');
-                viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '200注大底');
-            }
-        });
-    }
-
     function bindZuSanRowEvents(row, item, seq) {
         row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
             const zuSan = getZuSanHm(item);
@@ -3220,17 +3038,6 @@
                 viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, 'AI组三', 'zusan');
             }
         });
-    }
-
-    function appendDadiTableRow(tbody, item, seq) {
-        const realBalls = item.realHm ? formatBalls(item.realHm.split('').join(',')) : '-';
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td class="seq-cell">${seq}</td>
-            <td>${formatDadiModelCell(getDadiHm(item), item.realHm)}</td>
-            <td>${realBalls}</td>`;
-        bindDadiRowEvents(row, item, seq);
-        tbody.appendChild(row);
     }
 
     function appendZuSanTableRow(tbody, item, seq) {
@@ -3245,9 +3052,6 @@
     }
 
     function getCompareData(type, compareType) {
-        if (compareType === 'dadi') {
-            return getDadiData(type);
-        }
         return type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
     }
 
@@ -3256,10 +3060,6 @@
         if (!thead) return;
         if (compareType === 'qima') {
             thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
-            return;
-        }
-        if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>200注大底</th><th>实际开奖</th></tr>';
             return;
         }
         if (compareType === 'overfit') {
@@ -3571,21 +3371,6 @@
         const el = $(type, 'stats');
         const tab = compareType || compareTabs[type];
 
-        if (tab === 'dadi') {
-            const total = compareData.length;
-            let hitSuccess = 0;
-            const hitTotal = compareData.filter(i => getDadiHm(i)).length;
-            compareData.forEach(item => {
-                if (checkDadiMatch(getDadiHm(item), item.realHm)) hitSuccess++;
-            });
-            const hitRate = hitTotal > 0 ? ((hitSuccess / hitTotal) * 100).toFixed(1) : 0;
-            el.innerHTML = `
-                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
-                <div class="stat-card"><div class="stat-value">${hitSuccess}/${hitTotal}</div><div class="stat-label">命中(命中期数/预测期数)</div></div>
-                <div class="stat-card"><div class="stat-value">${hitRate}%</div><div class="stat-label">命中率</div></div>`;
-            return;
-        }
-
         if (tab === 'overfit') {
             let zx = 0, gp = 0;
             const total = compareData.filter(i => i.aiOverfitHm).length;
@@ -3631,7 +3416,7 @@
 
         let sanmaSuccess = 0, qimaSuccess = 0;
         const total = compareData.length;
-        const sanmaTotal = compareData.filter(i => i.aiHm).length;
+        const sanmaTotal = compareData.filter(i => i.aiRecommendHm || i.aiHm).length;
         const qimaTotal = compareData.filter(i => i.aiDingWeiHm).length;
         compareData.forEach(item => {
             if (checkMatch(item, item.realHm)) sanmaSuccess++;
@@ -3655,19 +3440,11 @@
         const colspan = predictTableColspan(type, compareType);
         renderStats(type, filteredData, compareType);
         renderQimaPosStats(type, filteredData);
-        renderDadiHitSeqPanel(type, filteredData);
         updatePredictTableHead(type, compareType);
         const tbody = $(type, 'table-body');
         tbody.innerHTML = '';
         if (filteredData.length === 0) {
             tbody.innerHTML = `<tr><td colspan="${colspan}" class="loading">暂无数据</td></tr>`;
-            adjustPredictTable(type);
-            return;
-        }
-        if (compareType === 'dadi') {
-            filteredData.forEach((item, idx) => {
-                appendDadiTableRow(tbody, item, idx + 1);
-            });
             adjustPredictTable(type);
             return;
         }

@@ -18,7 +18,7 @@ public class CompareVO {
     @ExcelProperty("期号")
     private String qh;
 
-    @ExcelProperty("AI预测号码")
+    @ExcelProperty("三码预测")
     private String aiHm;
 
     @ExcelProperty("推荐号码")

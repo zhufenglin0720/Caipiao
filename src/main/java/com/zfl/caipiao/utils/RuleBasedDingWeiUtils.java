@@ -179,10 +179,15 @@ public final class RuleBasedDingWeiUtils {
         PosTune[] tunes = applyMetaBand(baseTunes, meta);
 
         int[][] digits = toDigitMatrix(tail(history, Math.max(MAX_SAMPLE, needSample(profiles))));
+        DrawHabit habit = DrawHabit.of(digits);
 
         int[][] top7 = new int[3][TOP7];
         for (int pos = 0; pos < 3; pos++) {
             double[] score = scoreWithExperience(digits, pos, linear[pos], profiles[pos], tunes[pos]);
+            // 出号习惯：同位重号/邻号/近窗热号抬分，纠正「只拿中段名次」偏离
+            for (int d = 0; d < 10; d++) {
+                score[d] += habit.posBonus(pos, d);
+            }
             // 排三：在原标定分上轻量抬邻号/中遗漏；干旱时倍率由元调参抬高
             if (gameKind == GameKind.PL3) {
                 applyPl3SoftHitBoost(digits, pos, score, meta.softNeighMul, meta.softOmitMul);
@@ -304,7 +309,7 @@ public final class RuleBasedDingWeiUtils {
     }
 
     /**
-     * ④ 参考三码 buildBandAwareTop：先填命中名次带，再补次边缘/Top1/末位。
+     * 先拿真实高分 Top4（含热号），再补命中带与边缘，避免漏掉常开的 Top1/2。
      */
     private static int[] pickBandAwareTop7(double[] score, PosTune tune) {
         Integer[] order = new Integer[10];
@@ -317,6 +322,9 @@ public final class RuleBasedDingWeiUtils {
         });
 
         LinkedHashSet<Integer> set = new LinkedHashSet<>();
+        for (int i = 0; i < 4 && set.size() < TOP7; i++) {
+            set.add(order[i]);
+        }
         int lo = tune.bandLo;
         int hi = tune.bandHi;
         for (int i = 0; i < 10 && set.size() < TOP7; i++) {
@@ -325,8 +333,7 @@ public final class RuleBasedDingWeiUtils {
                 set.add(order[i]);
             }
         }
-        // 次边缘再 Top1 / 最末（与三码一致的补齐顺序）
-        for (int i : new int[]{1, 8, 0, 9}) {
+        for (int i : new int[]{4, 5, 8, 9}) {
             if (set.size() >= TOP7) {
                 break;
             }

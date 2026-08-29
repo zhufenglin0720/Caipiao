@@ -190,10 +190,14 @@ public final class Overfit20PredictUtils {
         List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover,
                 Math.max(40, ticketCap / 2));
         PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
-        // 分彩种汉明1/±1 锚点池（比例锚点随 WINDOW 动态换算）
-        List<String> directs = kind == GameKind.PL3
+        // 出号习惯：先钉近 3 期本体+邻号+换位，再补汉明展开（避免远锚把池拉飞）
+        LinkedHashSet<String> habitFirst = habitSeedPool(win, Math.min(18, ticketCap / 2));
+        List<String> ham = kind == GameKind.PL3
                 ? buildPl3Ham1Pool(win, strategy, ticketCap)
                 : buildSdHam1Pool(win, strategy, ticketCap);
+        LinkedHashSet<String> merged = new LinkedHashSet<>(habitFirst);
+        merged.addAll(ham);
+        List<String> directs = trimCap(merged, ticketCap);
         if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
             directs = expandSinglePosNeighbors(directs, ticketCap);
         }
@@ -202,7 +206,7 @@ public final class Overfit20PredictUtils {
                 : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
                 "win=%d eval=%d kind=%s topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s "
-                        + "drought=%s cap=%d bands=%d pm1w=%.1f mode=ham1-anchor",
+                        + "drought=%s cap=%d bands=%d pm1w=%.1f mode=habit+ham1",
                 win.size(), EVAL_PERIODS, kind, topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq,
                 cover.label(), drought, ticketCap, bands.size(), pm1.totalWeight());
         return new PredictResult(display, directs, tune);
@@ -214,7 +218,7 @@ public final class Overfit20PredictUtils {
      */
     static List<String> buildSdHam1Pool(List<String> window, List<String> strategy, int cap) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        for (int age : fractionAges(window, 0.10, 0.37, 0.43)) {
+        for (int age : fractionAges(window, 0.03, 0.10, 0.20)) {
             String seed = seedAtAge(window, age);
             if (seed == null) {
                 continue;
@@ -226,7 +230,7 @@ public final class Overfit20PredictUtils {
                 }
             }
         }
-        for (int age : fractionAges(window, 0.07, 0.20, 0.87)) {
+        for (int age : fractionAges(window, 0.03, 0.10, 0.17)) {
             String seed = seedAtAge(window, age);
             if (seed != null) {
                 out.addAll(singlePosPlusMinus1(seed));
@@ -241,7 +245,7 @@ public final class Overfit20PredictUtils {
      * 排列三：中后段锚点单位置汉明1按近窗位频排序取主仓，再补锚点±1与策略±1。
      */
     static List<String> buildPl3Ham1Pool(List<String> window, List<String> strategy, int cap) {
-        int[] ages = fractionAges(window, 0.40, 0.43, 0.70, 0.93);
+        int[] ages = fractionAges(window, 0.03, 0.10, 0.17, 0.27);
         int[][] freq = new int[3][10];
         for (int j = 0; j < window.size(); j++) {
             String c = pad3(window.get(j));
@@ -291,6 +295,26 @@ public final class Overfit20PredictUtils {
         appendStratPm1(out, strategy, 3, cap);
         appendGroupPerms(out, window, cap);
         return trimCap(out, cap);
+    }
+
+    /** 近 3 期开奖本体 + 单位置±1 + 组选换位，贴近出号习惯 */
+    static LinkedHashSet<String> habitSeedPool(List<String> window, int cap) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (window == null || window.isEmpty() || cap <= 0) {
+            return out;
+        }
+        for (int age = 0; age <= 2 && window.size() > age && out.size() < cap; age++) {
+            String seed = pad3(window.get(window.size() - 1 - age));
+            out.add(seed);
+            out.addAll(singlePosPlusMinus1(seed));
+            for (String p : permutationsOf(sortedKey(seed))) {
+                if (out.size() >= cap) {
+                    break;
+                }
+                out.add(p);
+            }
+        }
+        return out;
     }
 
     /** 年龄 = round(比例 × 窗长)，夹在 [1, win-1] */

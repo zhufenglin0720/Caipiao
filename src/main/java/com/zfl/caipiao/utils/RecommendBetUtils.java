@@ -56,6 +56,7 @@ public final class RecommendBetUtils {
         int n = Math.min(all.size(), MAX_RANK);
         int[] quota = allocateQuota(history, n);
         double[] rankScores = scoreRanksForStratified(n, history);
+        String lastReal = lastRealHm(history);
         Set<String> overfitSet = new LinkedHashSet<>();
         if (overfitPool != null && !overfitPool.isBlank()) {
             overfitSet.addAll(parseBets(overfitPool));
@@ -125,6 +126,7 @@ public final class RecommendBetUtils {
                         if (ofFinal.contains(bet)) {
                             sc += 5.0;
                         }
+                        sc += habitTicketBonus(bet, lastReal);
                         // 段内再按子箱拉开：避免全挤在密度尖峰
                         int span = hi - lo + 1;
                         int bin = span <= 1 ? 0 : ((r - lo) * need) / span;
@@ -615,6 +617,54 @@ public final class RecommendBetUtils {
             }
         }
         return freq;
+    }
+
+    private static String lastRealHm(List<HmCache.CompareDto> history) {
+        if (history == null) {
+            return null;
+        }
+        for (int i = history.size() - 1; i >= 0; i--) {
+            HmCache.CompareDto dto = history.get(i);
+            if (dto != null && StrUtil.isNotBlank(dto.getRealHm()) && dto.getRealHm().length() == 3) {
+                return pad3(dto.getRealHm());
+            }
+        }
+        return null;
+    }
+
+    /** 贴近上期重号 / 邻号 / 中和值的票加分 */
+    static double habitTicketBonus(String bet, String lastReal) {
+        if (bet == null || bet.length() != 3 || lastReal == null || lastReal.length() != 3) {
+            return 0;
+        }
+        int[] t = {bet.charAt(0) - '0', bet.charAt(1) - '0', bet.charAt(2) - '0'};
+        int[] last = {lastReal.charAt(0) - '0', lastReal.charAt(1) - '0', lastReal.charAt(2) - '0'};
+        boolean[] lastSet = new boolean[10];
+        lastSet[last[0]] = true;
+        lastSet[last[1]] = true;
+        lastSet[last[2]] = true;
+        double s = 0;
+        int chong = 0;
+        for (int p = 0; p < 3; p++) {
+            if (lastSet[t[p]]) {
+                chong++;
+            }
+            if (t[p] == last[p]) {
+                s += 2.4;
+            }
+            if (t[p] == (last[p] + 1) % 10 || t[p] == (last[p] + 9) % 10) {
+                s += 1.8;
+            }
+        }
+        s += chong * 1.6;
+        int sum = t[0] + t[1] + t[2];
+        if (sum >= 8 && sum <= 19) {
+            s += 1.2;
+        }
+        if (t[0] == t[1] && t[1] == t[2]) {
+            s -= 4;
+        }
+        return s;
     }
 
     private static String listForRank(HmCache.CompareDto dto) {
