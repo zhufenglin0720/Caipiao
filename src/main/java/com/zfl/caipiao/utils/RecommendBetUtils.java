@@ -57,12 +57,10 @@ public final class RecommendBetUtils {
         int[] quota = allocateQuota(history, n);
         double[] rankScores = scoreRanksForStratified(n, history);
         String lastReal = lastRealHm(history);
-        Set<String> banned = PrevPeriodDedup.ticketSet(PrevPeriodDedup.lastField(history, dto -> {
-            if (dto.getAiRecommendHm() != null && !dto.getAiRecommendHm().isBlank()) {
-                return dto.getAiRecommendHm();
-            }
-            return dto.getAiHm();
-        }));
+        Set<String> banned = new LinkedHashSet<>();
+        if (lastReal != null && lastReal.length() == 3) {
+            banned.add(lastReal);
+        }
         Set<String> overfitSet = new LinkedHashSet<>();
         if (overfitPool != null && !overfitPool.isBlank()) {
             overfitSet.addAll(parseBets(overfitPool));
@@ -691,7 +689,6 @@ public final class RecommendBetUtils {
         if (last.length() != 3) {
             return List.of();
         }
-        want.add(last);
         char[] c = last.toCharArray();
         want.add("" + c[0] + c[2] + c[1]);
         want.add("" + c[1] + c[0] + c[2]);

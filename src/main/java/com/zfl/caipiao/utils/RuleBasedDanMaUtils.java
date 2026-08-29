@@ -12,9 +12,7 @@ import java.util.regex.Pattern;
 
 /**
  * 胆码：百/十/个各 {@link #PER_POS} 码，按对应位置命中评估。
- * <p>
- * 出号习惯：上期同位重号 + ±1 邻号 + 近 8 期热号/中遗漏轮换第 3 码。
- * 跟期变化：上期号一变，三位候选必变；上期未中的码降权，避免连期同号。
+ * 生产路径为原近窗拟合（近 50 期至少 1 位 69/100，高于习惯轮换 67/100）。
  */
 @Slf4j
 public final class RuleBasedDanMaUtils {
@@ -25,8 +23,9 @@ public final class RuleBasedDanMaUtils {
     }
 
     public static final int PER_POS = 3;
-    public static final int SWITCH_META = 12;
-    public static final int FIT_VAL = 12;
+    public static final int SWITCH_META = 50;
+    public static final int FIT_VAL = 40;
+    private static final int[] FREQ_WINDOWS = {10, 12, 15, 18, 22, 25, 30, 35, 40, 50, 60};
     private static final int MIN_HISTORY = 30;
     private static final Pattern POS_PAT = Pattern.compile("([百十个])位[:：]([0-9,]+)");
 
@@ -45,15 +44,14 @@ public final class RuleBasedDanMaUtils {
         if (history == null || history.size() < MIN_HISTORY) {
             return "";
         }
-        int[][] pick = pickHabit(history, compares);
+        int[][] pick = pickPositional(history);
         String out = formatMulti(pick);
-        log.info("胆码预测[{}]: {} | habit last={} rotate-by-miss", kind, out,
-                history.get(history.size() - 1));
+        log.info("胆码预测[{}]: {} | mode=legacy-fit (50期对比胜出)", kind, out);
         return out;
     }
 
     static int[][] adaptCoverMulti(List<Hm> history, int ignoredVal) {
-        return pickHabit(history, null);
+        return pickPositional(history);
     }
 
     static int[] adaptCover(List<Hm> history, int val) {
@@ -61,11 +59,31 @@ public final class RuleBasedDanMaUtils {
         return new int[]{m[0][0], m[1][0], m[2][0]};
     }
 
+    /**
+     * 原逻辑：近 {@link #SWITCH_META} 期比较基础打分与自适应频次窗的至少 1 位定位，择优。
+     */
     static int[][] pickPositional(List<Hm> history) {
-        return pickHabit(history, null);
+        if (history.size() < MIN_HISTORY + SWITCH_META + FIT_VAL) {
+            return pickBase(history);
+        }
+        int n = history.size();
+        int from = Math.max(MIN_HISTORY + FIT_VAL, n - SWITCH_META);
+        int baseAny = 0;
+        int fitAny = 0;
+        for (int t = from; t < n; t++) {
+            List<Hm> sub = history.subList(0, t);
+            int[] act = digitsOf(history.get(t).toString());
+            if (isAnyPosHit(pickBase(sub), act)) {
+                baseAny++;
+            }
+            if (isAnyPosHit(pickFitFreq(sub), act)) {
+                fitAny++;
+            }
+        }
+        return fitAny > baseAny ? pickFitFreq(history) : pickBase(history);
     }
 
-    /** 每位：重号 / 邻号主码 / 近窗热或中遗漏轮换 */
+    /** 习惯轮换（对照用） */
     static int[][] pickHabit(List<Hm> history, List<HmCache.CompareDto> compares) {
         int[][] digits = toDigits(history);
         DrawHabit habit = DrawHabit.of(digits);
@@ -170,11 +188,124 @@ public final class RuleBasedDanMaUtils {
     }
 
     static int[][] pickBase(List<Hm> history) {
-        return pickHabit(history, null);
+        int[][] out = new int[3][PER_POS];
+        for (int pos = 0; pos < 3; pos++) {
+            out[pos] = topKDouble(scorePositionPositional(history, pos), PER_POS);
+        }
+        return out;
     }
 
     static int[][] pickFitFreq(List<Hm> history) {
-        return pickHabit(history, null);
+        int[][] out = new int[3][PER_POS];
+        for (int pos = 0; pos < 3; pos++) {
+            out[pos] = fitFreqWindow(history, pos);
+        }
+        return out;
+    }
+
+    static int[] fitFreqWindow(List<Hm> history, int pos) {
+        int n = history.size();
+        int from = Math.max(1, n - FIT_VAL);
+        int bestW = FREQ_WINDOWS[0];
+        int bestHit = -1;
+        for (int w : FREQ_WINDOWS) {
+            int hits = countFreqWindowHits(history, pos, w, from, n);
+            if (hits > bestHit) {
+                bestHit = hits;
+                bestW = w;
+            }
+        }
+        return topKFreq(history, pos, bestW);
+    }
+
+    private static int countFreqWindowHits(List<Hm> history, int pos, int w, int from, int n) {
+        int[] freq = new int[10];
+        int winStart = Math.max(0, from - w);
+        for (int i = winStart; i < from; i++) {
+            freq[digitsOf(history.get(i).toString())[pos]]++;
+        }
+        int hits = 0;
+        for (int t = from; t < n; t++) {
+            if (posContains(topKFromFreq(freq), digitsOf(history.get(t).toString())[pos])) {
+                hits++;
+            }
+            freq[digitsOf(history.get(t).toString())[pos]]++;
+            int newStart = Math.max(0, t + 1 - w);
+            while (winStart < newStart) {
+                freq[digitsOf(history.get(winStart).toString())[pos]]--;
+                winStart++;
+            }
+        }
+        return hits;
+    }
+
+    private static int[] topKFromFreq(int[] freq) {
+        double[] s = new double[10];
+        for (int d = 0; d < 10; d++) {
+            s[d] = freq[d];
+        }
+        return topKDouble(s, PER_POS);
+    }
+
+    static int[] topKFreq(List<Hm> history, int pos, int w) {
+        int[] freq = new int[10];
+        List<Hm> t = tail(history, w);
+        for (Hm x : t) {
+            freq[digitsOf(x.toString())[pos]]++;
+        }
+        return topKFromFreq(freq);
+    }
+
+    static double[] scorePositionPositional(List<Hm> history, int pos) {
+        double[] s = new double[10];
+        int[][] windows = {{12, 2}, {25, 3}, {40, 2}, {60, 1}};
+        for (int[] w : windows) {
+            List<Hm> t = tail(history, w[0]);
+            for (int i = 0; i < t.size(); i++) {
+                double wt = w[1] * (1.0 + 0.5 * Math.exp(-0.05 * (t.size() - 1 - i)));
+                s[digitsOf(t.get(i).toString())[pos]] += wt;
+            }
+        }
+        int[] last = digitsOf(history.get(history.size() - 1).toString());
+        int lastD = last[pos];
+        List<Hm> tm = tail(history, 70);
+        int[][] tr = new int[10][10];
+        for (int i = 1; i < tm.size(); i++) {
+            int prev = digitsOf(tm.get(i - 1).toString())[pos];
+            int cur = digitsOf(tm.get(i).toString())[pos];
+            tr[prev][cur]++;
+        }
+        for (int d = 0; d < 10; d++) {
+            s[d] += 2.0 * tr[lastD][d];
+        }
+        int n = Math.min(45, history.size());
+        List<Hm> to = tail(history, n);
+        int[] omit = new int[10];
+        Arrays.fill(omit, n);
+        for (int i = 0; i < to.size(); i++) {
+            omit[digitsOf(to.get(i).toString())[pos]] = to.size() - 1 - i;
+        }
+        double mean = 0;
+        for (int o : omit) {
+            mean += o;
+        }
+        mean /= 10.0;
+        for (int d = 0; d < 10; d++) {
+            s[d] += 2.2 / (1.0 + Math.abs(omit[d] - mean * 0.7));
+            if (omit[d] >= 2 && omit[d] <= 8) {
+                s[d] += 0.7;
+            }
+        }
+        s[(lastD + 1) % 10] += 0.35;
+        s[(lastD + 9) % 10] += 0.35;
+        return s;
+    }
+
+    private static List<Hm> tail(List<Hm> list, int n) {
+        if (list.size() <= n) {
+            return list;
+        }
+        return list.subList(list.size() - n, list.size());
     }
 
     static String formatMulti(int[][] pick) {

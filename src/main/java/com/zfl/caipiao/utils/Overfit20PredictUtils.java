@@ -118,8 +118,10 @@ public final class Overfit20PredictUtils {
         }
         int from = Math.max(0, codes.size() - WINDOW);
         List<String> window = codes.subList(from, codes.size());
-        Set<String> banned = PrevPeriodDedup.ticketSet(
-                PrevPeriodDedup.lastField(compares, HmCache.CompareDto::getAiOverfitHm));
+        Set<String> banned = new LinkedHashSet<>();
+        if (!codes.isEmpty()) {
+            banned.add(pad3(codes.get(codes.size() - 1)));
+        }
         return predictWindow(window, kind == null ? GameKind.SD : kind, banned);
     }
 
@@ -215,12 +217,13 @@ public final class Overfit20PredictUtils {
         if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
             directs = expandSinglePosNeighbors(directs, ticketCap);
         }
-        // 仅当整池与上期完全相同才换号，避免误伤近窗热号
-        if (banned != null && !banned.isEmpty() && banned.equals(new LinkedHashSet<>(directs))) {
+        // 去掉上一期开奖号本体，再补满 150
+        if (banned != null && !banned.isEmpty()) {
             directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
         }
         if (directs.size() < ticketCap) {
-            directs = PrevPeriodDedup.excludeTickets(directs, Set.of(), ticketCap, extras);
+            directs = PrevPeriodDedup.excludeTickets(directs, banned == null ? Set.of() : banned,
+                    ticketCap, extras);
         }
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
