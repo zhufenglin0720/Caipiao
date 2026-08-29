@@ -36,14 +36,16 @@ public final class DanMaBacktest {
         sb.append("命中口径：对应位置命中（开奖位数字落在该位候选中，跨位不算）\n");
         sb.append("主指标：至少1位定位 目标≥").append((int) ANY_POS_TARGET)
                 .append("% | 每位").append(RuleBasedDanMaUtils.PER_POS).append("码\n");
-        sb.append("策略：近窗择优（综合打分Top3 vs 自适应频次窗Top3），禁止硬编码开奖号\n");
+        sb.append("策略：3D=近窗拟合；排列三=习惯轮换\n");
         sb.append("说明：随机基线≈").append(String.format(Locale.ROOT, "%.1f",
                         (1 - Math.pow(1 - RuleBasedDanMaUtils.PER_POS / 10.0, 3)) * 100))
                 .append("%（至少1位）。\n\n");
 
-        Result sd = runOne("福彩3D", HistoryDataLoader.load3d(), eval, sb);
+        Result sd = runOne("福彩3D", HistoryDataLoader.load3d(),
+                RuleBasedDanMaUtils.GameKind.SD_3D, eval, sb);
         sb.append('\n');
-        Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(), eval, sb);
+        Result pl3 = runOne("排列三", HistoryDataLoader.loadPl3(),
+                RuleBasedDanMaUtils.GameKind.PL3, eval, sb);
 
         sb.append("\n========== 汇总 ==========\n");
         sb.append(String.format(Locale.ROOT, "%-8s | 至少1位定位 | 分位均 | 百/十/个 | 三位全中 | 结果%n", "彩种"));
@@ -74,7 +76,8 @@ public final class DanMaBacktest {
                 r.pass ? "达标" : "未达标"));
     }
 
-    static Result runOne(String name, List<Hm> all, int eval, StringBuilder out) {
+    static Result runOne(String name, List<Hm> all, RuleBasedDanMaUtils.GameKind kind,
+                         int eval, StringBuilder out) {
         out.append("---------- ").append(name).append(" ----------\n");
         if (all == null || all.isEmpty()) {
             out.append("无数据\n");
@@ -92,7 +95,7 @@ public final class DanMaBacktest {
         long t0 = System.currentTimeMillis();
         for (int i = start; i < all.size(); i++) {
             List<Hm> hist = all.subList(0, i);
-            int[][] pick = RuleBasedDanMaUtils.adaptCoverMulti(hist, 40);
+            int[][] pick = RuleBasedDanMaUtils.adaptCoverMulti(hist, kind);
             int[] act = RuleBasedDanMaUtils.digitsOf(all.get(i).toString());
             boolean[] hits = RuleBasedDanMaUtils.posHits(pick, act);
             int hp = 0;

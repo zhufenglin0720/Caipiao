@@ -44,7 +44,7 @@ public final class DanMaLogicCompare {
         sb.append(String.format(Locale.ROOT,
                 "合计     | %4d/%d | %4d/%d | %4d | %4d%n",
                 legacyAny, EVAL * 2, habitAny, EVAL * 2, legacyFull, habitFull));
-        sb.append(keepLegacy ? "结论：保留【原近窗拟合】\n" : "结论：保留【习惯轮换】\n");
+        sb.append(keepLegacy ? "结论：分彩种择优（见生产路径）\n" : "结论：分彩种择优\n");
 
         Path out = Path.of("reports/danma_50_compare.txt");
         Files.createDirectories(out.getParent());

@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 /**
  * 胆码：百/十/个各 {@link #PER_POS} 码，按对应位置命中评估。
- * 生产路径为原近窗拟合（近 50 期至少 1 位 69/100，高于习惯轮换 67/100）。
+ * 3D 用原近窗拟合（50期 39/50）；排列三用习惯轮换（50期 34/50，高于原逻辑 30/50）。
  */
 @Slf4j
 public final class RuleBasedDanMaUtils {
@@ -44,14 +44,26 @@ public final class RuleBasedDanMaUtils {
         if (history == null || history.size() < MIN_HISTORY) {
             return "";
         }
-        int[][] pick = pickPositional(history);
+        int[][] pick = pickFor(kind, history, compares);
         String out = formatMulti(pick);
-        log.info("胆码预测[{}]: {} | mode=legacy-fit (50期对比胜出)", kind, out);
+        log.info("胆码预测[{}]: {} | mode={}", kind, out,
+                kind == GameKind.PL3 ? "habit" : "legacy-fit");
         return out;
+    }
+
+    static int[][] pickFor(GameKind kind, List<Hm> history, List<HmCache.CompareDto> compares) {
+        if (kind == GameKind.PL3) {
+            return pickHabit(history, compares);
+        }
+        return pickPositional(history);
     }
 
     static int[][] adaptCoverMulti(List<Hm> history, int ignoredVal) {
         return pickPositional(history);
+    }
+
+    static int[][] adaptCoverMulti(List<Hm> history, GameKind kind) {
+        return pickFor(kind == null ? GameKind.SD_3D : kind, history, null);
     }
 
     static int[] adaptCover(List<Hm> history, int val) {
@@ -83,7 +95,7 @@ public final class RuleBasedDanMaUtils {
         return fitAny > baseAny ? pickFitFreq(history) : pickBase(history);
     }
 
-    /** 习惯轮换（对照用） */
+    /** 习惯轮换（排列三生产路径） */
     static int[][] pickHabit(List<Hm> history, List<HmCache.CompareDto> compares) {
         int[][] digits = toDigits(history);
         DrawHabit habit = DrawHabit.of(digits);
