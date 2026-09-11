@@ -32,8 +32,8 @@ public final class HitPeriod50Backtest {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("========== 近").append(eval).append("期命中率回测 ==========\n");
-        sb.append("大底=当前算法完整1000序 → 开奖位次密集区间保留大部分 → ").append(Overfit20PredictUtils.MAX_TICKETS)
-                .append("注；10注从大底均匀转化\n\n");
+        sb.append("大底=").append(Overfit20PredictUtils.MAX_TICKETS)
+                .append("注（近窗汉明1+习惯+邻号补满）；10注从大底均匀转化\n\n");
 
         Game sd = runOne("福彩3D", HistoryDataLoader.load3d(),
                 RuleBasedPredictUtils.GameKind.SD_3D,

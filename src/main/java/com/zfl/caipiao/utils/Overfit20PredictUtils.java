@@ -20,8 +20,8 @@ import java.util.function.ToDoubleFunction;
 /**
  * 近 {@link #WINDOW} 期开奖 · 过拟合组合预测（只推 {@link #MAX_TICKETS} 组）。
  * <p>
- * 用近窗开奖做策略/邻域；先按当前算法排出完整 1000 注位次，
- * 再取近窗开奖所落密集区间并只保留大部分号码，输出 {@link #MAX_TICKETS} 注。
+ * 用近窗开奖做策略/邻域；从最新一期往前、只在近 {@link #EVAL_PERIODS} 期上动态调参。
+ * 池=近窗全汉明1（邻号优先交错）+ 习惯种子 + 邻号补满至 {@link #MAX_TICKETS} 注。
  * 回测只评估近 {@link #EVAL_PERIODS} 期，不做更长往期回测。
  * 目标：直选≥{@link #ZX_TARGET}、组选≥{@link #GROUP_TARGET}。
  */
@@ -33,14 +33,8 @@ public final class Overfit20PredictUtils {
     public static final int GROUP_COUNT = 5;
     /** 回测 / 因果调参只看近 10 期，不做往期回测 */
     public static final int EVAL_PERIODS = 10;
-    /** 只推直选注数上限（从 1000 序切命中区间后保留大部分） */
+    /** 只推直选注数上限（250 组） */
     public static final int MAX_TICKETS = 250;
-    /** 完整直选宇宙 */
-    static final int FULL_UNIVERSE = 1000;
-    /** 近窗开奖位次覆盖比例：找覆盖该比例样本的最短区间 */
-    static final double HIT_COVER = 0.72;
-    /** 区间内保留比例：大部分而非全部 */
-    static final double KEEP_RATIO = 0.78;
     /** 候选组形态上限（内部） */
     public static final int MAX_GROUPS = 120;
     public static final int ZX_TARGET = 4;
@@ -206,26 +200,38 @@ public final class Overfit20PredictUtils {
 
         CoverSpec cover = selectCover(win, topN, bestLo, bestHi, bestTake, posM, maxExtra);
         int banN = banned == null ? 0 : banned.size();
-        WinStats stats = WinStats.of(win);
-        List<DirectScored> ranked = rankAllDirects(stats);
-        List<Integer> hitRanks = causalHitRanks(win);
-        int[] band = densestCoverBand(hitRanks, ranked.size(), HIT_COVER);
-        List<String> directs = keepMostOfHitBand(ranked, hitRanks, ticketCap, banned);
+        List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover,
+                Math.max(60, ticketCap / 2));
+        PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
+        // 3D 钉近 3 期全汉明1（邻号优先交错）；排三钉近 2 期
+        LinkedHashSet<String> habitFirst = recentFullHam1(win, kind == GameKind.PL3 ? 2 : 3,
+                kind == GameKind.PL3 ? 56 : 84);
+        habitFirst.addAll(habitSeedPool(win, 48));
+        List<String> ham = kind == GameKind.PL3
+                ? buildPl3Ham1Pool(win, strategy, ticketCap)
+                : buildSdHam1Pool(win, strategy, ticketCap);
+        LinkedHashSet<String> merged = new LinkedHashSet<>(habitFirst);
+        merged.addAll(ham);
+        List<String> extras = expandSinglePosNeighbors(new ArrayList<>(merged), ticketCap + 40);
+        List<String> directs = trimCap(merged, ticketCap);
+        if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
+            directs = expandSinglePosNeighbors(directs, ticketCap);
+        }
         if (banned != null && !banned.isEmpty()) {
-            directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, ticketsOf(ranked));
+            directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
         }
         if (directs.size() < ticketCap) {
             directs = PrevPeriodDedup.excludeTickets(directs, banned == null ? Set.of() : banned,
-                    ticketCap, ticketsOf(ranked));
+                    ticketCap, extras);
         }
         List<String> display = directs.size() <= GROUP_COUNT
                 ? new ArrayList<>(directs)
                 : new ArrayList<>(directs.subList(0, GROUP_COUNT));
         String tune = String.format(Locale.ROOT,
-                "win=%d eval=%d kind=%s topN=%d posM=%d stratBand=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s "
-                        + "drought=%s cap=%d hitBand=[%d,%d] hits=%d mode=full1000-keep%.0f%% ban=%d",
+                "win=%d eval=%d kind=%s topN=%d posM=%d band=[%d,%d)/%d eh=%d tickets=%d uniq=%.2f cover=%s "
+                        + "drought=%s cap=%d bands=%d pm1w=%.1f mode=habit+ham1 ban=%d",
                 win.size(), EVAL_PERIODS, kind, topN, posM, bestLo, bestHi, bestTake, bestEh, directs.size(), uniq,
-                cover.label(), drought, ticketCap, band[0], band[1], hitRanks.size(), KEEP_RATIO * 100, banN);
+                cover.label(), drought, ticketCap, bands.size(), pm1.totalWeight(), banN);
         return new PredictResult(display, directs, tune);
     }
 
@@ -314,23 +320,21 @@ public final class Overfit20PredictUtils {
         return trimCap(out, cap);
     }
 
-    /** 近 ageN 期：本体 + 三位全汉明1（每期最多 28 注） */
+    /** 近 ageN 期：本体 + 三位全汉明1（邻号优先交错，每期最多 28 注） */
     static LinkedHashSet<String> recentFullHam1(List<String> window, int ageN, int cap) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
         if (window == null || window.isEmpty() || cap <= 0) {
             return out;
         }
+        int[] deltas = {1, 9, 2, 8, 3, 7, 4, 6, 5};
         for (int age = 0; age < ageN && window.size() > age && out.size() < cap; age++) {
             String seed = pad3(window.get(window.size() - 1 - age));
             out.add(seed);
             int[] d = {seed.charAt(0) - '0', seed.charAt(1) - '0', seed.charAt(2) - '0'};
-            for (int p = 0; p < 3 && out.size() < cap; p++) {
-                for (int v = 0; v < 10 && out.size() < cap; v++) {
-                    if (v == d[p]) {
-                        continue;
-                    }
+            for (int delta : deltas) {
+                for (int p = 0; p < 3 && out.size() < cap; p++) {
                     int[] n = {d[0], d[1], d[2]};
-                    n[p] = v;
+                    n[p] = (d[p] + delta) % 10;
                     out.add("" + n[0] + n[1] + n[2]);
                 }
             }
@@ -1960,190 +1964,26 @@ public final class Overfit20PredictUtils {
 
     static List<DirectScored> rankAllDirects(WinStats stats) {
         List<ToDoubleFunction<int[]>> fns = stratFns(stats);
-        List<DirectScored> all = new ArrayList<>(FULL_UNIVERSE);
+        List<DirectScored> all = new ArrayList<>(1000);
         for (int a = 0; a <= 9; a++) {
             for (int b = 0; b <= 9; b++) {
                 for (int c = 0; c <= 9; c++) {
+                    if (a == b && b == c) {
+                        continue;
+                    }
                     int[] abc = {a, b, c};
                     double sc = 0;
                     for (ToDoubleFunction<int[]> fn : fns) {
                         sc += fn.applyAsDouble(abc);
                     }
                     sc /= fns.size();
-                    if (a == b && b == c) {
-                        sc -= 8;
-                    }
                     String code = "" + a + b + c;
                     all.add(new DirectScored(code, sortedKey(code), sc));
                 }
             }
         }
-        all.sort(Comparator.comparingDouble((DirectScored d) -> d.score).reversed()
-                .thenComparing(d -> d.code));
+        all.sort(Comparator.comparingDouble((DirectScored d) -> d.score).reversed());
         return all;
-    }
-
-    static List<Integer> causalHitRanks(List<String> win) {
-        List<Integer> ranks = new ArrayList<>();
-        if (win == null || win.size() < 10) {
-            return ranks;
-        }
-        int start = Math.max(tuneStart(win.size()), 8);
-        for (int i = start; i < win.size(); i++) {
-            List<DirectScored> ranked = rankAllDirects(WinStats.of(win.subList(0, i)));
-            int r = indexInRanked(ranked, pad3(win.get(i)));
-            if (r > 0) {
-                ranks.add(r);
-            }
-        }
-        return ranks;
-    }
-
-    static int indexInRanked(List<DirectScored> ranked, String code) {
-        if (ranked == null || code == null) {
-            return -1;
-        }
-        String a = pad3(code);
-        for (int i = 0; i < ranked.size(); i++) {
-            if (ranked.get(i).code.equals(a)) {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    /** 覆盖 cover 比例近窗开奖位次的最短连续区间（1-based, 含端点） */
-    static int[] densestCoverBand(List<Integer> ranks, int universe, double cover) {
-        int n = universe <= 0 ? FULL_UNIVERSE : universe;
-        if (ranks == null || ranks.isEmpty()) {
-            int w = Math.max(MAX_TICKETS, (int) Math.ceil(MAX_TICKETS / KEEP_RATIO));
-            return new int[]{80, Math.min(n, 80 + w - 1)};
-        }
-        int need = Math.max(1, (int) Math.ceil(ranks.size() * cover));
-        int[] freq = new int[n + 1];
-        for (int r : ranks) {
-            if (r >= 1 && r <= n) {
-                freq[r]++;
-            }
-        }
-        int[] ps = new int[n + 1];
-        for (int i = 1; i <= n; i++) {
-            ps[i] = ps[i - 1] + freq[i];
-        }
-        int bestLo = 1, bestHi = n, bestW = n + 1;
-        int hi = 1;
-        for (int lo = 1; lo <= n; lo++) {
-            if (hi < lo) {
-                hi = lo;
-            }
-            while (hi <= n && ps[hi] - ps[lo - 1] < need) {
-                hi++;
-            }
-            if (hi > n) {
-                break;
-            }
-            int w = hi - lo + 1;
-            if (w < bestW) {
-                bestW = w;
-                bestLo = lo;
-                bestHi = hi;
-            }
-        }
-        return new int[]{bestLo, bestHi};
-    }
-
-    /**
-     * 在开奖位次密集区间内均匀保留大部分号码（默认 78%），凑满 cap，不整段全收。
-     */
-    static List<String> keepMostOfHitBand(List<DirectScored> ranked, List<Integer> hitRanks,
-                                          int cap, Set<String> banned) {
-        if (ranked == null || ranked.isEmpty() || cap <= 0) {
-            return List.of();
-        }
-        int n = ranked.size();
-        int[] band = densestCoverBand(hitRanks, n, HIT_COVER);
-        int lo = band[0];
-        int hi = band[1];
-        int minWidth = Math.min(n, Math.max(cap + 1, (int) Math.ceil(cap / KEEP_RATIO)));
-        while (hi - lo + 1 < minWidth && (lo > 1 || hi < n)) {
-            if (lo > 1) {
-                lo--;
-            }
-            if (hi - lo + 1 < minWidth && hi < n) {
-                hi++;
-            }
-        }
-        List<DirectScored> slice = ranked.subList(lo - 1, hi);
-        int drop = Math.max(1, (int) Math.round(slice.size() * (1.0 - KEEP_RATIO)));
-        int keep = Math.min(cap, slice.size() - drop);
-        if (keep < cap && slice.size() > cap) {
-            keep = cap;
-            if (keep >= slice.size()) {
-                keep = slice.size() - 1;
-            }
-        }
-        LinkedHashSet<String> out = stridePick(slice, keep, banned);
-        if (out.size() < cap) {
-            for (DirectScored d : ranked) {
-                if (out.size() >= cap) {
-                    break;
-                }
-                if (d == null || d.code == null) {
-                    continue;
-                }
-                if (banned != null && banned.contains(d.code)) {
-                    continue;
-                }
-                out.add(d.code);
-            }
-        }
-        List<String> list = new ArrayList<>(out);
-        return list.size() > cap ? new ArrayList<>(list.subList(0, cap)) : list;
-    }
-
-    static LinkedHashSet<String> stridePick(List<DirectScored> slice, int keep, Set<String> banned) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
-        if (slice == null || slice.isEmpty() || keep <= 0) {
-            return out;
-        }
-        int m = slice.size();
-        int target = Math.min(keep, m);
-        if (target == 1) {
-            addIfAllowed(out, slice.get(0), banned);
-            return out;
-        }
-        for (int i = 0; i < target; i++) {
-            int idx = (int) Math.round(i * (m - 1) / (double) (target - 1));
-            addIfAllowed(out, slice.get(Math.min(m - 1, idx)), banned);
-        }
-        for (DirectScored d : slice) {
-            if (out.size() >= target) {
-                break;
-            }
-            addIfAllowed(out, d, banned);
-        }
-        return out;
-    }
-
-    private static void addIfAllowed(Set<String> out, DirectScored d, Set<String> banned) {
-        if (d == null || d.code == null) {
-            return;
-        }
-        if (banned != null && banned.contains(d.code)) {
-            return;
-        }
-        out.add(d.code);
-    }
-
-    static List<String> ticketsOf(List<DirectScored> ranked) {
-        List<String> out = new ArrayList<>();
-        if (ranked == null) {
-            return out;
-        }
-        for (DirectScored d : ranked) {
-            out.add(d.code);
-        }
-        return out;
     }
 
     static final class DirectScored {
