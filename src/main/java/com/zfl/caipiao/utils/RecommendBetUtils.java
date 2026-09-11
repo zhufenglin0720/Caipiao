@@ -61,237 +61,78 @@ public final class RecommendBetUtils {
 
     public static String pickRecommendBets(String pred, List<HmCache.CompareDto> history,
                                            String overfitPool, boolean pl3) {
+        List<String> overfit = parseBets(overfitPool);
+        if (overfit.size() >= MIN_PICK) {
+            return pickEvenFromPool(overfit, history);
+        }
         List<String> all = parseBets(pred);
         if (all.isEmpty()) {
             return "";
         }
-        int n = Math.min(all.size(), MAX_RANK);
-        int[] quota = allocateQuota(history, n);
-        double[] rankScores = scoreRanksForStratified(n, history);
+        return pickEvenFromPool(all, history);
+    }
+
+    /** 从大底均匀抽 10 组（同组只留 1 注），保留原排列 */
+    static String pickEvenFromPool(List<String> source, List<HmCache.CompareDto> history) {
+        if (source == null || source.isEmpty()) {
+            return "";
+        }
         String lastReal = lastRealHm(history);
         Set<String> banned = new LinkedHashSet<>();
         if (lastReal != null && lastReal.length() == 3) {
             banned.add(lastReal);
         }
-        Set<String> overfitSet = new LinkedHashSet<>();
-        if (overfitPool != null && !overfitPool.isBlank()) {
-            overfitSet.addAll(parseBets(overfitPool));
-        }
-
         List<String> picked = new ArrayList<>(MAX_PICK);
-        Set<String> usedDigitKeys = new LinkedHashSet<>();
-
-        // 置顶大底第 1 名：模型直选最强票，且不占用上期开奖号
-        if (PIN_TOP1 && n >= 1) {
-            String top = all.get(0);
-            if (top != null && top.length() == 3 && !banned.contains(top)) {
-                usedDigitKeys.add(digitKey(top));
-                picked.add(top);
-                int seg = segmentOf(1);
-                if (seg >= 0 && quota[seg] > 0) {
-                    quota[seg]--;
-                }
-            }
-        }
-
-        // 预留上期开奖换位 / ±1 / 隔期组选，提高组选命中期数
+        Set<String> used = new LinkedHashSet<>();
         if (lastReal != null && lastReal.length() == 3) {
-            List<String> habitCands = habitNearTickets(lastReal, all, history);
             int reserved = 0;
-            for (String bet : habitCands) {
-                if (reserved >= HABIT_RESERVE || picked.size() >= MAX_PICK) {
+            for (String bet : habitNearTickets(lastReal, source, history)) {
+                if (reserved >= 2 || picked.size() >= MAX_PICK) {
                     break;
                 }
-                if (banned.contains(bet)) {
-                    continue;
-                }
-                String key = digitKey(bet);
-                if (!usedDigitKeys.add(key)) {
+                if (banned.contains(bet) || !used.add(digitKey(bet))) {
                     continue;
                 }
                 picked.add(bet);
                 reserved++;
-                int rank = indexOfBet(String.join(",", all), bet);
-                int seg = segmentOf(rank);
-                if (seg >= 0 && quota[seg] > 0) {
-                    quota[seg]--;
-                }
             }
         }
-
-        // 过拟合：大底内号最多占 OF_MAX_SLOTS 槽（条件转化优先），从所在段扣配额
-        int ofSlots = 0;
-        for (String bet : overfitSet) {
-            if (ofSlots >= OF_MAX_SLOTS || picked.size() >= MAX_PICK) {
-                break;
-            }
-            int rank = -1;
-            for (int r = 1; r <= n; r++) {
-                if (all.get(r - 1).equals(bet)) {
-                    rank = r;
-                    break;
-                }
-            }
-            if (rank < 1) {
-                continue;
-            }
-            if (banned.contains(bet)) {
-                continue;
-            }
-            String key = digitKey(bet);
-            if (!usedDigitKeys.add(key)) {
-                continue;
-            }
-            int seg = segmentOf(rank);
-            if (seg >= 0 && quota[seg] > 0) {
-                quota[seg]--;
-            } else {
-                int maxI = 3;
-                for (int s = 0; s < 4; s++) {
-                    if (quota[s] > quota[maxI]) {
-                        maxI = s;
+        int remain = MAX_PICK - picked.size();
+        int n = source.size();
+        if (remain > 0 && n > 0) {
+            for (int slot = 0; slot < remain && picked.size() < MAX_PICK; slot++) {
+                int idx = (slot * n) / remain;
+                String chosen = null;
+                for (int j = 0; j < n; j++) {
+                    String bet = source.get((idx + j) % n);
+                    if (bet == null || bet.length() != 3 || banned.contains(bet)) {
+                        continue;
                     }
-                }
-                if (quota[maxI] > 0) {
-                    quota[maxI]--;
-                }
-            }
-            picked.add(bet);
-            ofSlots++;
-        }
-
-        // 按段取号：段内按「过拟合加分 + 历史位次密度」取 Top，并做子箱去挤兑
-        for (int seg = 0; seg < 4; seg++) {
-            int need = quota[seg];
-            if (need <= 0) {
-                continue;
-            }
-            int lo = seg == 0 ? 1 : SEG_HI[seg - 1] + 1;
-            int hi = Math.min(SEG_HI[seg], n);
-            if (lo > hi) {
-                continue;
-            }
-            List<Integer> ranks = new ArrayList<>();
-            for (int r = lo; r <= hi; r++) {
-                ranks.add(r);
-            }
-            final Set<String> ofFinal = overfitSet;
-            ranks.sort(Comparator
-                    .comparingDouble((Integer r) -> {
-                        String bet = all.get(r - 1);
-                        double sc = rankScores[r];
-                        if (ofFinal.contains(bet)) {
-                            sc += 5.0;
-                        }
-                        sc += habitTicketBonus(bet, lastReal);
-                        // 段内再按子箱拉开：避免全挤在密度尖峰
-                        int span = hi - lo + 1;
-                        int bin = span <= 1 ? 0 : ((r - lo) * need) / span;
-                        sc += (need - bin) * 1e-4;
-                        return sc;
-                    }).reversed()
-                    .thenComparingInt(r -> r));
-
-            // 子箱各取至多 1，再按分补满
-            int span = hi - lo + 1;
-            int[] binUsed = new int[Math.max(1, need)];
-            int got = 0;
-            for (int r : ranks) {
-                if (got >= need || picked.size() >= MAX_PICK) {
+                    if (used.contains(digitKey(bet))) {
+                        continue;
+                    }
+                    chosen = bet;
                     break;
                 }
-                int bin = span <= 1 ? 0 : Math.min(need - 1, ((r - lo) * need) / span);
-                if (binUsed[bin] >= 1 && got >= Math.min(need, binUsed.length)) {
-                    continue;
-                }
-                if (binUsed[bin] >= 1) {
-                    continue;
-                }
-                String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
-                    continue;
-                }
-                String key = digitKey(bet);
-                if (usedDigitKeys.contains(key)) {
-                    continue;
-                }
-                usedDigitKeys.add(key);
-                picked.add(bet);
-                binUsed[bin]++;
-                got++;
-            }
-            for (int r : ranks) {
-                if (got >= need || picked.size() >= MAX_PICK) {
+                if (chosen == null) {
                     break;
                 }
-                String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
-                    continue;
-                }
-                String key = digitKey(bet);
-                if (usedDigitKeys.contains(key)) {
-                    continue;
-                }
-                usedDigitKeys.add(key);
-                picked.add(bet);
-                got++;
-            }
-        }
-
-        // 不足则全表按分补齐
-        if (picked.size() < MIN_PICK) {
-            List<Integer> ranks = new ArrayList<>();
-            for (int r = 1; r <= n; r++) {
-                ranks.add(r);
-            }
-            ranks.sort(Comparator
-                    .comparingDouble((Integer r) -> rankScores[r]).reversed()
-                    .thenComparingInt(r -> r));
-            for (int r : ranks) {
-                if (picked.size() >= MAX_PICK) {
-                    break;
-                }
-                String bet = all.get(r - 1);
-                if (bet == null || bet.length() != 3 || banned.contains(bet)) {
-                    continue;
-                }
-                String key = digitKey(bet);
-                if (usedDigitKeys.add(key)) {
-                    picked.add(bet);
-                }
+                used.add(digitKey(chosen));
+                picked.add(chosen);
             }
         }
         if (picked.size() < MIN_PICK) {
-            for (String bet : fillUniqueDigitSets(all, MAX_PICK)) {
-                if (picked.size() >= MAX_PICK) {
-                    break;
-                }
-                if (banned.contains(bet)) {
-                    continue;
-                }
-                String key = digitKey(bet);
-                if (usedDigitKeys.add(key)) {
-                    picked.add(bet);
-                }
-            }
-        }
-        // 实在凑不齐才回退上期号，保证仍有 10 注
-        if (picked.size() < MIN_PICK) {
-            for (String bet : all) {
+            for (String bet : source) {
                 if (picked.size() >= MAX_PICK) {
                     break;
                 }
                 if (bet == null || bet.length() != 3) {
                     continue;
                 }
-                String key = digitKey(bet);
-                if (usedDigitKeys.add(key)) {
+                if (used.add(digitKey(bet))) {
                     picked.add(bet);
                 }
             }
-        }
-        if (REALIGN_POOL_RANK) {
-            picked = realignToBestPoolRank(picked, all, banned);
         }
         return String.join(",", picked.subList(0, Math.min(MAX_PICK, picked.size())));
     }

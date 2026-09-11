@@ -23,10 +23,12 @@ public final class HistoryDataLoader {
 
     public static List<Hm> load3d() {
         return loadPreferExcel(new String[]{
-                "F:\\彩票\\3D.xlsx",
+                "X:\\彩票\\3D.xlsx",
+                "X:/彩票/3D.xlsx",
                 "D:\\彩票\\3D.xlsx",
-                "F:/彩票/3D.xlsx",
+                "F:\\彩票\\3D.xlsx",
                 "D:/彩票/3D.xlsx",
+                "F:/彩票/3D.xlsx",
                 "data/lottery/3D.xlsx"
         }, new String[]{
                 "F:\\彩票\\3d_asc.txt",
@@ -38,10 +40,12 @@ public final class HistoryDataLoader {
 
     public static List<Hm> loadPl3() {
         return loadPreferExcel(new String[]{
-                "F:\\彩票\\排列三.xlsx",
+                "X:\\彩票\\排列三.xlsx",
+                "X:/彩票/排列三.xlsx",
                 "D:\\彩票\\排列三.xlsx",
-                "F:/彩票/排列三.xlsx",
+                "F:\\彩票\\排列三.xlsx",
                 "D:/彩票/排列三.xlsx",
+                "F:/彩票/排列三.xlsx",
                 "data/lottery/排列三.xlsx"
         }, new String[]{
                 "F:\\彩票\\pl3_asc.txt",

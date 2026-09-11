@@ -31,12 +31,9 @@ public final class HitPeriod50Backtest {
             eval = Integer.parseInt(args[0]);
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("========== 近").append(eval).append("期命中期数回测 ==========\n");
-        sb.append("三码=10注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
-                .append("组直/组  七码=三位全中  胆码=至少1位/三位全中\n");
-        sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
-        sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期三位数字进各位；")
-                .append("三码同组改用大底最高排列。目标=命中期数最多。\n\n");
+        sb.append("========== 近").append(eval).append("期命中率回测 ==========\n");
+        sb.append("大底=当前算法完整1000序 → 开奖位次密集区间保留大部分 → ").append(Overfit20PredictUtils.MAX_TICKETS)
+                .append("注；10注从大底均匀转化\n\n");
 
         Game sd = runOne("福彩3D", HistoryDataLoader.load3d(),
                 RuleBasedPredictUtils.GameKind.SD_3D,
@@ -50,23 +47,30 @@ public final class HitPeriod50Backtest {
                 RuleBasedDingWeiUtils.GameKind.PL3,
                 RuleBasedDanMaUtils.GameKind.PL3, eval, sb);
 
-        sb.append("\n========== 汇总（命中期数） ==========\n");
+        sb.append("\n========== 命中率 ==========\n");
         sb.append(String.format(Locale.ROOT,
-                "%-8s | 三码直 | 三码组 | 过拟合直 | 过拟合组 | 七码全中 | 胆码1位 | 胆码全中 | 上期复用%n",
-                "彩种"));
-        appendRow(sb, sd);
-        appendRow(sb, pl3);
-        sb.append(String.format(Locale.ROOT,
-                "合计     | %4d | %4d | %6d | %6d | %6d | %6d | %6d%n",
-                sd.sanmaZx + pl3.sanmaZx, sd.sanmaGrp + pl3.sanmaGrp,
-                sd.ofZx + pl3.ofZx, sd.ofGrp + pl3.ofGrp,
-                sd.dwFull + pl3.dwFull, sd.danAny + pl3.danAny, sd.danFull + pl3.danFull));
+                "%-8s | 10注直选 | 大底直选 | 大底组选%n", "彩种"));
+        appendRateRow(sb, sd);
+        appendRateRow(sb, pl3);
 
         Path out = Path.of("reports/hitperiod_" + eval + ".txt");
         Files.createDirectories(out.getParent());
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
         sb.append("\n结果已写入: ").append(out.toAbsolutePath()).append('\n');
         System.out.println(sb);
+    }
+
+    private static void appendRateRow(StringBuilder sb, Game g) {
+        sb.append(String.format(Locale.ROOT,
+                "%-8s | %4d/%d (%5.2f%%) | %4d/%d (%5.2f%%) | %4d/%d (%5.2f%%)%n",
+                g.name,
+                g.sanmaZx, g.n, pct(g.sanmaZx, g.n),
+                g.ofZx, g.n, pct(g.ofZx, g.n),
+                g.ofGrp, g.n, pct(g.ofGrp, g.n)));
+    }
+
+    private static double pct(int hit, int n) {
+        return n == 0 ? 0 : hit * 100.0 / n;
     }
 
     private static void appendRow(StringBuilder sb, Game g) {
@@ -165,8 +169,7 @@ public final class HitPeriod50Backtest {
 
         Overfit20PredictUtils.PredictResult of = Overfit20PredictUtils.predictResult(hist, ofKind, compares);
         String ofCsv = of.poolCsv();
-        String raw = RuleBasedPredictUtils.predict(hist, compares, predKind, ofCsv);
-        String sanma = RecommendBetUtils.pickRecommendBets(raw, compares, ofCsv,
+        String sanma = RecommendBetUtils.pickRecommendBets(ofCsv, compares, ofCsv,
                 predKind == RuleBasedPredictUtils.GameKind.PL3);
         String dw = RuleBasedDingWeiUtils.predict(hist, compares, dwKind);
         String dan = RuleBasedDanMaUtils.predict(hist, compares, danKind);
@@ -241,7 +244,7 @@ public final class HitPeriod50Backtest {
                 .setQh(all.get(i).getQh())
                 .setAiHm(sanma)
                 .setAiRecommendHm(sanma)
-                .setAiFullHm(raw)
+                .setAiFullHm(ofCsv)
                 .setAiOverfitHm(ofCsv)
                 .setAiDingWeiHm(dw)
                 .setAiDanMaHm(dan)
