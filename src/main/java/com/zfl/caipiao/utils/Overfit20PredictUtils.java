@@ -20,8 +20,8 @@ import java.util.function.ToDoubleFunction;
 /**
  * 近 {@link #WINDOW} 期开奖 · 过拟合组合预测（只推 {@link #MAX_TICKETS} 组）。
  * <p>
- * 用近窗开奖做策略/邻域；从最新一期往前、只在近 {@link #EVAL_PERIODS} 期上因果动态调参
- *（band / 配额 /「预测与开奖单位置±1」），无写死开奖号、无写死 band/槽位表。
+ * 用近窗开奖做策略/邻域；从最新一期往前、只在近 {@link #EVAL_PERIODS} 期上动态调参。
+ * 池=近窗全汉明1（邻号优先交错）+ 习惯种子 + 邻号补满至 {@link #MAX_TICKETS} 注。
  * 回测只评估近 {@link #EVAL_PERIODS} 期，不做更长往期回测。
  * 目标：直选≥{@link #ZX_TARGET}、组选≥{@link #GROUP_TARGET}。
  */
@@ -33,8 +33,8 @@ public final class Overfit20PredictUtils {
     public static final int GROUP_COUNT = 5;
     /** 回测 / 因果调参只看近 10 期，不做往期回测 */
     public static final int EVAL_PERIODS = 10;
-    /** 只推直选注数上限（150 组） */
-    public static final int MAX_TICKETS = 150;
+    /** 只推直选注数上限（250 组） */
+    public static final int MAX_TICKETS = 250;
     /** 候选组形态上限（内部） */
     public static final int MAX_GROUPS = 120;
     public static final int ZX_TARGET = 4;
@@ -203,9 +203,9 @@ public final class Overfit20PredictUtils {
         List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover,
                 Math.max(60, ticketCap / 2));
         PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
-        // 3D 钉近 2 期全汉明1；排三只钉上期，避免占满池后跟飞号
-        LinkedHashSet<String> habitFirst = recentFullHam1(win, kind == GameKind.PL3 ? 1 : 2,
-                kind == GameKind.PL3 ? 32 : 64);
+        // 3D 钉近 3 期全汉明1（邻号优先交错）；排三钉近 2 期
+        LinkedHashSet<String> habitFirst = recentFullHam1(win, kind == GameKind.PL3 ? 2 : 3,
+                kind == GameKind.PL3 ? 56 : 84);
         habitFirst.addAll(habitSeedPool(win, 48));
         List<String> ham = kind == GameKind.PL3
                 ? buildPl3Ham1Pool(win, strategy, ticketCap)
@@ -217,7 +217,6 @@ public final class Overfit20PredictUtils {
         if (ENABLE_NEIGHBOR_EXPAND && directs.size() < ticketCap) {
             directs = expandSinglePosNeighbors(directs, ticketCap);
         }
-        // 去掉上一期开奖号本体，再补满 150
         if (banned != null && !banned.isEmpty()) {
             directs = PrevPeriodDedup.excludeTickets(directs, banned, ticketCap, extras);
         }
@@ -321,23 +320,21 @@ public final class Overfit20PredictUtils {
         return trimCap(out, cap);
     }
 
-    /** 近 ageN 期：本体 + 三位全汉明1（每期最多 28 注） */
+    /** 近 ageN 期：本体 + 三位全汉明1（邻号优先交错，每期最多 28 注） */
     static LinkedHashSet<String> recentFullHam1(List<String> window, int ageN, int cap) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
         if (window == null || window.isEmpty() || cap <= 0) {
             return out;
         }
+        int[] deltas = {1, 9, 2, 8, 3, 7, 4, 6, 5};
         for (int age = 0; age < ageN && window.size() > age && out.size() < cap; age++) {
             String seed = pad3(window.get(window.size() - 1 - age));
             out.add(seed);
             int[] d = {seed.charAt(0) - '0', seed.charAt(1) - '0', seed.charAt(2) - '0'};
-            for (int p = 0; p < 3 && out.size() < cap; p++) {
-                for (int v = 0; v < 10 && out.size() < cap; v++) {
-                    if (v == d[p]) {
-                        continue;
-                    }
+            for (int delta : deltas) {
+                for (int p = 0; p < 3 && out.size() < cap; p++) {
                     int[] n = {d[0], d[1], d[2]};
-                    n[p] = v;
+                    n[p] = (d[p] + delta) % 10;
                     out.add("" + n[0] + n[1] + n[2]);
                 }
             }
