@@ -3096,7 +3096,7 @@
         const items = hasActiveDadiFilter(filters)
             ? filterDadiItems(numbers, filters, indexList)
             : toDadiPopupItems(numbers, indexList);
-        const text = items.map(({ num }) => num).join('\n');
+        const text = items.map(({ num }) => num).join(' ');
         if (!text) {
             btn.textContent = '无可复制';
             setTimeout(() => { btn.textContent = '一键复制'; }, 1500);
