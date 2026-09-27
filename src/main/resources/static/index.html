@@ -1052,6 +1052,41 @@
             color: var(--accent-light);
         }
 
+        .seq-match-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            min-width: 140px;
+            max-width: 280px;
+        }
+
+        .seq-match-nums {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 4px;
+            max-height: 96px;
+            overflow: auto;
+            padding-top: 4px;
+            padding-left: 2px;
+        }
+
+        .seq-match-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .seq-match-empty {
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        .seq-match-cell .dadi-copy-btn {
+            align-self: flex-start;
+        }
+
         .dingwei-ball.highlight {
             background: linear-gradient(145deg, var(--accent-light), var(--accent));
             color: #1a1a2e;
@@ -2766,6 +2801,53 @@
         return idx >= 0 ? idx + 1 : 0;
     }
 
+    /** 当期以前全部直选命中序号（1-based）。dadi 表 newestFirst，更旧期在更大下标。 */
+    function collectPastDadiHitSeqs(list, currentIdx) {
+        const set = new Set();
+        if (!Array.isArray(list) || currentIdx < 0) return [];
+        for (let i = currentIdx + 1; i < list.length; i++) {
+            const item = list[i];
+            if (!item) continue;
+            const pos = getOverfitHitPosition(item.aiDadiHm, item.realHm);
+            if (pos > 0) set.add(pos);
+        }
+        return Array.from(set).sort((a, b) => a - b);
+    }
+
+    /** 命中序列向两侧各扩 5 注（如 22 → 17..27），再去重升序 */
+    function expandDadiHitSeqs(hitSeqs) {
+        const set = new Set();
+        if (!hitSeqs || !hitSeqs.length) return [];
+        for (const pos of hitSeqs) {
+            for (let s = pos - 5; s <= pos + 5; s++) {
+                if (s >= 1) set.add(s);
+            }
+        }
+        return Array.from(set).sort((a, b) => a - b);
+    }
+
+    /** 用序号从当期大底池取号；越界序号跳过 */
+    function resolveSeqMatchItems(aiDadiHm, hitSeqs) {
+        if (!aiDadiHm || !hitSeqs || !hitSeqs.length) return [];
+        const nums = String(aiDadiHm).split(',').map(s => s.trim()).filter(Boolean);
+        const out = [];
+        for (const seq of hitSeqs) {
+            if (seq < 1 || seq > nums.length) continue;
+            out.push({ seq, num: nums[seq - 1] });
+        }
+        return out;
+    }
+
+    function formatSeqMatchCell(matchCsv, realHm, count) {
+        if (!matchCsv) {
+            return `<div class="dadi-model-cell"><span class="dadi-model-status empty">暂无命中序列</span></div>`;
+        }
+        return `<div class="dadi-model-cell">
+            ${formatDadiPreview(matchCsv, realHm)}
+            <span class="dadi-model-status pending">序列匹配 · ${count} 注</span>
+        </div>`;
+    }
+
     function formatOverfitModelStatus(overfitHm, realHm) {
         if (!overfitHm) {
             return '<span class="dadi-model-status empty">暂无</span>';
@@ -2920,14 +3002,21 @@
         return true;
     }
 
-    function filterDadiItems(numbers, filters) {
+    function toDadiPopupItems(numbers, indexList) {
+        return numbers.map((num, i) => ({
+            num,
+            idx: indexList && indexList[i] != null ? indexList[i] : i + 1
+        }));
+    }
+
+    function filterDadiItems(numbers, filters, indexList) {
         const freeDigits = filters.freeDigits;
         const pos = filters.positions;
         const seq = filters.seq;
         const freeActive = hasDadiFreeDigitFilter(freeDigits);
         const posActive = hasDadiPositionFilter(pos);
         const seqActive = hasDadiSeqRangeFilter(seq);
-        return numbers.map((num, i) => ({ num, idx: i + 1 }))
+        return toDadiPopupItems(numbers, indexList)
             .filter(({ num, idx }) => {
                 if (freeActive && !matchesDadiFreeDigitSearch(num, freeDigits)) return false;
                 if (posActive && !matchesDadiPositionSearch(num, pos)) return false;
@@ -2936,7 +3025,7 @@
             });
     }
 
-    function renderDadiPopupGrid(numbers, realHm, filters, matchMode) {
+    function renderDadiPopupGrid(numbers, realHm, filters, matchMode, indexList) {
         let hitPos = 0;
         if (realHm) {
             if (matchMode === 'zusan' && isPairCode(realHm)) {
@@ -2947,25 +3036,38 @@
                 hitPos = numbers.map(n => pad3Code(n)).indexOf(target) + 1;
             }
         }
+        // 命中高亮：若有自定义序号，用真实序号比对
+        if (realHm && indexList && indexList.length === numbers.length) {
+            const target = matchMode === 'zusan' && isPairCode(realHm)
+                ? sortedDigitKey(realHm)
+                : pad3Code(realHm);
+            for (let i = 0; i < numbers.length; i++) {
+                const n = matchMode === 'zusan' ? String(numbers[i]).trim() : pad3Code(numbers[i]);
+                if (n === target) {
+                    hitPos = indexList[i];
+                    break;
+                }
+            }
+        }
         const items = hasActiveDadiFilter(filters)
-            ? filterDadiItems(numbers, filters)
-            : numbers.map((num, i) => ({ num, idx: i + 1 }));
+            ? filterDadiItems(numbers, filters, indexList)
+            : toDadiPopupItems(numbers, indexList);
         return items.map(({ num, idx }) => renderDadiNumItem(num, idx, hitPos)).join('');
     }
 
-    let dadiPopupState = { numbers: [], realHm: '', matchMode: 'exact' };
+    let dadiPopupState = { numbers: [], indexList: null, realHm: '', matchMode: 'exact' };
 
     function filterDadiPopupGrid() {
         const grid = document.getElementById('dadi-popup-grid');
         if (!grid) return;
         const filters = getDadiFilters();
-        const { numbers, realHm, matchMode } = dadiPopupState;
-        grid.innerHTML = renderDadiPopupGrid(numbers, realHm, filters, matchMode);
+        const { numbers, indexList, realHm, matchMode } = dadiPopupState;
+        grid.innerHTML = renderDadiPopupGrid(numbers, realHm, filters, matchMode, indexList);
         const countEl = document.getElementById('dadi-popup-search-count');
         if (countEl) {
             const total = numbers.length;
             const active = hasActiveDadiFilter(filters);
-            const visible = active ? filterDadiItems(numbers, filters).length : total;
+            const visible = active ? filterDadiItems(numbers, filters, indexList).length : total;
             countEl.textContent = active ? `显示 ${visible} / ${total} 注` : `共 ${total} 注`;
         }
     }
@@ -2988,10 +3090,10 @@
     async function copyDadiPopupNumbers() {
         const btn = document.getElementById('qima-popup-copy-btn');
         const filters = getDadiFilters();
-        const { numbers } = dadiPopupState;
+        const { numbers, indexList } = dadiPopupState;
         const items = hasActiveDadiFilter(filters)
-            ? filterDadiItems(numbers, filters)
-            : numbers.map((num, i) => ({ num, idx: i + 1 }));
+            ? filterDadiItems(numbers, filters, indexList)
+            : toDadiPopupItems(numbers, indexList);
         const text = items.map(({ num }) => num).join('\n');
         if (!text) {
             btn.textContent = '无可复制';
@@ -3012,9 +3114,9 @@
         }
     }
 
-    function showDadiNumbersPopup(numbers, realHm, seq, modelLabel, matchMode) {
+    function showDadiNumbersPopup(numbers, realHm, seq, modelLabel, matchMode, indexList) {
         const mode = matchMode || 'exact';
-        dadiPopupState = { numbers, realHm, matchMode: mode };
+        dadiPopupState = { numbers, indexList: indexList || null, realHm, matchMode: mode };
         const title = seq ? `序号 ${seq} · ${modelLabel}` : modelLabel;
         const emptyFilters = {
             freeDigits: '',
@@ -3070,7 +3172,7 @@
                     <span class="dadi-search-count" id="dadi-popup-search-count">共 ${numbers.length} 注</span>
                 </div>
             </div>
-            <div class="dadi-numbers-grid" id="dadi-popup-grid">${renderDadiPopupGrid(numbers, realHm, emptyFilters, mode)}</div>`;
+            <div class="dadi-numbers-grid" id="dadi-popup-grid">${renderDadiPopupGrid(numbers, realHm, emptyFilters, mode, indexList)}</div>`;
         openQimaPopup(title, bodyHtml, {
             dadiView: true
         });
@@ -3113,7 +3215,7 @@
             return;
         }
         if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>大底直选</th><th>实际开奖</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>大底直选</th><th>实际开奖</th><th>序列匹配</th></tr>';
             return;
         }
         if (compareType === 'overfit') {
@@ -3133,7 +3235,8 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'dadi' || compareType === 'overfit') return 3;
+        if (compareType === 'dadi') return 4;
+        if (compareType === 'overfit') return 3;
         if (compareType === 'danma') return 4;
         return 3;
     }
@@ -3158,7 +3261,7 @@
     function closeQimaPopup() {
         document.querySelector('#qima-popup-overlay .qima-popup').classList.remove('dadi-view-popup');
         document.getElementById('qima-popup-copy-btn').hidden = true;
-        dadiPopupState = { numbers: [], realHm: '', matchMode: 'exact' };
+        dadiPopupState = { numbers: [], indexList: null, realHm: '', matchMode: 'exact' };
         document.getElementById('qima-popup-overlay').classList.remove('active');
     }
 
@@ -3560,15 +3663,41 @@
             } else if (compareType === 'dadi' || compareType === 'overfit') {
                 const poolTitle = compareType === 'dadi' ? '大底直选' : '过拟合组合';
                 const displayHm = (compareType === 'dadi' ? item.aiDadiHm : item.aiOverfitHm) || '';
-                row.innerHTML = `
-                    <td class="seq-cell">${seq}</td>
-                    <td>${formatOverfitModelCell(displayHm, item.realHm)}</td>
-                    <td>${realBalls}</td>`;
-                if (displayHm) {
-                    const numbers = displayHm.split(',').map(s => s.trim()).filter(Boolean);
-                    row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
-                        viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, poolTitle);
-                    });
+                if (compareType === 'dadi') {
+                    const hitSeqs = expandDadiHitSeqs(collectPastDadiHitSeqs(filteredData, idx));
+                    const matchItems = resolveSeqMatchItems(displayHm, hitSeqs);
+                    const matchCsv = matchItems.map(i => i.num).join(',');
+                    row.innerHTML = `
+                        <td class="seq-cell">${seq}</td>
+                        <td class="dadi-pool-cell">${formatOverfitModelCell(displayHm, item.realHm)}</td>
+                        <td>${realBalls}</td>
+                        <td class="seq-match-col">${formatSeqMatchCell(matchCsv, item.realHm, matchItems.length)}</td>`;
+                    const poolCell = row.querySelector('.dadi-pool-cell');
+                    const matchCell = row.querySelector('.seq-match-col');
+                    if (displayHm && poolCell) {
+                        const numbers = displayHm.split(',').map(s => s.trim()).filter(Boolean);
+                        poolCell.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
+                            viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, poolTitle);
+                        });
+                    }
+                    if (matchItems.length && matchCell) {
+                        const matchNums = matchItems.map(i => i.num);
+                        const matchIdxs = matchItems.map(i => i.seq);
+                        matchCell.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
+                            viewBtn.onclick = () => showDadiNumbersPopup(matchNums, item.realHm, seq, '序列匹配', 'exact', matchIdxs);
+                        });
+                    }
+                } else {
+                    row.innerHTML = `
+                        <td class="seq-cell">${seq}</td>
+                        <td>${formatOverfitModelCell(displayHm, item.realHm)}</td>
+                        <td>${realBalls}</td>`;
+                    if (displayHm) {
+                        const numbers = displayHm.split(',').map(s => s.trim()).filter(Boolean);
+                        row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
+                            viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, poolTitle);
+                        });
+                    }
                 }
             } else if (compareType === 'danma') {
                 const hits = getDanMaPosHits(item.aiDanMaHm, item.realHm);
