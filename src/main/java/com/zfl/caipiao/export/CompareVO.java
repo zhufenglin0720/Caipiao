@@ -27,6 +27,9 @@ public class CompareVO {
     @ExcelProperty("过拟合组合")
     private String aiOverfitHm;
 
+    @ExcelProperty("大底直选")
+    private String aiFullHm;
+
     @ExcelProperty("AI预测胆码")
     private String aiDanMaHm;
 

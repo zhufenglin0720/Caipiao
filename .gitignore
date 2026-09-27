@@ -39,3 +39,6 @@ data/lottery/
 
 # lottery local dumps (keep code only)
 data/lottery/
+
+# local decompile scratch
+.tmp-decompile/

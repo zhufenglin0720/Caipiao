@@ -545,6 +545,43 @@
             align-items: center;
         }
 
+        .qima-pos-panel > .qima-pos-summary {
+            display: block;
+        }
+
+        .hit-extra-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 10px;
+            margin-top: 6px;
+            max-height: 48px;
+            overflow: auto;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .hit-extra-line:first-child {
+            margin-top: 0;
+        }
+
+        .hit-extra-line .pos-label {
+            font-weight: 600;
+            color: var(--purple);
+            white-space: nowrap;
+        }
+
+        .qima-seq-list {
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .qima-seq-list .pos-label {
+            font-weight: 600;
+            color: var(--purple);
+        }
+
         .qima-detail-btn {
             padding: 5px 12px;
             border: 1px solid var(--purple);
@@ -1626,6 +1663,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">大底直选</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
@@ -1754,6 +1792,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">大底直选</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
@@ -2525,10 +2564,10 @@
         return window.matchMedia('(max-width: 768px)').matches;
     }
 
-    function filterByPeriodCount(data, count) {
+    function filterByPeriodCount(data, count, newestFirst) {
         if (!Array.isArray(data)) return [];
         if (!count) return [...data];
-        return data.slice(-count);
+        return newestFirst ? data.slice(0, count) : data.slice(-count);
     }
 
     function adjustPredictTable(type) {
@@ -2607,7 +2646,6 @@
     }
 
     function switchCompareTab(type, tab, el) {
-        if (tab === 'dadi') tab = 'sanma';
         compareTabs[type] = tab;
         el.parentElement.querySelectorAll('.compare-tab').forEach(b => b.classList.remove('active'));
         el.classList.add('active');
@@ -2714,10 +2752,17 @@
         </div>`;
     }
 
+    function pad3Code(s) {
+        const t = String(s ?? '').trim();
+        if (!t) return '';
+        return t.length >= 3 ? t.slice(-3) : t.padStart(3, '0');
+    }
+
     function getOverfitHitPosition(overfitHm, realHm) {
         if (!overfitHm || !realHm) return 0;
-        const nums = String(overfitHm).split(',').map(s => s.trim()).filter(Boolean);
-        const idx = nums.indexOf(realHm);
+        const target = pad3Code(realHm);
+        const nums = String(overfitHm).split(',').map(s => pad3Code(s)).filter(Boolean);
+        const idx = nums.indexOf(target);
         return idx >= 0 ? idx + 1 : 0;
     }
 
@@ -2898,7 +2943,8 @@
                 const key = sortedDigitKey(realHm);
                 hitPos = numbers.map(n => String(n).trim()).indexOf(key) + 1;
             } else {
-                hitPos = numbers.indexOf(realHm) + 1;
+                const target = pad3Code(realHm);
+                hitPos = numbers.map(n => pad3Code(n)).indexOf(target) + 1;
             }
         }
         const items = hasActiveDadiFilter(filters)
@@ -3052,6 +3098,10 @@
     }
 
     function getCompareData(type, compareType) {
+        if (compareType === 'dadi') {
+            const list = type === '3d' ? currentData.sdDadi : currentData.pl3Dadi;
+            return Array.isArray(list) ? list : [];
+        }
         return type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
     }
 
@@ -3060,6 +3110,10 @@
         if (!thead) return;
         if (compareType === 'qima') {
             thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
+            return;
+        }
+        if (compareType === 'dadi') {
+            thead.innerHTML = '<tr><th>序号</th><th>大底直选</th><th>实际开奖</th></tr>';
             return;
         }
         if (compareType === 'overfit') {
@@ -3079,7 +3133,7 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'overfit') return 3;
+        if (compareType === 'dadi' || compareType === 'overfit') return 3;
         if (compareType === 'danma') return 4;
         return 3;
     }
@@ -3130,11 +3184,26 @@
         const summaryEl = document.getElementById(domPrefix(type) + '-qima-pos-summary');
         if (!panel) return;
 
-        if (compareTabs[type] !== 'qima') {
+        const tab = compareTabs[type];
+        if (tab !== 'qima' && tab !== 'dadi' && tab !== 'overfit') {
             panel.style.display = 'none';
             return;
         }
         panel.style.display = 'block';
+
+        if (tab === 'dadi' || tab === 'overfit') {
+            const field = tab === 'dadi' ? 'aiDadiHm' : 'aiOverfitHm';
+            const ranks = [];
+            compareData.forEach(item => {
+                const pos = getOverfitHitPosition(item[field], item.realHm);
+                if (pos > 0) ranks.push(pos);
+            });
+            ranks.sort((a, b) => a - b);
+            summaryEl.innerHTML = ranks.length
+                ? `<div class="hit-extra-line"><span class="pos-label">命中排序</span>${ranks.map(n => `<span class="hit-extra-chip">${n}</span>`).join('')}</div>`
+                : '<span style="color:var(--text-secondary);font-size:13px">当前范围内无直选命中</span>';
+            return;
+        }
 
         const hits = [];
         compareData.forEach((item, idx) => {
@@ -3157,14 +3226,22 @@
             return;
         }
 
+        const latest = hits.slice(0, 5);
+        const comboHtml = latest.map(({ positions }) =>
+            `<div class="qima-seq-line">百位 第${positions.bai}位 十位 第${positions.shi}位 个位 第${positions.ge}位</div>`
+        ).join('');
+
         summaryEl.innerHTML = `
+            <div class="qima-pos-summary">
             <div class="qima-pos-summary-item"><span class="pos-label">百位索引</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
             <div class="qima-pos-summary-item"><span class="pos-label">十位索引</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
             <div class="qima-pos-summary-item"><span class="pos-label">个位索引</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
             <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>
             <div class="qima-pos-summary-actions">
                 <button type="button" class="qima-detail-btn" id="${domPrefix(type)}-qima-detail-btn">查看命中明细</button>
-            </div>`;
+            </div>
+            </div>
+            <div class="qima-seq-list"><div class="pos-label" style="margin-bottom:2px">开过序列</div>${comboHtml}</div>`;
 
         document.getElementById(domPrefix(type) + '-qima-detail-btn').onclick = () => showQimaHitsPopup(hits);
     }
@@ -3244,12 +3321,13 @@
 
     function checkOverfitZx(overfitHm, realHm) {
         if (!overfitHm || !realHm) return false;
-        return String(overfitHm).split(',').map(s => s.trim()).includes(realHm);
+        return getOverfitHitPosition(overfitHm, realHm) > 0;
     }
 
     function checkOverfitGroup(overfitHm, realHm) {
-        if (!overfitHm || !realHm || realHm.length !== 3) return false;
-        const key = sortedDigitKey(realHm);
+        const target = pad3Code(realHm);
+        if (!overfitHm || target.length !== 3) return false;
+        const key = sortedDigitKey(target);
         return String(overfitHm).split(',').map(s => s.trim()).filter(Boolean)
             .some(p => sortedDigitKey(p.padStart(3, '0').slice(-3)) === key);
     }
@@ -3371,17 +3449,19 @@
         const el = $(type, 'stats');
         const tab = compareType || compareTabs[type];
 
-        if (tab === 'overfit') {
+        if (tab === 'dadi' || tab === 'overfit') {
+            const field = tab === 'dadi' ? 'aiDadiHm' : 'aiOverfitHm';
+            const periodLabel = tab === 'dadi' ? '有大底预测期数' : '有组合预测期数';
             let zx = 0, gp = 0;
-            const total = compareData.filter(i => i.aiOverfitHm).length;
+            const total = compareData.filter(i => i[field]).length;
             compareData.forEach(item => {
-                if (checkOverfitZx(item.aiOverfitHm, item.realHm)) zx++;
-                if (checkOverfitGroup(item.aiOverfitHm, item.realHm)) gp++;
+                if (checkOverfitZx(item[field], item.realHm)) zx++;
+                if (checkOverfitGroup(item[field], item.realHm)) gp++;
             });
             const zxRate = total > 0 ? ((zx / total) * 100).toFixed(1) : 0;
             const gpRate = total > 0 ? ((gp / total) * 100).toFixed(1) : 0;
             el.innerHTML = `
-                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有组合预测期数</div></div>
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">${periodLabel}</div></div>
                 <div class="stat-card"><div class="stat-value">${zx}/${total}</div><div class="stat-label">直选命中</div></div>
                 <div class="stat-card"><div class="stat-value">${zxRate}%</div><div class="stat-label">直选命中率</div></div>
                 <div class="stat-card"><div class="stat-value">${gp}/${total}</div><div class="stat-label">组选命中</div></div>
@@ -3436,7 +3516,11 @@
     function renderTable(type) {
         const compareType = compareTabs[type];
         const data = getCompareData(type, compareType);
-        const filteredData = [...filterByPeriodCount(data, filters[type])].reverse();
+        const newestFirst = compareType === 'dadi';
+        const filteredData = filterByPeriodCount(data, filters[type], newestFirst);
+        if (!newestFirst) {
+            filteredData.reverse();
+        }
         const colspan = predictTableColspan(type, compareType);
         renderStats(type, filteredData, compareType);
         renderQimaPosStats(type, filteredData);
@@ -3473,8 +3557,9 @@
                     const btn = row.querySelector('.qima-hit-btn');
                     btn.onclick = () => showQimaIndexPopup(seq, positions, item.aiDingWeiHm, item.realHm);
                 }
-            } else if (compareType === 'overfit') {
-                const displayHm = item.aiOverfitHm || '';
+            } else if (compareType === 'dadi' || compareType === 'overfit') {
+                const poolTitle = compareType === 'dadi' ? '大底直选' : '过拟合组合';
+                const displayHm = (compareType === 'dadi' ? item.aiDadiHm : item.aiOverfitHm) || '';
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
                     <td>${formatOverfitModelCell(displayHm, item.realHm)}</td>
@@ -3482,7 +3567,7 @@
                 if (displayHm) {
                     const numbers = displayHm.split(',').map(s => s.trim()).filter(Boolean);
                     row.querySelectorAll('.dadi-view-btn').forEach(viewBtn => {
-                        viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, '过拟合组合');
+                        viewBtn.onclick = () => showDadiNumbersPopup(numbers, item.realHm, seq, poolTitle);
                     });
                 }
             } else if (compareType === 'danma') {
