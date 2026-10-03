@@ -31,6 +31,10 @@ public final class Overfit20PredictUtils {
    private static final int COVER_META = 10;
    private static final int TUNE_WARMUP = 4;
    static volatile boolean ENABLE_NEIGHBOR_EXPAND = true;
+   /** 过拟合习惯种子：近窗全汉明1 的期数（3D / 排三） */
+   static int HABIT_HAM1_AGES_SD = 2;
+   static int HABIT_HAM1_AGES_PL3 = 1;
+   static int HABIT_SEED_CAP = 48;
 
    private Overfit20PredictUtils() {
    }
@@ -158,9 +162,11 @@ public final class Overfit20PredictUtils {
          List<String> strategy = buildTicketPool(win, topN, bestLo, bestHi, bestTake, posM, cover, Math.max(60, ticketCap / 2));
          Overfit20PredictUtils.PlusMinus1Profile pm1 = learnPlusMinus1Profile(win, strategy);
          LinkedHashSet<String> habitFirst = recentFullHam1(
-            win, kind == Overfit20PredictUtils.GameKind.PL3 ? 1 : 2, kind == Overfit20PredictUtils.GameKind.PL3 ? 32 : 64
+            win,
+            kind == Overfit20PredictUtils.GameKind.PL3 ? HABIT_HAM1_AGES_PL3 : HABIT_HAM1_AGES_SD,
+            kind == Overfit20PredictUtils.GameKind.PL3 ? 32 : 64
          );
-         habitFirst.addAll(habitSeedPool(win, 48));
+         habitFirst.addAll(habitSeedPool(win, HABIT_SEED_CAP));
          List<String> ham = kind == Overfit20PredictUtils.GameKind.PL3 ? buildPl3Ham1Pool(win, strategy, ticketCap) : buildSdHam1Pool(win, strategy, ticketCap);
          LinkedHashSet<String> merged = new LinkedHashSet<>(habitFirst);
          merged.addAll(ham);

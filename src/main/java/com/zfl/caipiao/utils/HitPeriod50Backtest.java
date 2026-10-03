@@ -32,7 +32,8 @@ public final class HitPeriod50Backtest {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("========== 近").append(eval).append("期命中期数回测 ==========\n");
-        sb.append("三码=10注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
+        sb.append("三码=10注直/组  大底=").append(RuleBasedPredictUtils.maxBetLimit())
+                .append("注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
                 .append("组直/组  七码=三位全中  胆码=至少1位/三位全中\n");
         sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
         sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期三位数字进各位；")
@@ -52,13 +53,14 @@ public final class HitPeriod50Backtest {
 
         sb.append("\n========== 汇总（命中期数） ==========\n");
         sb.append(String.format(Locale.ROOT,
-                "%-8s | 三码直 | 三码组 | 过拟合直 | 过拟合组 | 七码全中 | 胆码1位 | 胆码全中 | 上期复用%n",
+                "%-8s | 三码直 | 三码组 | 大底直 | 大底组 | 过拟合直 | 过拟合组 | 七码全中 | 胆码1位 | 胆码全中 | 上期复用%n",
                 "彩种"));
         appendRow(sb, sd);
         appendRow(sb, pl3);
         sb.append(String.format(Locale.ROOT,
-                "合计     | %4d | %4d | %6d | %6d | %6d | %6d | %6d%n",
+                "合计     | %4d | %4d | %4d | %4d | %6d | %6d | %6d | %6d | %6d%n",
                 sd.sanmaZx + pl3.sanmaZx, sd.sanmaGrp + pl3.sanmaGrp,
+                sd.dadiZx + pl3.dadiZx, sd.dadiGrp + pl3.dadiGrp,
                 sd.ofZx + pl3.ofZx, sd.ofGrp + pl3.ofGrp,
                 sd.dwFull + pl3.dwFull, sd.danAny + pl3.danAny, sd.danFull + pl3.danFull));
 
@@ -71,8 +73,9 @@ public final class HitPeriod50Backtest {
 
     private static void appendRow(StringBuilder sb, Game g) {
         sb.append(String.format(Locale.ROOT,
-                "%-8s | %4d/%d | %4d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %d%n",
-                g.name, g.sanmaZx, g.n, g.sanmaGrp, g.n, g.ofZx, g.n, g.ofGrp, g.n,
+                "%-8s | %4d/%d | %4d/%d | %4d/%d | %4d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %d%n",
+                g.name, g.sanmaZx, g.n, g.sanmaGrp, g.n, g.dadiZx, g.n, g.dadiGrp, g.n,
+                g.ofZx, g.n, g.ofGrp, g.n,
                 g.dwFull, g.n, g.danAny, g.n, g.danFull, g.n, g.dup));
     }
 
@@ -115,8 +118,8 @@ public final class HitPeriod50Backtest {
             int done = i - start + 1;
             if (done % 10 == 0 || done == eval) {
                 System.out.printf(Locale.ROOT,
-                        "%s 进度 %d/%d | 三码直%d 过拟合直%d 七码%d 胆码%d 复用%d%n",
-                        name, done, eval, g.sanmaZx, g.ofZx, g.dwFull, g.danAny, g.dup);
+                        "%s 进度 %d/%d | 三码直%d 大底直%d 过拟合直%d 七码%d 胆码%d%n",
+                        name, done, eval, g.sanmaZx, g.dadiZx, g.ofZx, g.dwFull, g.danAny);
             }
         }
         long cost = System.currentTimeMillis() - t0;
@@ -124,6 +127,9 @@ public final class HitPeriod50Backtest {
         out.append(String.format(Locale.ROOT,
                 "三码10注：直选=%d/%d  组选=%d/%d  与上期完全相同=%d%n",
                 g.sanmaZx, g.n, g.sanmaGrp, g.n, g.dupSanma));
+        out.append(String.format(Locale.ROOT,
+                "大底%d注：直选=%d/%d  组选=%d/%d%n",
+                RuleBasedPredictUtils.maxBetLimit(), g.dadiZx, g.n, g.dadiGrp, g.n));
         out.append(String.format(Locale.ROOT,
                 "过拟合%d组：直选=%d/%d  组选=%d/%d  池均=%.1f  与上期完全相同=%d%n",
                 Overfit20PredictUtils.MAX_TICKETS, g.ofZx, g.n, g.ofGrp, g.n,
@@ -188,6 +194,12 @@ public final class HitPeriod50Backtest {
             }
             if (containsGrp(sanma, actual)) {
                 g.sanmaGrp++;
+            }
+            if (containsZx(raw, actual)) {
+                g.dadiZx++;
+            }
+            if (containsGrp(raw, actual)) {
+                g.dadiGrp++;
             }
             if (s.ofZx) {
                 g.ofZx++;
@@ -330,6 +342,8 @@ public final class HitPeriod50Backtest {
         int n;
         int sanmaZx;
         int sanmaGrp;
+        int dadiZx;
+        int dadiGrp;
         int ofZx;
         int ofGrp;
         int ofSize;

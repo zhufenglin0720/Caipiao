@@ -39,6 +39,40 @@ public final class HistoryDataLoader {
       );
    }
 
+   /** 优先在线拉取开奖，失败再回退本地 Excel / txt */
+   public static List<Hm> load3dPreferOnline() {
+      return loadPreferOnline(
+         new String[]{"http://data.17500.cn/3d_asc.txt"},
+         new String[]{"X:\\彩票\\3D.xlsx", "F:\\彩票\\3D.xlsx", "D:\\彩票\\3D.xlsx", "data/lottery/3D.xlsx"},
+         new String[]{"F:\\彩票\\3d_asc.txt", "D:\\彩票\\3d_asc.txt", "data/lottery/3d_asc.txt"},
+         true
+      );
+   }
+
+   public static List<Hm> loadPl3PreferOnline() {
+      return loadPreferOnline(
+         new String[]{"http://data.17500.cn/pl3_asc.txt"},
+         new String[]{"X:\\彩票\\排列三.xlsx", "F:\\彩票\\排列三.xlsx", "D:\\彩票\\排列三.xlsx", "data/lottery/排列三.xlsx"},
+         new String[]{"F:\\彩票\\pl3_asc.txt", "D:\\彩票\\pl3_asc.txt", "data/lottery/pl3_asc.txt"},
+         false
+      );
+   }
+
+   private static List<Hm> loadPreferOnline(String[] onlineUrls, String[] excelPaths, String[] txtPaths, boolean is3d) {
+      for (String url : onlineUrls) {
+         try {
+            List<Hm> list = loadAscText(url, is3d);
+            if (list != null && !list.isEmpty()) {
+               System.out.println("在线读取: " + url + " 期数=" + list.size() + (is3d ? " [3D]" : " [排列三]"));
+               return normalize(list);
+            }
+         } catch (Exception e) {
+            System.out.println("在线失败 " + url + ": " + e.getMessage());
+         }
+      }
+      return loadPreferExcel(excelPaths, txtPaths, is3d);
+   }
+
    private static List<Hm> loadPreferExcel(String[] excelPaths, String[] txtPaths, boolean is3d) {
       for (String p : excelPaths) {
          Path path = Path.of(p);
