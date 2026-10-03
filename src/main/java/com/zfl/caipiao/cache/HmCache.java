@@ -13,7 +13,6 @@ public class HmCache {
    private static final List<HmCache.DadiCompareDto> SD_DADI_COMPARE_CACHE = new ArrayList<>();
    private static final List<HmCache.DadiCompareDto> PL3_DADI_COMPARE_CACHE = new ArrayList<>();
    private static final List<HmCache.PnlRecordDto> PNL_CACHE = new ArrayList<>();
-   private static final int DADI_KEEP = 30;
 
    public static List<Hm> getSdCache() {
       return SD_CACHE;
@@ -99,18 +98,10 @@ public class HmCache {
 
    public static void addSdDadiCompareCache(HmCache.DadiCompareDto dadiCompareDto) {
       SD_DADI_COMPARE_CACHE.add(0, dadiCompareDto);
-      trimDadi(SD_DADI_COMPARE_CACHE);
    }
 
    public static void addPl3DadiCompareCache(HmCache.DadiCompareDto dadiCompareDto) {
       PL3_DADI_COMPARE_CACHE.add(0, dadiCompareDto);
-      trimDadi(PL3_DADI_COMPARE_CACHE);
-   }
-
-   private static void trimDadi(List<HmCache.DadiCompareDto> cache) {
-      while (cache.size() > 30) {
-         cache.remove(cache.size() - 1);
-      }
    }
 
    public static void addSdCache(Hm hm) {

@@ -148,7 +148,7 @@ public class DadiService {
                      .setRealHm(vo.getRealHm())
                )
                .toList();
-            List<HmCache.DadiCompareDto> dtos = loaded.size() > 30 ? new ArrayList<>(loaded.subList(0, 30)) : new ArrayList<>(loaded);
+            List<HmCache.DadiCompareDto> dtos = new ArrayList<>(loaded);
             int before = dtos.size();
             dtos = dropSettledDuplicateOfPending(dtos);
             if (is3D) {

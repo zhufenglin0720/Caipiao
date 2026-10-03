@@ -2815,12 +2815,12 @@
         return Array.from(set).sort((a, b) => a - b);
     }
 
-    /** 命中序列向两侧各扩 5 注（如 22 → 17..27），再去重升序 */
+    /** 命中序列向两侧各扩 2 注（如 22 → 20..24），再去重升序 */
     function expandDadiHitSeqs(hitSeqs) {
         const set = new Set();
         if (!hitSeqs || !hitSeqs.length) return [];
         for (const pos of hitSeqs) {
-            for (let s = pos - 5; s <= pos + 5; s++) {
+            for (let s = pos - 2; s <= pos + 2; s++) {
                 if (s >= 1) set.add(s);
             }
         }
