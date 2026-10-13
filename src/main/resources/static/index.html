@@ -1737,6 +1737,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">大底直选</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
@@ -1866,6 +1867,7 @@
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">大底直选</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
@@ -2882,9 +2884,18 @@
         if (!matchCsv) {
             return `<div class="dadi-model-cell"><span class="dadi-model-status empty">暂无命中序列</span></div>`;
         }
+        const zxPos = getOverfitHitPosition(matchCsv, realHm);
+        let statusHtml;
+        if (!realHm) {
+            statusHtml = `<span class="dadi-model-status pending">${statusLabel} · ${count} 注</span>`;
+        } else if (zxPos > 0) {
+            statusHtml = `<span class="dadi-model-status hit">${statusLabel}命中，第 ${zxPos} 注</span>`;
+        } else {
+            statusHtml = `<span class="dadi-model-status miss">${statusLabel} · ${count} 注 · 未命中</span>`;
+        }
         return `<div class="dadi-model-cell">
             ${formatDadiPreview(matchCsv, realHm)}
-            <span class="dadi-model-status pending">${statusLabel} · ${count} 注</span>
+            ${statusHtml}
         </div>`;
     }
 
@@ -3236,8 +3247,25 @@
         tbody.appendChild(row);
     }
 
-    function getCompareData(type, compareType) {
+    function poolTabConfig(compareType) {
         if (compareType === 'dadi') {
+            return { title: '大底直选', field: 'aiDadiHm', periodLabel: '有大底预测期数' };
+        }
+        if (compareType === 'dadi1000') {
+            return { title: '大底1000注', field: 'aiDadi1000Hm', periodLabel: '有1000注预测期数' };
+        }
+        if (compareType === 'overfit') {
+            return { title: '过拟合组合', field: 'aiOverfitHm', periodLabel: '有组合预测期数' };
+        }
+        return null;
+    }
+
+    function isPoolCompareTab(compareType) {
+        return compareType === 'dadi' || compareType === 'dadi1000' || compareType === 'overfit';
+    }
+
+    function getCompareData(type, compareType) {
+        if (compareType === 'dadi' || compareType === 'dadi1000') {
             const list = type === '3d' ? currentData.sdDadi : currentData.pl3Dadi;
             return Array.isArray(list) ? list : [];
         }
@@ -3251,12 +3279,9 @@
             thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
             return;
         }
-        if (compareType === 'dadi') {
-            thead.innerHTML = '<tr><th>序号</th><th>大底直选</th><th>实际开奖</th><th>序列匹配(源)</th><th>序列匹配</th></tr>';
-            return;
-        }
-        if (compareType === 'overfit') {
-            thead.innerHTML = '<tr><th>序号</th><th>过拟合组合</th><th>实际开奖</th><th>序列匹配(源)</th><th>序列匹配</th></tr>';
+        const poolCfg = poolTabConfig(compareType);
+        if (poolCfg) {
+            thead.innerHTML = `<tr><th>序号</th><th>${poolCfg.title}</th><th>实际开奖</th><th>序列匹配(源)</th><th>序列匹配</th></tr>`;
             return;
         }
         if (compareType === 'danma') {
@@ -3272,7 +3297,7 @@
 
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
-        if (compareType === 'dadi' || compareType === 'overfit') return 5;
+        if (isPoolCompareTab(compareType)) return 5;
         if (compareType === 'danma') return 4;
         return 3;
     }
@@ -3324,14 +3349,15 @@
         if (!panel) return;
 
         const tab = compareTabs[type];
-        if (tab !== 'qima' && tab !== 'dadi' && tab !== 'overfit') {
+        if (tab !== 'qima' && !isPoolCompareTab(tab)) {
             panel.style.display = 'none';
             return;
         }
         panel.style.display = 'block';
 
-        if (tab === 'dadi' || tab === 'overfit') {
-            const field = tab === 'dadi' ? 'aiDadiHm' : 'aiOverfitHm';
+        const poolCfg = poolTabConfig(tab);
+        if (poolCfg) {
+            const field = poolCfg.field;
             const countMap = new Map();
             compareData.forEach(item => {
                 const pos = getOverfitHitPosition(item[field], item.realHm);
@@ -3594,9 +3620,9 @@
         const el = $(type, 'stats');
         const tab = compareType || compareTabs[type];
 
-        if (tab === 'dadi' || tab === 'overfit') {
-            const field = tab === 'dadi' ? 'aiDadiHm' : 'aiOverfitHm';
-            const periodLabel = tab === 'dadi' ? '有大底预测期数' : '有组合预测期数';
+        const poolCfg = poolTabConfig(tab);
+        if (poolCfg) {
+            const field = poolCfg.field;
             let zx = 0;
             const total = compareData.filter(i => i[field]).length;
             compareData.forEach(item => {
@@ -3605,7 +3631,7 @@
             const miss = Math.max(0, total - zx);
             const zxRate = total > 0 ? ((zx / total) * 100).toFixed(1) : 0;
             el.innerHTML = `
-                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">${periodLabel}</div></div>
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">${poolCfg.periodLabel}</div></div>
                 <div class="stat-card"><div class="stat-value">${zx}/${total}</div><div class="stat-label">直选命中</div></div>
                 <div class="stat-card"><div class="stat-value">${zxRate}%</div><div class="stat-label">直选命中率</div></div>
                 <div class="stat-card"><div class="stat-value">${miss}/${total}</div><div class="stat-label">未命中</div></div>`;
@@ -3659,7 +3685,7 @@
     function renderTable(type) {
         const compareType = compareTabs[type];
         const data = getCompareData(type, compareType);
-        const newestFirst = compareType === 'dadi';
+        const newestFirst = compareType === 'dadi' || compareType === 'dadi1000';
         const filteredData = filterByPeriodCount(data, filters[type], newestFirst);
         if (!newestFirst) {
             filteredData.reverse();
@@ -3700,9 +3726,10 @@
                     const btn = row.querySelector('.qima-hit-btn');
                     btn.onclick = () => showQimaIndexPopup(seq, positions, item.aiDingWeiHm, item.realHm);
                 }
-            } else if (compareType === 'dadi' || compareType === 'overfit') {
-                const poolTitle = compareType === 'dadi' ? '大底直选' : '过拟合组合';
-                const poolField = compareType === 'dadi' ? 'aiDadiHm' : 'aiOverfitHm';
+            } else if (isPoolCompareTab(compareType)) {
+                const poolCfg = poolTabConfig(compareType);
+                const poolTitle = poolCfg.title;
+                const poolField = poolCfg.field;
                 const displayHm = item[poolField] || '';
                 const sourceSeqs = collectPastHitSeqs(filteredData, idx, poolField);
                 const expandSeqs = expandDadiHitSeqs(sourceSeqs);

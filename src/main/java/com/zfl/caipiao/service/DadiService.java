@@ -48,6 +48,11 @@ public class DadiService {
    }
 
    public void saveGeneratedDadi(boolean is3D, String qh, String numbersText) {
+      this.saveGeneratedDadi(is3D, qh, numbersText, null);
+   }
+
+   /** 保存当期大底：500注主池不变；可选同步写入完整1000注（同算法排序扩展）。 */
+   public void saveGeneratedDadi(boolean is3D, String qh, String numbersText, String numbers1000Text) {
       List<String> numbers = this.parseNumbers(numbersText);
       if (numbers.size() > 500) {
          numbers = numbers.subList(0, 500);
@@ -55,11 +60,15 @@ public class DadiService {
 
       this.validateDadiNumbers(numbers);
       String dadiHm = String.join(",", numbers);
+      String dadi1000Hm = this.normalizeDadi1000(numbers1000Text);
       List<HmCache.DadiCompareDto> cache = is3D ? HmCache.getSdDadiCompareCache() : HmCache.getPl3DadiCompareCache();
       if (CollUtil.isNotEmpty(cache)) {
          HmCache.DadiCompareDto latest = cache.get(0);
          if (StrUtil.isBlank(latest.getRealHm())) {
             latest.setCursorDadiHm(dadiHm);
+            if (dadi1000Hm != null) {
+               latest.setCursorDadi1000Hm(dadi1000Hm);
+            }
             if (StrUtil.isNotBlank(qh)) {
                latest.setQh(qh);
                cache.removeIf(d -> d != latest && qh.equals(StrUtil.trim(d.getQh())));
@@ -70,7 +79,11 @@ public class DadiService {
          }
       }
 
-      HmCache.DadiCompareDto dto = new HmCache.DadiCompareDto().setQh(qh).setRealHm(null).setCursorDadiHm(dadiHm);
+      HmCache.DadiCompareDto dto = new HmCache.DadiCompareDto()
+         .setQh(qh)
+         .setRealHm(null)
+         .setCursorDadiHm(dadiHm)
+         .setCursorDadi1000Hm(dadi1000Hm);
       if (CollUtil.isNotEmpty(cache) && StrUtil.isNotBlank(qh)) {
          cache.removeIf(d -> qh.equals(StrUtil.trim(d.getQh())));
       }
@@ -82,6 +95,20 @@ public class DadiService {
       }
 
       this.writeExcel(is3D);
+   }
+
+   private String normalizeDadi1000(String numbers1000Text) {
+      if (StrUtil.isBlank(numbers1000Text)) {
+         return null;
+      }
+      List<String> numbers = this.parseNumbers(numbers1000Text);
+      if (numbers.isEmpty()) {
+         return null;
+      }
+      if (numbers.size() > 1000) {
+         numbers = numbers.subList(0, 1000);
+      }
+      return String.join(",", numbers);
    }
 
    public void saveDadi(boolean is3D, String model, String numbersText) {
@@ -144,6 +171,7 @@ public class DadiService {
                   vo -> new HmCache.DadiCompareDto()
                      .setQh(vo.getQh())
                      .setCursorDadiHm(vo.getCursorDadiHm())
+                     .setCursorDadi1000Hm(vo.getCursorDadi1000Hm())
                      .setCustomDadiHm(vo.getCustomDadiHm())
                      .setRealHm(vo.getRealHm())
                )
@@ -197,6 +225,7 @@ public class DadiService {
             dto -> DadiCompareVO.builder()
                .qh(dto.getQh())
                .cursorDadiHm(dto.getCursorDadiHm())
+               .cursorDadi1000Hm(dto.getCursorDadi1000Hm())
                .customDadiHm(dto.getCustomDadiHm())
                .realHm(dto.getRealHm())
                .build()

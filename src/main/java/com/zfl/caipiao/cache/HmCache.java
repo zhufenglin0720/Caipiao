@@ -326,6 +326,7 @@ public class HmCache {
    public static class DadiCompareDto {
       private String qh;
       private String cursorDadiHm;
+      private String cursorDadi1000Hm;
       private String customDadiHm;
       private String realHm;
       public String getQh() {
@@ -333,6 +334,9 @@ public class HmCache {
       }
       public String getCursorDadiHm() {
          return this.cursorDadiHm;
+      }
+      public String getCursorDadi1000Hm() {
+         return this.cursorDadi1000Hm;
       }
       public String getCustomDadiHm() {
          return this.customDadiHm;
@@ -346,6 +350,10 @@ public class HmCache {
       }
       public HmCache.DadiCompareDto setCursorDadiHm(final String cursorDadiHm) {
          this.cursorDadiHm = cursorDadiHm;
+         return this;
+      }
+      public HmCache.DadiCompareDto setCursorDadi1000Hm(final String cursorDadi1000Hm) {
+         this.cursorDadi1000Hm = cursorDadi1000Hm;
          return this;
       }
       public HmCache.DadiCompareDto setCustomDadiHm(final String customDadiHm) {
@@ -371,12 +379,18 @@ public class HmCache {
                Object this$cursorDadiHm = this.getCursorDadiHm();
                Object other$cursorDadiHm = other.getCursorDadiHm();
                if (this$cursorDadiHm == null ? other$cursorDadiHm == null : this$cursorDadiHm.equals(other$cursorDadiHm)) {
-                  Object this$customDadiHm = this.getCustomDadiHm();
-                  Object other$customDadiHm = other.getCustomDadiHm();
-                  if (this$customDadiHm == null ? other$customDadiHm == null : this$customDadiHm.equals(other$customDadiHm)) {
-                     Object this$realHm = this.getRealHm();
-                     Object other$realHm = other.getRealHm();
-                     return this$realHm == null ? other$realHm == null : this$realHm.equals(other$realHm);
+                  Object this$cursorDadi1000Hm = this.getCursorDadi1000Hm();
+                  Object other$cursorDadi1000Hm = other.getCursorDadi1000Hm();
+                  if (this$cursorDadi1000Hm == null ? other$cursorDadi1000Hm == null : this$cursorDadi1000Hm.equals(other$cursorDadi1000Hm)) {
+                     Object this$customDadiHm = this.getCustomDadiHm();
+                     Object other$customDadiHm = other.getCustomDadiHm();
+                     if (this$customDadiHm == null ? other$customDadiHm == null : this$customDadiHm.equals(other$customDadiHm)) {
+                        Object this$realHm = this.getRealHm();
+                        Object other$realHm = other.getRealHm();
+                        return this$realHm == null ? other$realHm == null : this$realHm.equals(other$realHm);
+                     } else {
+                        return false;
+                     }
                   } else {
                      return false;
                   }
@@ -399,6 +413,8 @@ public class HmCache {
          result = result * 59 + ($qh == null ? 43 : $qh.hashCode());
          Object $cursorDadiHm = this.getCursorDadiHm();
          result = result * 59 + ($cursorDadiHm == null ? 43 : $cursorDadiHm.hashCode());
+         Object $cursorDadi1000Hm = this.getCursorDadi1000Hm();
+         result = result * 59 + ($cursorDadi1000Hm == null ? 43 : $cursorDadi1000Hm.hashCode());
          Object $customDadiHm = this.getCustomDadiHm();
          result = result * 59 + ($customDadiHm == null ? 43 : $customDadiHm.hashCode());
          Object $realHm = this.getRealHm();
@@ -410,6 +426,8 @@ public class HmCache {
             + this.getQh()
             + ", cursorDadiHm="
             + this.getCursorDadiHm()
+            + ", cursorDadi1000Hm="
+            + this.getCursorDadi1000Hm()
             + ", customDadiHm="
             + this.getCustomDadiHm()
             + ", realHm="

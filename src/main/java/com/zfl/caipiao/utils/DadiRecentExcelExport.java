@@ -176,6 +176,7 @@ public final class DadiRecentExcelExport {
             list.add(DadiCompareVO.builder()
                     .qh(row.getQh())
                     .cursorDadiHm(row.getCursorDadiHm())
+                    .cursorDadi1000Hm(old == null ? null : old.getCursorDadi1000Hm())
                     .customDadiHm(old == null ? null : old.getCustomDadiHm())
                     .realHm(row.getRealHm())
                     .build());

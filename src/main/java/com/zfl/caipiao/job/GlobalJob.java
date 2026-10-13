@@ -56,7 +56,8 @@ public class GlobalJob {
       String sdOverfitPool = sdOf.poolCsv();
       System.out.println("过拟合[3D] " + sdOf.tune);
       String raw200 = RuleBasedPredictUtils.predict(HmCache.getSdCache(), HmCache.getSdCompareCache(), RuleBasedPredictUtils.GameKind.SD_3D, sdOverfitPool);
-      this.saveStraightDadi(true, raw200);
+      String raw1000Sd = predictDadi1000(HmCache.getSdCache(), HmCache.getSdCompareCache(), RuleBasedPredictUtils.GameKind.SD_3D, sdOverfitPool);
+      this.saveStraightDadi(true, raw200, raw1000Sd);
       String zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
       String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
@@ -78,7 +79,8 @@ public class GlobalJob {
       String pl3OverfitPool = pl3Of.poolCsv();
       System.out.println("过拟合[排列三] " + pl3Of.tune);
       raw200 = RuleBasedPredictUtils.predict(HmCache.getPl3Cache(), HmCache.getPl3CompareCache(), RuleBasedPredictUtils.GameKind.PL3, pl3OverfitPool);
-      this.saveStraightDadi(false, raw200);
+      String raw1000Pl3 = predictDadi1000(HmCache.getPl3Cache(), HmCache.getPl3CompareCache(), RuleBasedPredictUtils.GameKind.PL3, pl3OverfitPool);
+      this.saveStraightDadi(false, raw200, raw1000Pl3);
       zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
       String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
@@ -194,13 +196,31 @@ public class GlobalJob {
    }
 
    private void saveStraightDadi(boolean is3D, String pool) {
+      this.saveStraightDadi(is3D, pool, null);
+   }
+
+   private void saveStraightDadi(boolean is3D, String pool, String pool1000) {
       if (StrUtil.isBlank(pool)) {
          System.out.println("大底[" + (is3D ? "3D" : "排列三") + "] 生成为空，未落盘");
       } else {
          int count = pool.split(",").length;
          String qh = nextIssue(is3D);
-         this.dadiService.saveGeneratedDadi(is3D, qh, pool);
-         System.out.println("大底[" + (is3D ? "3D" : "排列三") + "] " + count + "注 期号=" + qh);
+         this.dadiService.saveGeneratedDadi(is3D, qh, pool, pool1000);
+         int count1000 = StrUtil.isBlank(pool1000) ? 0 : pool1000.split(",").length;
+         System.out.println("大底[" + (is3D ? "3D" : "排列三") + "] " + count + "注"
+            + (count1000 > 0 ? (" +1000注=" + count1000) : "")
+            + " 期号=" + qh);
+      }
+   }
+
+   /** 同算法扩展到完整1000注；不改变默认500上限。 */
+   private static String predictDadi1000(List<Hm> history, List<HmCache.CompareDto> compares,
+                                         RuleBasedPredictUtils.GameKind kind, String overfitPool) {
+      RuleBasedPredictUtils.setBetLimitOverride(1000);
+      try {
+         return RuleBasedPredictUtils.predict(history, compares, kind, overfitPool);
+      } finally {
+         RuleBasedPredictUtils.setBetLimitOverride(0);
       }
    }
 

@@ -164,17 +164,31 @@ public class DataController {
       }
 
       String pendingDadi = pendingCursorDadi(dadiList);
+      String pendingDadi1000 = pendingCursorDadi1000(dadiList);
       Map<String, String> byQh = new HashMap<>();
       Map<String, String> byReal = new HashMap<>();
+      Map<String, String> byQh1000 = new HashMap<>();
+      Map<String, String> byReal1000 = new HashMap<>();
       if (dadiList != null) {
          for (HmCache.DadiCompareDto d : dadiList) {
-            if (d != null && d.getCursorDadiHm() != null && !d.getCursorDadiHm().isBlank()) {
+            if (d == null) {
+               continue;
+            }
+            if (d.getCursorDadiHm() != null && !d.getCursorDadiHm().isBlank()) {
                if (d.getQh() != null && !d.getQh().isBlank()) {
                   byQh.put(d.getQh().trim(), d.getCursorDadiHm());
                }
 
                if (d.getRealHm() != null && !d.getRealHm().isBlank()) {
                   byReal.put(pad3(d.getRealHm()), d.getCursorDadiHm());
+               }
+            }
+            if (d.getCursorDadi1000Hm() != null && !d.getCursorDadi1000Hm().isBlank()) {
+               if (d.getQh() != null && !d.getQh().isBlank()) {
+                  byQh1000.put(d.getQh().trim(), d.getCursorDadi1000Hm());
+               }
+               if (d.getRealHm() != null && !d.getRealHm().isBlank()) {
+                  byReal1000.put(pad3(d.getRealHm()), d.getCursorDadi1000Hm());
                }
             }
          }
@@ -189,6 +203,7 @@ public class DataController {
          map.put("aiRecommendHm", firstRecommend(dto));
          map.put("aiOverfitHm", dto.getAiOverfitHm());
          map.put("aiDadiHm", resolveDadi(dto, ix == pendingIdx ? pendingDadi : null, byQh, byReal));
+         map.put("aiDadi1000Hm", resolveDadi1000(dto, ix == pendingIdx ? pendingDadi1000 : null, byQh1000, byReal1000));
          map.put("aiDanMaHm", dto.getAiDanMaHm());
          map.put("aiZuSanHm", dto.getAiZuSanHm());
          map.put("aiDingWeiHm", dto.getAiDingWeiHm());
@@ -216,6 +231,7 @@ public class DataController {
                Map<String, String> map = new HashMap<>();
                map.put("qh", d.getQh());
                map.put("aiDadiHm", d.getCursorDadiHm());
+               map.put("aiDadi1000Hm", d.getCursorDadi1000Hm());
                map.put("realHm", d.getRealHm());
                out.add(map);
             }
@@ -269,6 +285,20 @@ public class DataController {
       }
    }
 
+   private static String resolveDadi1000(HmCache.CompareDto dto, String pendingDadi1000,
+                                         Map<String, String> byQh, Map<String, String> byReal) {
+      if (dto.getQh() != null && byQh.containsKey(dto.getQh().trim())) {
+         return byQh.get(dto.getQh().trim());
+      }
+      if (dto.getRealHm() != null && !dto.getRealHm().isBlank()) {
+         String hit = byReal.get(pad3(dto.getRealHm()));
+         if (hit != null) {
+            return hit;
+         }
+      }
+      return pendingDadi1000 == null ? "" : pendingDadi1000;
+   }
+
    private static String pendingCursorDadi(List<HmCache.DadiCompareDto> dadiList) {
       if (dadiList == null) {
          return "";
@@ -282,6 +312,19 @@ public class DataController {
 
          return "";
       }
+   }
+
+   private static String pendingCursorDadi1000(List<HmCache.DadiCompareDto> dadiList) {
+      if (dadiList == null) {
+         return "";
+      }
+      for (HmCache.DadiCompareDto d : dadiList) {
+         if (d != null && d.getCursorDadi1000Hm() != null && !d.getCursorDadi1000Hm().isBlank()
+                 && (d.getRealHm() == null || d.getRealHm().isBlank())) {
+            return d.getCursorDadi1000Hm();
+         }
+      }
+      return "";
    }
 
    private static String pad3(String s) {

@@ -21,6 +21,9 @@ public class DadiCompareVO {
     @ExcelProperty(value = "Cursor500注大底", index = 1)
     private String cursorDadiHm;
 
+    @ExcelProperty(value = "Cursor1000注大底", index = 2)
+    private String cursorDadi1000Hm;
+
     @ExcelProperty("自定义")
     private String customDadiHm;
 
