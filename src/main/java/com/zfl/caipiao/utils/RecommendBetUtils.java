@@ -43,228 +43,299 @@ public final class RecommendBetUtils {
       List<String> all = parseBets(pred);
       if (all.isEmpty()) {
          return "";
-      } else {
-         int n = Math.min(all.size(), 200);
-         int[] quota = allocateQuota(history, n);
-         double[] rankScores = scoreRanksForStratified(n, history);
-         String lastReal = lastRealHm(history);
-         Set<String> banned = new LinkedHashSet<>();
-         if (lastReal != null && lastReal.length() == 3) {
-            banned.add(lastReal);
+      }
+
+      // 专家选号：集中打前部强号，不再按 1-200 分层摊薄
+      int focusN = Math.min(all.size(), pl3 ? 48 : 60);
+      String lastReal = lastRealHm(history);
+      String prevReal = prevRealHm(history, 1);
+      Set<String> banned = new LinkedHashSet<>();
+      if (lastReal != null && lastReal.length() == 3) {
+         banned.add(lastReal);
+      }
+
+      Set<String> overfitSet = new LinkedHashSet<>();
+      if (overfitPool != null && !overfitPool.isBlank()) {
+         overfitSet.addAll(parseBets(overfitPool));
+      }
+
+      Map<String, Integer> rankOf = new LinkedHashMap<>();
+      for (int i = 0; i < all.size(); i++) {
+         rankOf.putIfAbsent(all.get(i), i + 1);
+      }
+
+      LinkedHashSet<String> universe = new LinkedHashSet<>();
+      for (int i = 0; i < focusN; i++) {
+         universe.add(all.get(i));
+      }
+      for (String of : overfitSet) {
+         Integer r = rankOf.get(of);
+         if (r != null && r <= Math.min(all.size(), 120)) {
+            universe.add(of);
          }
+      }
+      if (lastReal != null) {
+         universe.addAll(habitNearTickets(lastReal, all, history));
+         universe.addAll(singlePosNeighborsInPool(lastReal, all));
+      }
+      if (prevReal != null) {
+         universe.addAll(singlePosNeighborsInPool(prevReal, all));
+      }
 
-         Set<String> overfitSet = new LinkedHashSet<>();
-         if (overfitPool != null && !overfitPool.isBlank()) {
-            overfitSet.addAll(parseBets(overfitPool));
+      int[][] recentPosFreq = recentPosFreq(history, 12);
+      int[] recentSumPeak = recentSumPeaks(history, 20);
+
+      record Cand(String bet, double score) {
+      }
+      List<Cand> cands = new ArrayList<>();
+      for (String bet : universe) {
+         if (bet == null || bet.length() != 3 || banned.contains(bet)) {
+            continue;
          }
+         int rank = rankOf.getOrDefault(bet, 999);
+         double sc = expertScore(bet, rank, lastReal, prevReal, overfitSet.contains(bet), recentPosFreq, recentSumPeak, pl3);
+         cands.add(new Cand(bet, sc));
+      }
+      cands.sort(Comparator.comparingDouble(Cand::score).reversed().thenComparingInt(c -> rankOf.getOrDefault(c.bet(), 999)));
 
-         List<String> picked = new ArrayList<>(10);
-         Set<String> usedDigitKeys = new LinkedHashSet<>();
-         if (PIN_TOP1 && n >= 1) {
-            String top = all.get(0);
-            if (top != null && top.length() == 3 && !banned.contains(top)) {
-               usedDigitKeys.add(digitKey(top));
-               picked.add(top);
-               int seg = segmentOf(1);
-               if (seg >= 0 && quota[seg] > 0) {
-                  quota[seg]--;
-               }
-            }
+      List<String> picked = new ArrayList<>(10);
+      Set<String> usedKeys = new LinkedHashSet<>();
+
+      // 1) 过拟合 ∩ 大底前列：直选主力
+      int ofNeed = pl3 ? 4 : 5;
+      for (Cand c : cands) {
+         if (picked.size() >= ofNeed) {
+            break;
          }
-
-         if (lastReal != null && lastReal.length() == 3) {
-            List<String> habitCands = habitNearTickets(lastReal, all, history);
-            int reserved = 0;
-
-            for (String bet : habitCands) {
-               if (reserved >= HABIT_RESERVE || picked.size() >= 10) {
-                  break;
-               }
-
-               if (!banned.contains(bet)) {
-                  String key = digitKey(bet);
-                  if (usedDigitKeys.add(key)) {
-                     picked.add(bet);
-                     reserved++;
-                     int rank = indexOfBet(String.join(",", all), bet);
-                     int seg = segmentOf(rank);
-                     if (seg >= 0 && quota[seg] > 0) {
-                        quota[seg]--;
-                     }
-                  }
-               }
-            }
+         if (!overfitSet.contains(c.bet())) {
+            continue;
          }
+         if (usedKeys.add(digitKey(c.bet()))) {
+            picked.add(c.bet());
+         }
+      }
 
-         int ofSlots = 0;
+      // 2) 上期重号/邻号习惯带
+      int habitNeed = picked.size() + (pl3 ? 3 : 2);
+      for (Cand c : cands) {
+         if (picked.size() >= habitNeed) {
+            break;
+         }
+         if (habitTicketBonus(c.bet(), lastReal) < 2.5) {
+            continue;
+         }
+         if (usedKeys.add(digitKey(c.bet()))) {
+            picked.add(c.bet());
+         }
+      }
 
-         for (String bet : overfitSet) {
-            if (ofSlots >= OF_MAX_SLOTS || picked.size() >= 10) {
+      // 3) 按综合分补满，同组只留一注（REALIGN 后再对齐最高排列）
+      for (Cand c : cands) {
+         if (picked.size() >= 10) {
+            break;
+         }
+         if (usedKeys.add(digitKey(c.bet()))) {
+            picked.add(c.bet());
+         }
+      }
+
+      if (picked.size() < 10) {
+         for (String bet : all) {
+            if (picked.size() >= 10) {
                break;
             }
-
-            int rank = -1;
-
-            for (int r = 1; r <= n; r++) {
-               if (all.get(r - 1).equals(bet)) {
-                  rank = r;
-                  break;
-               }
+            if (bet == null || bet.length() != 3 || banned.contains(bet)) {
+               continue;
             }
-
-            if (rank >= 1 && !banned.contains(bet)) {
-               String key = digitKey(bet);
-               if (usedDigitKeys.add(key)) {
-                  int seg = segmentOf(rank);
-                  if (seg >= 0 && quota[seg] > 0) {
-                     quota[seg]--;
-                  } else {
-                     int maxI = 3;
-
-                     for (int s = 0; s < 4; s++) {
-                        if (quota[s] > quota[maxI]) {
-                           maxI = s;
-                        }
-                     }
-
-                     if (quota[maxI] > 0) {
-                        quota[maxI]--;
-                     }
-                  }
-
-                  picked.add(bet);
-                  ofSlots++;
-               }
+            if (usedKeys.add(digitKey(bet))) {
+               picked.add(bet);
             }
          }
-
-         for (int seg = 0; seg < 4; seg++) {
-            int need = quota[seg];
-            if (need > 0) {
-               int lo = seg == 0 ? 1 : SEG_HI[seg - 1] + 1;
-               int hi = Math.min(SEG_HI[seg], n);
-               if (lo <= hi) {
-                  List<Integer> ranks = new ArrayList<>();
-
-                  for (int rx = lo; rx <= hi; rx++) {
-                     ranks.add(rx);
-                  }
-
-                  ranks.sort(Comparator.<Integer>comparingDouble(rx -> {
-                     String betx = all.get(rx - 1);
-                     double sc = rankScores[rx];
-                     if (overfitSet.contains(betx)) {
-                        sc += 5.0;
-                     }
-
-                     sc += habitTicketBonus(betx, lastReal);
-                     int spanx = hi - lo + 1;
-                     int bin = spanx <= 1 ? 0 : (rx - lo) * need / spanx;
-                     return sc + (need - bin) * 1.0E-4;
-                  }).reversed().thenComparingInt(rx -> rx));
-                  int span = hi - lo + 1;
-                  int[] binUsed = new int[Math.max(1, need)];
-                  int got = 0;
-
-                  for (int rx : ranks) {
-                     if (got >= need || picked.size() >= 10) {
-                        break;
-                     }
-
-                     int bin = span <= 1 ? 0 : Math.min(need - 1, (rx - lo) * need / span);
-                     if ((binUsed[bin] < 1 || got < Math.min(need, binUsed.length)) && binUsed[bin] < 1) {
-                        String bet = all.get(rx - 1);
-                        if (bet != null && bet.length() == 3 && !banned.contains(bet)) {
-                           String key = digitKey(bet);
-                           if (!usedDigitKeys.contains(key)) {
-                              usedDigitKeys.add(key);
-                              picked.add(bet);
-                              binUsed[bin]++;
-                              got++;
-                           }
-                        }
-                     }
-                  }
-
-                  for (int rx : ranks) {
-                     if (got >= need || picked.size() >= 10) {
-                        break;
-                     }
-
-                     String bet = all.get(rx - 1);
-                     if (bet != null && bet.length() == 3 && !banned.contains(bet)) {
-                        String key = digitKey(bet);
-                        if (!usedDigitKeys.contains(key)) {
-                           usedDigitKeys.add(key);
-                           picked.add(bet);
-                           got++;
-                        }
-                     }
-                  }
-               }
-            }
-         }
-
-         if (picked.size() < 10) {
-            List<Integer> ranks = new ArrayList<>();
-
-            for (int rx = 1; rx <= n; rx++) {
-               ranks.add(rx);
-            }
-
-            ranks.sort(Comparator.<Integer>comparingDouble(rx -> rankScores[rx]).reversed().thenComparingInt(rx -> rx));
-
-            for (int rx : ranks) {
-               if (picked.size() >= 10) {
-                  break;
-               }
-
-               String bet = all.get(rx - 1);
-               if (bet != null && bet.length() == 3 && !banned.contains(bet)) {
-                  String key = digitKey(bet);
-                  if (usedDigitKeys.add(key)) {
-                     picked.add(bet);
-                  }
-               }
-            }
-         }
-
-         if (picked.size() < 10) {
-            for (String bet : fillUniqueDigitSets(all, 10)) {
-               if (picked.size() >= 10) {
-                  break;
-               }
-
-               if (!banned.contains(bet)) {
-                  String key = digitKey(bet);
-                  if (usedDigitKeys.add(key)) {
-                     picked.add(bet);
-                  }
-               }
-            }
-         }
-
-         if (picked.size() < 10) {
-            for (String bet : all) {
-               if (picked.size() >= 10) {
-                  break;
-               }
-
-               if (bet != null && bet.length() == 3) {
-                  String key = digitKey(bet);
-                  if (usedDigitKeys.add(key)) {
-                     picked.add(bet);
-                  }
-               }
-            }
-         }
-
-         if (REALIGN_POOL_RANK) {
-            picked = realignToBestPoolRank(picked, all, banned);
-         }
-
-         return String.join(",", picked.subList(0, Math.min(10, picked.size())));
       }
+
+      if (PIN_TOP1 && !all.isEmpty() && !banned.contains(all.get(0))) {
+         String top = all.get(0);
+         String topKey = digitKey(top);
+         if (!picked.isEmpty() && !digitKey(picked.get(0)).equals(topKey)) {
+            picked.removeIf(b -> digitKey(b).equals(topKey));
+            picked.add(0, top);
+            while (picked.size() > 10) {
+               picked.remove(picked.size() - 1);
+            }
+         } else if (picked.isEmpty()) {
+            picked.add(top);
+         }
+      }
+
+      if (REALIGN_POOL_RANK) {
+         picked = realignToBestPoolRank(picked, all, banned);
+      }
+
+      // 展示顺序：分高优先
+      Map<String, Double> scoreMap = new LinkedHashMap<>();
+      for (Cand c : cands) {
+         scoreMap.put(c.bet(), c.score());
+      }
+      picked.sort(Comparator.<String>comparingDouble(b -> scoreMap.getOrDefault(b, 0.0)).reversed()
+            .thenComparingInt(b -> rankOf.getOrDefault(b, 999)));
+
+      return String.join(",", picked.subList(0, Math.min(10, picked.size())));
+   }
+
+   private static double expertScore(String bet, int rank, String lastReal, String prevReal,
+                                     boolean inOverfit, int[][] recentPosFreq, int[] recentSumPeak, boolean pl3) {
+      double sc = 0.0;
+      // 名次：前部指数衰减，远离前列快速掉分
+      if (rank >= 1 && rank <= 80) {
+         sc += 28.0 * Math.exp(-(rank - 1) / (pl3 ? 14.0 : 18.0));
+      } else if (rank <= 120) {
+         sc += 4.0;
+      }
+
+      if (inOverfit) {
+         sc += rank <= 40 ? 18.0 : (rank <= 80 ? 12.0 : 7.0);
+      }
+
+      sc += habitTicketBonus(bet, lastReal) * 2.2;
+      if (prevReal != null) {
+         sc += habitTicketBonus(bet, prevReal) * 0.7;
+      }
+
+      int[] t = digits(bet);
+      if (t != null && recentPosFreq != null) {
+         for (int p = 0; p < 3; p++) {
+            sc += recentPosFreq[p][t[p]] * 1.35;
+         }
+         int sum = t[0] + t[1] + t[2];
+         for (int peak : recentSumPeak) {
+            if (Math.abs(sum - peak) <= 1) {
+               sc += 3.5;
+               break;
+            }
+            if (Math.abs(sum - peak) <= 3) {
+               sc += 1.2;
+               break;
+            }
+         }
+         int span = Math.max(t[0], Math.max(t[1], t[2])) - Math.min(t[0], Math.min(t[1], t[2]));
+         if (span >= 2 && span <= 8) {
+            sc += 1.5;
+         }
+         if (t[0] == t[1] && t[1] == t[2]) {
+            sc -= 8.0;
+         }
+      }
+
+      // 与上期汉明距离：1 最甜，0 已禁，3 过散略抑
+      if (lastReal != null && lastReal.length() == 3 && bet.length() == 3) {
+         int ham = hamming(bet, lastReal);
+         if (ham == 1) {
+            sc += 6.5;
+         } else if (ham == 2) {
+            sc += 2.0;
+         } else if (ham == 3) {
+            sc -= 0.8;
+         }
+      }
+      return sc;
+   }
+
+   private static int hamming(String a, String b) {
+      int d = 0;
+      for (int i = 0; i < 3; i++) {
+         if (a.charAt(i) != b.charAt(i)) {
+            d++;
+         }
+      }
+      return d;
+   }
+
+   private static int[] digits(String bet) {
+      if (bet == null || bet.length() != 3) {
+         return null;
+      }
+      return new int[]{bet.charAt(0) - '0', bet.charAt(1) - '0', bet.charAt(2) - '0'};
+   }
+
+   private static String prevRealHm(List<HmCache.CompareDto> history, int skipNewest) {
+      if (history == null) {
+         return null;
+      }
+      int skipped = 0;
+      for (int i = history.size() - 1; i >= 0; i--) {
+         HmCache.CompareDto dto = history.get(i);
+         if (dto != null && StrUtil.isNotBlank(dto.getRealHm()) && dto.getRealHm().length() == 3) {
+            if (skipped >= skipNewest) {
+               return pad3(dto.getRealHm());
+            }
+            skipped++;
+         }
+      }
+      return null;
+   }
+
+   private static int[][] recentPosFreq(List<HmCache.CompareDto> history, int window) {
+      int[][] freq = new int[3][10];
+      if (history == null) {
+         return freq;
+      }
+      int got = 0;
+      for (int i = history.size() - 1; i >= 0 && got < window; i--) {
+         HmCache.CompareDto dto = history.get(i);
+         if (dto == null || StrUtil.isBlank(dto.getRealHm()) || dto.getRealHm().length() != 3) {
+            continue;
+         }
+         String r = pad3(dto.getRealHm());
+         for (int p = 0; p < 3; p++) {
+            freq[p][r.charAt(p) - '0']++;
+         }
+         got++;
+      }
+      return freq;
+   }
+
+   private static int[] recentSumPeaks(List<HmCache.CompareDto> history, int window) {
+      int[] sumFreq = new int[28];
+      if (history != null) {
+         int got = 0;
+         for (int i = history.size() - 1; i >= 0 && got < window; i--) {
+            HmCache.CompareDto dto = history.get(i);
+            if (dto == null || StrUtil.isBlank(dto.getRealHm()) || dto.getRealHm().length() != 3) {
+               continue;
+            }
+            String r = pad3(dto.getRealHm());
+            int sum = (r.charAt(0) - '0') + (r.charAt(1) - '0') + (r.charAt(2) - '0');
+            if (sum >= 0 && sum < sumFreq.length) {
+               sumFreq[sum]++;
+            }
+            got++;
+         }
+      }
+      Integer[] idx = new Integer[28];
+      for (int i = 0; i < 28; i++) {
+         idx[i] = i;
+      }
+      Arrays.sort(idx, (a, b) -> Integer.compare(sumFreq[b], sumFreq[a]));
+      return new int[]{idx[0], idx[1], idx[2]};
+   }
+
+   private static List<String> singlePosNeighborsInPool(String seed, List<String> pool) {
+      if (seed == null || seed.length() != 3 || pool == null) {
+         return List.of();
+      }
+      Set<String> have = new LinkedHashSet<>(pool);
+      List<String> out = new ArrayList<>();
+      for (int p = 0; p < 3; p++) {
+         for (int delta : new int[]{1, 9}) {
+            char[] n = seed.toCharArray();
+            n[p] = (char) ('0' + (n[p] - '0' + delta) % 10);
+            String s = new String(n);
+            if (have.contains(s)) {
+               out.add(s);
+            }
+         }
+      }
+      return out;
    }
 
    static List<String> realignToBestPoolRank(List<String> picked, List<String> pool, Set<String> banned) {
@@ -797,6 +868,7 @@ public final class RecommendBetUtils {
          lastSet[last[2]] = true;
          double s = 0.0;
          int chong = 0;
+         int neigh = 0;
 
          for (int p = 0; p < 3; p++) {
             if (lastSet[t[p]]) {
@@ -804,22 +876,33 @@ public final class RecommendBetUtils {
             }
 
             if (t[p] == last[p]) {
-               s += 2.4;
+               s += 2.8;
             }
 
             if (t[p] == (last[p] + 1) % 10 || t[p] == (last[p] + 9) % 10) {
-               s++;
+               s += 1.4;
+               neigh++;
             }
          }
 
-         s += chong * 1.6;
+         s += chong * 2.0;
+         if (chong >= 2) {
+            s += 2.5;
+         }
+         if (neigh >= 2) {
+            s += 1.8;
+         }
          int sum = t[0] + t[1] + t[2];
+         int lastSum = last[0] + last[1] + last[2];
          if (sum >= 8 && sum <= 19) {
-            s++;
+            s += 1.2;
+         }
+         if (Math.abs(sum - lastSum) <= 4) {
+            s += 1.5;
          }
 
          if (t[0] == t[1] && t[1] == t[2]) {
-            s -= 4.0;
+            s -= 5.0;
          }
 
          return s;
