@@ -363,8 +363,33 @@
 
         .compare-tabs {
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
             margin-bottom: 0;
+        }
+
+        .shuangdan-groups {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .shuangdan-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .shuangdan-group .sd-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-right: 2px;
+        }
+
+        .shuangdan-group.hit .sd-label {
+            color: var(--green, #22c55e);
         }
 
         .compare-tab:hover { border-color: var(--purple); }
@@ -1666,8 +1691,22 @@
             .filter-btn { padding: 6px 12px; font-size: 12px; }
             .auto-refresh { margin-left: 0; }
             .toolbar-divider { display: none; }
-            .compare-tabs { width: 100%; }
-            .compare-tab { flex: 1; text-align: center; padding: 7px 10px; font-size: 12px; }
+            .compare-tabs {
+                width: 100%;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                gap: 6px;
+                padding-bottom: 4px;
+                scrollbar-width: thin;
+            }
+            .compare-tab {
+                flex: 0 0 auto;
+                text-align: center;
+                padding: 7px 12px;
+                font-size: 12px;
+                white-space: nowrap;
+            }
             .qima-pos-panel { padding: 8px 10px; margin-bottom: 6px; }
             .dadi-search-hint { flex-basis: 100%; font-size: 10px; }
             .dadi-search-row .dadi-search-count { margin-left: 0; width: 100%; }
@@ -1740,6 +1779,7 @@
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'shuangdan', this)">双胆</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'qima', this)">七码</button>
                 </div>
             </div>
@@ -1870,6 +1910,7 @@
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'overfit', this)">过拟合组合</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'shuangdan', this)">双胆</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'qima', this)">七码</button>
                 </div>
             </div>
@@ -2649,7 +2690,9 @@
         const container = document.getElementById(domPrefix(type) + '-predict-table');
         if (!container || !$(type, 'predict').classList.contains('active')) return;
 
-        const isQima = compareTabs[type] === 'qima' || compareTabs[type] === 'danma';
+        const isQima = compareTabs[type] === 'qima'
+            || compareTabs[type] === 'danma'
+            || compareTabs[type] === 'shuangdan';
         const count = filters[type];
         container.classList.toggle('qima-mode', isQima);
 
@@ -3288,6 +3331,10 @@
             thead.innerHTML = '<tr><th>序号</th><th>胆码预测</th><th>实际开奖</th><th>命中</th></tr>';
             return;
         }
+        if (compareType === 'shuangdan') {
+            thead.innerHTML = '<tr><th>序号</th><th>双胆预测(三组)</th><th>实际开奖</th><th>命中</th></tr>';
+            return;
+        }
         if (type === '3d') {
             thead.innerHTML = '<tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
         } else {
@@ -3298,7 +3345,7 @@
     function predictTableColspan(type, compareType) {
         if (compareType === 'qima') return 4;
         if (isPoolCompareTab(compareType)) return 5;
-        if (compareType === 'danma') return 4;
+        if (compareType === 'danma' || compareType === 'shuangdan') return 4;
         return 3;
     }
 
@@ -3579,6 +3626,56 @@
         return html + '</div>';
     }
 
+    /** 解析双胆：组1:1,5 组2:2,8 组3:0,3 → [[1,5],[2,8],[0,3]] */
+    function parseShuangDan(text) {
+        if (!text) return null;
+        const pairs = [];
+        const re = /组\d+[:：]([0-9])[,，\-]([0-9])/g;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+            const a = Number(m[1]);
+            const b = Number(m[2]);
+            if (a !== b) pairs.push([Math.min(a, b), Math.max(a, b)]);
+        }
+        if (!pairs.length) {
+            text.split(/[,，\s]+/).forEach(p => {
+                const t = p.trim();
+                if (/^\d[-~]\d$/.test(t)) {
+                    const a = Number(t[0]);
+                    const b = Number(t[2]);
+                    if (a !== b) pairs.push([Math.min(a, b), Math.max(a, b)]);
+                }
+            });
+        }
+        return pairs.length ? pairs : null;
+    }
+
+    function getShuangDanHits(text, realHm) {
+        const pairs = parseShuangDan(text);
+        if (!pairs || !realHm || realHm.length < 3) return null;
+        const set = new Set(String(realHm).slice(-3).split(''));
+        return pairs.map(([a, b]) => set.has(String(a)) && set.has(String(b)));
+    }
+
+    /** 双胆三组横排，命中组码高亮 */
+    function formatShuangDan(text, realHm) {
+        const pairs = parseShuangDan(text);
+        if (!pairs) return text || '-';
+        const hits = getShuangDanHits(text, realHm);
+        let html = '<div class="shuangdan-groups">';
+        pairs.forEach((pair, i) => {
+            const hit = !!(hits && hits[i]);
+            html += `<div class="shuangdan-group${hit ? ' hit' : ''}"><span class="sd-label">组${i + 1}</span>`;
+            pair.forEach(d => {
+                const digitHit = !!(realHm && String(realHm).includes(String(d)));
+                html += `<span class="dingwei-ball${digitHit ? ' highlight' : ''}">${d}</span>`;
+            });
+            if (hit) html += '<span class="success" style="font-size:11px;margin-left:2px">✓</span>';
+            html += '</div>';
+        });
+        return html + '</div>';
+    }
+
     /** 胆码：百/十/个横向排列，每位3码；高亮对应位置命中 */
     function formatDanMaHorizontal(text, realHm) {
         if (!text) return '-';
@@ -3660,6 +3757,30 @@
                 <div class="stat-card"><div class="stat-value">${bai}</div><div class="stat-label">百位定位</div></div>
                 <div class="stat-card"><div class="stat-value">${shi}</div><div class="stat-label">十位定位</div></div>
                 <div class="stat-card"><div class="stat-value">${ge}</div><div class="stat-label">个位定位</div></div>`;
+            return;
+        }
+
+        if (tab === 'shuangdan') {
+            let anyHit = 0, twoHit = 0, threeHit = 0, groupHits = 0;
+            const total = compareData.filter(i => i.aiShuangDanHm).length;
+            compareData.forEach(item => {
+                if (!item.realHm) return;
+                const hits = getShuangDanHits(item.aiShuangDanHm, item.realHm);
+                if (!hits) return;
+                const n = hits.filter(Boolean).length;
+                groupHits += n;
+                if (n >= 1) anyHit++;
+                if (n >= 2) twoHit++;
+                if (n >= 3) threeHit++;
+            });
+            const anyRate = total > 0 ? ((anyHit / total) * 100).toFixed(1) : 0;
+            el.innerHTML = `
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">有双胆预测期数</div></div>
+                <div class="stat-card"><div class="stat-value">${anyHit}/${total}</div><div class="stat-label">至少1组命中</div></div>
+                <div class="stat-card"><div class="stat-value">${anyRate}%</div><div class="stat-label">至少1组命中率</div></div>
+                <div class="stat-card"><div class="stat-value">${twoHit}</div><div class="stat-label">≥2组命中期数</div></div>
+                <div class="stat-card"><div class="stat-value">${threeHit}</div><div class="stat-label">三组全中期数</div></div>
+                <div class="stat-card"><div class="stat-value">${groupHits}</div><div class="stat-label">命中组次合计</div></div>`;
             return;
         }
 
@@ -3785,6 +3906,30 @@
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
                     <td class="qima-predict-cell">${formatDanMaHorizontal(item.aiDanMaHm, item.realHm)}</td>
+                    <td>${realBalls}</td>
+                    <td>${matchCell}</td>`;
+            } else if (compareType === 'shuangdan') {
+                const hits = getShuangDanHits(item.aiShuangDanHm, item.realHm);
+                let matchCell;
+                if (!item.realHm) {
+                    matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
+                } else if (hits) {
+                    const n = hits.filter(Boolean).length;
+                    if (n >= 3) {
+                        matchCell = '<span class="success">✓ 三组全中</span>';
+                    } else if (n >= 1) {
+                        const parts = [];
+                        hits.forEach((h, i) => { if (h) parts.push('组' + (i + 1)); });
+                        matchCell = `<span class="success">✓ 命中${n}组(${parts.join('')})</span>`;
+                    } else {
+                        matchCell = '<span class="fail">✗ 未命中</span>';
+                    }
+                } else {
+                    matchCell = '<span class="fail">✗ 未命中</span>';
+                }
+                row.innerHTML = `
+                    <td class="seq-cell">${seq}</td>
+                    <td class="qima-predict-cell">${formatShuangDan(item.aiShuangDanHm, item.realHm)}</td>
                     <td>${realBalls}</td>
                     <td>${matchCell}</td>`;
             } else {

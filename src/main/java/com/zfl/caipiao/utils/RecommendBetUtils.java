@@ -16,7 +16,7 @@ public final class RecommendBetUtils {
    public static final int HIT_LOOKBACK = 100;
    public static final int MIN_PICK = 10;
    public static final int MAX_PICK = 10;
-   private static final int MAX_RANK = 200;
+   private static final int MAX_RANK = 500;
    private static final int COND_LOOKBACK = 40;
    private static final double RECENCY_DECAY = 0.96;
    private static final double HIST_WEIGHT = 0.88;
@@ -45,7 +45,57 @@ public final class RecommendBetUtils {
          return "";
       }
 
-      // 专家选号：集中打前部强号，不再按 1-200 分层摊薄
+      // 近50期对照最优：大底前 200 名「历史命中名次密度带」取 10 注（同组去重）。
+      // 大底命中虽多在 200+，但尾部名次不稳定；前 200 密度带合计直选优于专家/过拟合截取。
+      int n = Math.min(all.size(), 200);
+      double[] scores = scoreRanksForStratified(n, history);
+      int bandW = Math.min(18, Math.max(12, n / 8));
+      int[] band = discoverDenseBand(scores, n, bandW);
+      String banned = lastRealHm(history);
+
+      List<String> picked = new ArrayList<>(10);
+      Set<String> usedKeys = new LinkedHashSet<>();
+      List<Integer> bandRanks = new ArrayList<>();
+      for (int r = Math.max(1, band[0]); r <= Math.min(n, band[1]); r++) {
+         bandRanks.add(r);
+      }
+      bandRanks.sort(Comparator.<Integer>comparingDouble(r -> scores[r]).reversed().thenComparingInt(r -> r));
+      for (int r : bandRanks) {
+         if (picked.size() >= MAX_PICK) {
+            break;
+         }
+         addUniqueBet(all.get(r - 1), banned, usedKeys, picked);
+      }
+      List<Integer> rest = new ArrayList<>(n);
+      for (int r = 1; r <= n; r++) {
+         rest.add(r);
+      }
+      rest.sort(Comparator.<Integer>comparingDouble(r -> scores[r]).reversed().thenComparingInt(r -> r));
+      for (int r : rest) {
+         if (picked.size() >= MAX_PICK) {
+            break;
+         }
+         addUniqueBet(all.get(r - 1), banned, usedKeys, picked);
+      }
+      for (String bet : all) {
+         if (picked.size() >= MAX_PICK) {
+            break;
+         }
+         addUniqueBet(bet, banned, usedKeys, picked);
+      }
+      return String.join(",", picked.subList(0, Math.min(MAX_PICK, picked.size())));
+   }
+
+   /**
+    * 原先的专家 10 注。只留给大底纠偏当反馈（aiHm），不作为三码展示。
+    * 近 50 期里三码若改存这套号，密度带选号会把下期大底带偏，直选又掉回 1/100。
+    */
+   public static String pickExpertBets(String pred, List<HmCache.CompareDto> history, String overfitPool, boolean pl3) {
+      List<String> all = parseBets(pred);
+      if (all.isEmpty()) {
+         return "";
+      }
+
       int focusN = Math.min(all.size(), pl3 ? 48 : 60);
       String lastReal = lastRealHm(history);
       String prevReal = prevRealHm(history, 1);
@@ -101,7 +151,6 @@ public final class RecommendBetUtils {
       List<String> picked = new ArrayList<>(10);
       Set<String> usedKeys = new LinkedHashSet<>();
 
-      // 1) 过拟合 ∩ 大底前列：直选主力
       int ofNeed = pl3 ? 4 : 5;
       for (Cand c : cands) {
          if (picked.size() >= ofNeed) {
@@ -115,7 +164,6 @@ public final class RecommendBetUtils {
          }
       }
 
-      // 2) 上期重号/邻号习惯带
       int habitNeed = picked.size() + (pl3 ? 3 : 2);
       for (Cand c : cands) {
          if (picked.size() >= habitNeed) {
@@ -129,7 +177,6 @@ public final class RecommendBetUtils {
          }
       }
 
-      // 3) 按综合分补满，同组只留一注（REALIGN 后再对齐最高排列）
       for (Cand c : cands) {
          if (picked.size() >= 10) {
             break;
@@ -171,7 +218,6 @@ public final class RecommendBetUtils {
          picked = realignToBestPoolRank(picked, all, banned);
       }
 
-      // 展示顺序：分高优先
       Map<String, Double> scoreMap = new LinkedHashMap<>();
       for (Cand c : cands) {
          scoreMap.put(c.bet(), c.score());
@@ -180,6 +226,15 @@ public final class RecommendBetUtils {
             .thenComparingInt(b -> rankOf.getOrDefault(b, 999)));
 
       return String.join(",", picked.subList(0, Math.min(10, picked.size())));
+   }
+
+   private static void addUniqueBet(String bet, String banned, Set<String> usedKeys, List<String> picked) {
+      if (bet == null || bet.length() != 3 || bet.equals(banned)) {
+         return;
+      }
+      if (usedKeys.add(digitKey(bet))) {
+         picked.add(bet);
+      }
    }
 
    private static double expertScore(String bet, int rank, String lastReal, String prevReal,
@@ -771,7 +826,7 @@ public final class RecommendBetUtils {
    }
 
    static int[] hitRankFreq(List<HmCache.CompareDto> history, int lookback) {
-      int[] freq = new int[201];
+      int[] freq = new int[MAX_RANK + 1];
       if (history == null) {
          return freq;
       } else {
@@ -782,7 +837,7 @@ public final class RecommendBetUtils {
             HmCache.CompareDto dto = history.get(i);
             if (dto != null && !StrUtil.isBlank(listForRank(dto)) && !StrUtil.isBlank(dto.getRealHm()) && dto.getRealHm().length() == 3) {
                int rank = indexOfBet(listForRank(dto), pad3(dto.getRealHm()));
-               if (rank >= 1 && rank <= 200) {
+               if (rank >= 1 && rank <= MAX_RANK) {
                   freq[rank]++;
                }
             }

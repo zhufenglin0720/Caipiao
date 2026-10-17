@@ -34,7 +34,7 @@ public final class HitPeriod50Backtest {
         sb.append("========== 近").append(eval).append("期命中期数回测 ==========\n");
         sb.append("三码=10注直/组  大底=").append(RuleBasedPredictUtils.maxBetLimit())
                 .append("注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
-                .append("组直/组  七码=三位全中  胆码=至少1位/三位全中\n");
+                .append("组直/组  七码=三位全中  胆码=至少1位  双胆=至少1组\n");
         sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
         sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期三位数字进各位；")
                 .append("三码同组改用大底最高排列。目标=命中期数最多。\n\n");
@@ -53,7 +53,7 @@ public final class HitPeriod50Backtest {
 
         sb.append("\n========== 汇总（命中期数） ==========\n");
         sb.append(String.format(Locale.ROOT,
-                "%-8s | 三码直 | 三码组 | 大底直 | 大底组 | 过拟合直 | 过拟合组 | 七码全中 | 胆码1位 | 胆码全中 | 上期复用%n",
+                "%-8s | 三码直 | 三码组 | 大底直 | 大底组 | 过拟合直 | 过拟合组 | 七码全中 | 胆码1位 | 双胆1组 | 上期复用%n",
                 "彩种"));
         appendRow(sb, sd);
         appendRow(sb, pl3);
@@ -62,7 +62,7 @@ public final class HitPeriod50Backtest {
                 sd.sanmaZx + pl3.sanmaZx, sd.sanmaGrp + pl3.sanmaGrp,
                 sd.dadiZx + pl3.dadiZx, sd.dadiGrp + pl3.dadiGrp,
                 sd.ofZx + pl3.ofZx, sd.ofGrp + pl3.ofGrp,
-                sd.dwFull + pl3.dwFull, sd.danAny + pl3.danAny, sd.danFull + pl3.danFull));
+                sd.dwFull + pl3.dwFull, sd.danAny + pl3.danAny, sd.shuangAny + pl3.shuangAny));
 
         Path out = Path.of("reports/hitperiod_" + eval + ".txt");
         Files.createDirectories(out.getParent());
@@ -76,7 +76,7 @@ public final class HitPeriod50Backtest {
                 "%-8s | %4d/%d | %4d/%d | %4d/%d | %4d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %6d/%d | %d%n",
                 g.name, g.sanmaZx, g.n, g.sanmaGrp, g.n, g.dadiZx, g.n, g.dadiGrp, g.n,
                 g.ofZx, g.n, g.ofGrp, g.n,
-                g.dwFull, g.n, g.danAny, g.n, g.danFull, g.n, g.dup));
+                g.dwFull, g.n, g.danAny, g.n, g.shuangAny, g.n, g.dup));
     }
 
     static Game runOne(String name, List<Hm> all,
@@ -118,8 +118,8 @@ public final class HitPeriod50Backtest {
             int done = i - start + 1;
             if (done % 10 == 0 || done == eval) {
                 System.out.printf(Locale.ROOT,
-                        "%s 进度 %d/%d | 三码直%d 大底直%d 过拟合直%d 七码%d 胆码%d%n",
-                        name, done, eval, g.sanmaZx, g.dadiZx, g.ofZx, g.dwFull, g.danAny);
+                        "%s 进度 %d/%d | 三码直%d 大底直%d 过拟合直%d 七码%d 胆码%d 双胆%d%n",
+                        name, done, eval, g.sanmaZx, g.dadiZx, g.ofZx, g.dwFull, g.danAny, g.shuangAny);
             }
         }
         long cost = System.currentTimeMillis() - t0;
@@ -140,6 +140,8 @@ public final class HitPeriod50Backtest {
         out.append(String.format(Locale.ROOT,
                 "胆码：至少1位=%d/%d  三位全中=%d/%d  与上期完全相同=%d%n",
                 g.danAny, g.n, g.danFull, g.n, g.dupDan));
+        out.append(String.format(Locale.ROOT,
+                "双胆：至少1组=%d/%d%n", g.shuangAny, g.n));
         if (!missOf.isEmpty()) {
             out.append("过拟合直选未中（最多12期）: ")
                     .append(String.join(" ; ", missOf.subList(0, Math.min(12, missOf.size()))))
@@ -172,10 +174,13 @@ public final class HitPeriod50Backtest {
         Overfit20PredictUtils.PredictResult of = Overfit20PredictUtils.predictResult(hist, ofKind, compares);
         String ofCsv = of.poolCsv();
         String raw = RuleBasedPredictUtils.predict(hist, compares, predKind, ofCsv);
-        String sanma = RecommendBetUtils.pickRecommendBets(raw, compares, ofCsv,
-                predKind == RuleBasedPredictUtils.GameKind.PL3);
+        boolean pl3 = predKind == RuleBasedPredictUtils.GameKind.PL3;
+        String sanma = RecommendBetUtils.pickRecommendBets(raw, compares, ofCsv, pl3);
+        // 大底纠偏仍吃专家 10 注，三码展示用分层配额。
+        String feedback = RecommendBetUtils.pickExpertBets(raw, compares, ofCsv, pl3);
         String dw = RuleBasedDingWeiUtils.predict(hist, compares, dwKind);
         String dan = RuleBasedDanMaUtils.predict(hist, compares, danKind);
+        String shuang = RuleBasedShuangDanUtils.predict(hist);
 
         Step s = new Step();
         s.qh = all.get(i).getQh();
@@ -247,16 +252,20 @@ public final class HitPeriod50Backtest {
                 g.dupDan++;
                 g.dup++;
             }
+            if (RuleBasedShuangDanUtils.isAnyGroupHit(shuang, actual)) {
+                g.shuangAny++;
+            }
         }
 
         compares.add(new HmCache.CompareDto()
                 .setQh(all.get(i).getQh())
-                .setAiHm(sanma)
+                .setAiHm(feedback)
                 .setAiRecommendHm(sanma)
                 .setAiFullHm(raw)
                 .setAiOverfitHm(ofCsv)
                 .setAiDingWeiHm(dw)
                 .setAiDanMaHm(dan)
+                .setAiShuangDanHm(shuang)
                 .setRealHm(actual));
         while (compares.size() > RecommendBetUtils.HIT_LOOKBACK + 5) {
             compares.remove(0);
@@ -351,6 +360,7 @@ public final class HitPeriod50Backtest {
         final int[] dwPos = new int[3];
         int danAny;
         int danFull;
+        int shuangAny;
         int dup;
         int dupSanma;
         int dupOf;

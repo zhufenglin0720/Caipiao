@@ -205,6 +205,7 @@ public class DataController {
          map.put("aiDadiHm", resolveDadi(dto, ix == pendingIdx ? pendingDadi : null, byQh, byReal));
          map.put("aiDadi1000Hm", resolveDadi1000(dto, ix == pendingIdx ? pendingDadi1000 : null, byQh1000, byReal1000));
          map.put("aiDanMaHm", dto.getAiDanMaHm());
+         map.put("aiShuangDanHm", dto.getAiShuangDanHm());
          map.put("aiZuSanHm", dto.getAiZuSanHm());
          map.put("aiDingWeiHm", dto.getAiDingWeiHm());
          map.put("realHm", dto.getRealHm());

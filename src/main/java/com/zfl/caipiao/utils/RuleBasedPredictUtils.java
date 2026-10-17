@@ -655,6 +655,7 @@ public final class RuleBasedPredictUtils {
                                  .setAiFullHm(full)
                                  .setAiDingWeiHm(src.getAiDingWeiHm())
                                  .setAiDanMaHm(src.getAiDanMaHm())
+                                 .setAiShuangDanHm(src.getAiShuangDanHm())
                                  .setRealHm(src.getRealHm())
                            );
                         }

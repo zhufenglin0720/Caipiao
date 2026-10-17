@@ -15,6 +15,7 @@ import com.zfl.caipiao.utils.RecommendBetUtils;
 import com.zfl.caipiao.utils.RuleBasedDanMaUtils;
 import com.zfl.caipiao.utils.RuleBasedDingWeiUtils;
 import com.zfl.caipiao.utils.RuleBasedPredictUtils;
+import com.zfl.caipiao.utils.RuleBasedShuangDanUtils;
 import jakarta.annotation.Resource;
 import jakarta.mail.MessagingException;
 import java.util.List;
@@ -60,15 +61,18 @@ public class GlobalJob {
       this.saveStraightDadi(true, raw200, raw1000Sd);
       String zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
+      String sdFeedback = RecommendBetUtils.pickExpertBets(raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
       String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
+      String sdShuangDan = RuleBasedShuangDanUtils.get3dShuangDan();
       if (StrUtil.isNotBlank(sdRecommend)) {
          HmCache.addSdCompareCache(
             new HmCache.CompareDto()
-               .setAiHm(sdRecommend)
+               .setAiHm(sdFeedback)
                .setAiFullHm(raw200)
                .setAiRecommendHm(sdRecommend)
                .setAiOverfitHm(sdOverfitPool)
                .setAiDanMaHm(sdDanMa)
+               .setAiShuangDanHm(sdShuangDan)
                .setAiZuSanHm(zuSan)
          );
       }
@@ -83,15 +87,18 @@ public class GlobalJob {
       this.saveStraightDadi(false, raw200, raw1000Pl3);
       zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
+      String pl3Feedback = RecommendBetUtils.pickExpertBets(raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
       String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
+      String pl3ShuangDan = RuleBasedShuangDanUtils.getPl3ShuangDan();
       if (StrUtil.isNotBlank(pl3Recommend)) {
          HmCache.addPl3CompareCache(
             new HmCache.CompareDto()
-               .setAiHm(pl3Recommend)
+               .setAiHm(pl3Feedback)
                .setAiFullHm(raw200)
                .setAiRecommendHm(pl3Recommend)
                .setAiOverfitHm(pl3OverfitPool)
                .setAiDanMaHm(pl3DanMa)
+               .setAiShuangDanHm(pl3ShuangDan)
                .setAiZuSanHm(zuSan)
          );
       }
@@ -333,6 +340,7 @@ public class GlobalJob {
                   .aiOverfitHm(compareDtox.getAiOverfitHm())
                   .aiFullHm(compareDtox.getAiFullHm())
                   .aiDanMaHm(compareDtox.getAiDanMaHm())
+                  .aiShuangDanHm(compareDtox.getAiShuangDanHm())
                   .aiZuSanHm(StrUtil.blankToDefault(compareDtox.getAiZuSanHm(), RecommendBetUtils.extractZuSanGroups(compareDtox.getAiHm())))
                   .realHm(compareDtox.getRealHm())
                   .dingWeiQm(compareDtox.getAiDingWeiHm())
@@ -351,6 +359,7 @@ public class GlobalJob {
                   .aiOverfitHm(compareDtox.getAiOverfitHm())
                   .aiFullHm(compareDtox.getAiFullHm())
                   .aiDanMaHm(compareDtox.getAiDanMaHm())
+                  .aiShuangDanHm(compareDtox.getAiShuangDanHm())
                   .aiZuSanHm(StrUtil.blankToDefault(compareDtox.getAiZuSanHm(), RecommendBetUtils.extractZuSanGroups(compareDtox.getAiHm())))
                   .realHm(compareDtox.getRealHm())
                   .dingWeiQm(compareDtox.getAiDingWeiHm())

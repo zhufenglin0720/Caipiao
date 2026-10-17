@@ -76,6 +76,10 @@ public class HmCache {
                   last.setAiDanMaHm(compareDto.getAiDanMaHm());
                }
 
+               if (compareDto.getAiShuangDanHm() != null) {
+                  last.setAiShuangDanHm(compareDto.getAiShuangDanHm());
+               }
+
                if (compareDto.getAiDingWeiHm() != null) {
                   last.setAiDingWeiHm(compareDto.getAiDingWeiHm());
                }
@@ -146,6 +150,7 @@ public class HmCache {
       private String aiRecommendHm;
       private String aiOverfitHm;
       private String aiDanMaHm;
+      private String aiShuangDanHm;
       private String aiDingWeiHm;
       private String realHm;
       public String getQh() {
@@ -168,6 +173,9 @@ public class HmCache {
       }
       public String getAiDanMaHm() {
          return this.aiDanMaHm;
+      }
+      public String getAiShuangDanHm() {
+         return this.aiShuangDanHm;
       }
       public String getAiDingWeiHm() {
          return this.aiDingWeiHm;
@@ -201,6 +209,10 @@ public class HmCache {
       }
       public HmCache.CompareDto setAiDanMaHm(final String aiDanMaHm) {
          this.aiDanMaHm = aiDanMaHm;
+         return this;
+      }
+      public HmCache.CompareDto setAiShuangDanHm(final String aiShuangDanHm) {
+         this.aiShuangDanHm = aiShuangDanHm;
          return this;
       }
       public HmCache.CompareDto setAiDingWeiHm(final String aiDingWeiHm) {
@@ -241,12 +253,18 @@ public class HmCache {
                               Object this$aiDanMaHm = this.getAiDanMaHm();
                               Object other$aiDanMaHm = other.getAiDanMaHm();
                               if (this$aiDanMaHm == null ? other$aiDanMaHm == null : this$aiDanMaHm.equals(other$aiDanMaHm)) {
-                                 Object this$aiDingWeiHm = this.getAiDingWeiHm();
-                                 Object other$aiDingWeiHm = other.getAiDingWeiHm();
-                                 if (this$aiDingWeiHm == null ? other$aiDingWeiHm == null : this$aiDingWeiHm.equals(other$aiDingWeiHm)) {
-                                    Object this$realHm = this.getRealHm();
-                                    Object other$realHm = other.getRealHm();
-                                    return this$realHm == null ? other$realHm == null : this$realHm.equals(other$realHm);
+                                 Object this$aiShuangDanHm = this.getAiShuangDanHm();
+                                 Object other$aiShuangDanHm = other.getAiShuangDanHm();
+                                 if (this$aiShuangDanHm == null ? other$aiShuangDanHm == null : this$aiShuangDanHm.equals(other$aiShuangDanHm)) {
+                                    Object this$aiDingWeiHm = this.getAiDingWeiHm();
+                                    Object other$aiDingWeiHm = other.getAiDingWeiHm();
+                                    if (this$aiDingWeiHm == null ? other$aiDingWeiHm == null : this$aiDingWeiHm.equals(other$aiDingWeiHm)) {
+                                       Object this$realHm = this.getRealHm();
+                                       Object other$realHm = other.getRealHm();
+                                       return this$realHm == null ? other$realHm == null : this$realHm.equals(other$realHm);
+                                    } else {
+                                       return false;
+                                    }
                                  } else {
                                     return false;
                                  }
@@ -294,6 +312,8 @@ public class HmCache {
          result = result * 59 + ($aiOverfitHm == null ? 43 : $aiOverfitHm.hashCode());
          Object $aiDanMaHm = this.getAiDanMaHm();
          result = result * 59 + ($aiDanMaHm == null ? 43 : $aiDanMaHm.hashCode());
+         Object $aiShuangDanHm = this.getAiShuangDanHm();
+         result = result * 59 + ($aiShuangDanHm == null ? 43 : $aiShuangDanHm.hashCode());
          Object $aiDingWeiHm = this.getAiDingWeiHm();
          result = result * 59 + ($aiDingWeiHm == null ? 43 : $aiDingWeiHm.hashCode());
          Object $realHm = this.getRealHm();
@@ -315,6 +335,8 @@ public class HmCache {
             + this.getAiOverfitHm()
             + ", aiDanMaHm="
             + this.getAiDanMaHm()
+            + ", aiShuangDanHm="
+            + this.getAiShuangDanHm()
             + ", aiDingWeiHm="
             + this.getAiDingWeiHm()
             + ", realHm="

@@ -7,6 +7,7 @@ import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.service.PnlService;
+import com.zfl.caipiao.utils.ShuangDanBackfill;
 import jakarta.annotation.Resource;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,6 +53,7 @@ public class AppStarter implements ApplicationRunner {
                   .setAiOverfitHm(compareVO.getAiOverfitHm())
                   .setAiFullHm(compareVO.getAiFullHm())
                   .setAiDanMaHm(compareVO.getAiDanMaHm())
+                  .setAiShuangDanHm(compareVO.getAiShuangDanHm())
                   .setAiZuSanHm(compareVO.getAiZuSanHm())
                   .setRealHm(compareVO.getRealHm())
                   .setAiDingWeiHm(compareVO.getDingWeiQm())
@@ -71,6 +73,7 @@ public class AppStarter implements ApplicationRunner {
                   .setAiOverfitHm(compareVO.getAiOverfitHm())
                   .setAiFullHm(compareVO.getAiFullHm())
                   .setAiDanMaHm(compareVO.getAiDanMaHm())
+                  .setAiShuangDanHm(compareVO.getAiShuangDanHm())
                   .setAiZuSanHm(compareVO.getAiZuSanHm())
                   .setRealHm(compareVO.getRealHm())
                   .setAiDingWeiHm(compareVO.getDingWeiQm())
@@ -78,6 +81,9 @@ public class AppStarter implements ApplicationRunner {
             .toList()
       );
       System.out.println("pl3CompareCache:" + HmCache.getPl3CompareCache());
+      int sdSdFill = ShuangDanBackfill.backfillAndPersist(true, this.fileLocationCompare3d, ShuangDanBackfill.DEFAULT_PERIODS);
+      int plSdFill = ShuangDanBackfill.backfillAndPersist(false, this.fileLocationComparePl3, ShuangDanBackfill.DEFAULT_PERIODS);
+      System.out.println("shuangDanBackfill 3d=" + sdSdFill + " pl3=" + plSdFill);
       this.dadiService.loadFromExcel(true, this.fileLocationCompare3dDadi);
       System.out.println("3dDadiCompareCache:" + HmCache.getSdDadiCompareCache().size());
       this.dadiService.loadFromExcel(false, this.fileLocationComparePl3Dadi);
