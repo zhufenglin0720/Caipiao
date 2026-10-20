@@ -392,6 +392,27 @@
             color: var(--green, #22c55e);
         }
 
+        .predict-copy-cell {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 6px 8px;
+            padding: 6px 0;
+        }
+
+        .predict-balls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .predict-copy-cell .row-copy-btn {
+            padding: 2px 10px;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
         .compare-tab:hover { border-color: var(--purple); }
         .compare-tab.active {
             background: rgba(99, 102, 241, 0.2);
@@ -3178,6 +3199,33 @@
         document.body.removeChild(ta);
     }
 
+    function formatShuangDanCopy(text) {
+        const pairs = parseShuangDan(text);
+        if (!pairs || !pairs.length) return '';
+        return pairs.map(([a, b]) => String(a) + String(b)).join(',');
+    }
+
+    async function copyPredictText(btn, text) {
+        const label = '一键复制';
+        if (!text) {
+            btn.textContent = '无可复制';
+            setTimeout(() => { btn.textContent = label; }, 1500);
+            return;
+        }
+        try {
+            await copyTextToClipboard(text);
+            btn.textContent = '已复制';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = label;
+                btn.classList.remove('copied');
+            }, 1500);
+        } catch (e) {
+            btn.textContent = '复制失败';
+            setTimeout(() => { btn.textContent = label; }, 1500);
+        }
+    }
+
     async function copyDadiPopupNumbers() {
         const btn = document.getElementById('qima-popup-copy-btn');
         const filters = getDadiFilters();
@@ -3927,19 +3975,37 @@
                 } else {
                     matchCell = '<span class="fail">✗ 未命中</span>';
                 }
+                const copyText = formatShuangDanCopy(item.aiShuangDanHm);
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
-                    <td class="qima-predict-cell">${formatShuangDan(item.aiShuangDanHm, item.realHm)}</td>
+                    <td class="qima-predict-cell">
+                        <div class="predict-copy-cell">
+                            ${formatShuangDan(item.aiShuangDanHm, item.realHm)}
+                            ${copyText ? '<button type="button" class="dadi-copy-btn row-copy-btn">一键复制</button>' : ''}
+                        </div>
+                    </td>
                     <td>${realBalls}</td>
                     <td>${matchCell}</td>`;
+                const shuangdanCopyBtn = row.querySelector('.row-copy-btn');
+                if (shuangdanCopyBtn) shuangdanCopyBtn.onclick = () => copyPredictText(shuangdanCopyBtn, copyText);
             } else {
                 const displayHm = topSanmaBets(item);
+                const copyText = displayHm
+                    ? String(displayHm).split(',').map(s => s.trim()).filter(Boolean).join(',')
+                    : '';
                 const isMatch = checkMatch(item, item.realHm);
                 const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
                 row.innerHTML = `
-                    <td>${formatBalls(displayHm)}</td>
+                    <td>
+                        <div class="predict-copy-cell">
+                            <div class="predict-balls">${formatBalls(displayHm)}</div>
+                            ${copyText ? '<button type="button" class="dadi-copy-btn row-copy-btn">一键复制</button>' : ''}
+                        </div>
+                    </td>
                     <td>${realBalls}</td>
                     <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
+                const sanmaCopyBtn = row.querySelector('.row-copy-btn');
+                if (sanmaCopyBtn) sanmaCopyBtn.onclick = () => copyPredictText(sanmaCopyBtn, copyText);
             }
             tbody.appendChild(row);
         });
