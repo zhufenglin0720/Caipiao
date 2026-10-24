@@ -32,12 +32,11 @@ public final class HitPeriod50Backtest {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("========== 近").append(eval).append("期命中期数回测 ==========\n");
-        sb.append("三码=10注直/组  大底=").append(RuleBasedPredictUtils.maxBetLimit())
+        sb.append("三码=20注直/组  大底=").append(RuleBasedPredictUtils.maxBetLimit())
                 .append("注直/组  过拟合=").append(Overfit20PredictUtils.MAX_TICKETS)
                 .append("组直/组  七码=三位全中  胆码=至少1位  双胆=至少1组\n");
-        sb.append("去重：整期预测集合与上期完全相同才换号（不过度剔除热号）\n");
-        sb.append("调参：过拟合置顶近窗全汉明1（3D近2期/排三上期）；七码保证上期三位数字进各位；")
-                .append("三码同组改用大底最高排列。目标=命中期数最多。\n\n");
+        sb.append("模型：三码20注先取6码组六。再用窗口里直选差最多的百十个平移（0到9环绕，每位±1）挪整组号。")
+                .append("3D窗口35期，排三窗口12期。平移量每期重算。\n\n");
 
         Game sd = runOne("福彩3D", HistoryDataLoader.load3d(),
                 RuleBasedPredictUtils.GameKind.SD_3D,
@@ -175,12 +174,12 @@ public final class HitPeriod50Backtest {
         String ofCsv = of.poolCsv();
         String raw = RuleBasedPredictUtils.predict(hist, compares, predKind, ofCsv);
         boolean pl3 = predKind == RuleBasedPredictUtils.GameKind.PL3;
-        String sanma = RecommendBetUtils.pickRecommendBets(raw, compares, ofCsv, pl3);
+        String sanma = RecommendBetUtils.pickRecommendBets(hist, pl3);
         // 大底纠偏仍吃专家 10 注，三码展示用分层配额。
         String feedback = RecommendBetUtils.pickExpertBets(raw, compares, ofCsv, pl3);
         String dw = RuleBasedDingWeiUtils.predict(hist, compares, dwKind);
         String dan = RuleBasedDanMaUtils.predict(hist, compares, danKind);
-        String shuang = RuleBasedShuangDanUtils.predict(hist);
+        String shuang = RuleBasedShuangDanUtils.predict(hist, pl3);
 
         Step s = new Step();
         s.qh = all.get(i).getQh();

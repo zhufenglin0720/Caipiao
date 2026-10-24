@@ -72,6 +72,16 @@ public final class Overfit20PredictUtils {
    }
 
    public static Overfit20PredictUtils.PredictResult predictResult(List<Hm> history, Overfit20PredictUtils.GameKind kind, List<HmCache.CompareDto> compares) {
+      if (history != null && history.size() >= 40) {
+         boolean pl3 = kind == Overfit20PredictUtils.GameKind.PL3;
+         int[] ids = Flow1000Ranker.pool(Flow1000Ranker.matrix(toCodes(history)), pl3, MAX_TICKETS);
+         List<String> directs = new ArrayList<>(ids.length);
+         for (int id : ids) {
+            directs.add(String.format(Locale.ROOT, "%03d", id));
+         }
+         List<String> display = directs.size() <= 5 ? directs : new ArrayList<>(directs.subList(0, 5));
+         return new Overfit20PredictUtils.PredictResult(display, directs, "flow1000 " + Flow1000Ranker.describe(pl3));
+      }
       List<String> codes = toCodes(history);
       if (codes.isEmpty()) {
          return new Overfit20PredictUtils.PredictResult(List.of(), List.of(), "empty");

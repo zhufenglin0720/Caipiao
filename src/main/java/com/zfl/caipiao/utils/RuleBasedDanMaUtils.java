@@ -2,6 +2,7 @@ package com.zfl.caipiao.utils;
 
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.Hm;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -31,6 +32,19 @@ public final class RuleBasedDanMaUtils {
    }
 
    public static String predict(List<Hm> history, List<HmCache.CompareDto> compares, RuleBasedDanMaUtils.GameKind kind) {
+      if (history != null && history.size() >= 30) {
+         boolean pl3 = kind == RuleBasedDanMaUtils.GameKind.PL3;
+         List<String> codes = new ArrayList<>(history.size());
+         for (Hm hm : history) {
+            if (hm != null) {
+               codes.add(hm.toString());
+            }
+         }
+         int[][] pick = Flow1000Ranker.digitTop(Flow1000Ranker.matrix(codes), pl3, PER_POS);
+         String out = formatMulti(pick);
+         log.info("胆码预测[{}]: {} | mode={}", new Object[]{kind, out, Flow1000Ranker.describe(pl3)});
+         return out;
+      }
       if (history != null && history.size() >= 30) {
          int[][] pick = pickFor(kind, history, compares);
          String out = formatMulti(pick);

@@ -73,6 +73,19 @@ public final class RuleBasedPredictUtils {
 
    public static String predict(List<Hm> history, List<HmCache.CompareDto> compares, RuleBasedPredictUtils.GameKind kind, String overfitPool) {
       if (history != null && history.size() >= 20) {
+         CURRENT_KIND = kind == null ? RuleBasedPredictUtils.GameKind.SD_3D : kind;
+         boolean flowPl3 = CURRENT_KIND == RuleBasedPredictUtils.GameKind.PL3;
+         List<String> codes = new ArrayList<>(history.size());
+         for (Hm hm : history) {
+            if (hm != null) {
+               codes.add(hm.toString());
+            }
+         }
+         int[] ids = Flow1000Ranker.pool(Flow1000Ranker.matrix(codes), flowPl3, maxBetLimit());
+         log.info("{} 1000直选输出{}注 {}", new Object[]{CURRENT_KIND, ids.length, Flow1000Ranker.describe(flowPl3)});
+         return Flow1000Ranker.csv(ids);
+      }
+      if (history != null && history.size() >= 20) {
          applyGameProfile(kind == null ? RuleBasedPredictUtils.GameKind.SD_3D : kind);
          boolean pl3 = CURRENT_KIND == RuleBasedPredictUtils.GameKind.PL3;
          List<HmCache.CompareDto> streakCompares = mergeDadiTickets(compares, pl3);

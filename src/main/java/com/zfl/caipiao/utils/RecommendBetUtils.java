@@ -2,6 +2,7 @@ package com.zfl.caipiao.utils;
 
 import cn.hutool.core.util.StrUtil;
 import com.zfl.caipiao.cache.HmCache;
+import com.zfl.caipiao.export.Hm;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -31,6 +32,19 @@ public final class RecommendBetUtils {
    private RecommendBetUtils() {
    }
 
+   private static int[][] digitsFromCompares(List<HmCache.CompareDto> history) {
+      if (history == null || history.isEmpty()) {
+         return new int[0][3];
+      }
+      List<String> codes = new ArrayList<>();
+      for (HmCache.CompareDto dto : history) {
+         if (dto != null && dto.getRealHm() != null && dto.getRealHm().trim().length() >= 3) {
+            codes.add(dto.getRealHm().trim());
+         }
+      }
+      return Flow1000Ranker.matrix(codes);
+   }
+
    public static String pickRecommendBets(String pred, List<HmCache.CompareDto> history) {
       return pickRecommendBets(pred, history, null, false);
    }
@@ -39,7 +53,24 @@ public final class RecommendBetUtils {
       return pickRecommendBets(pred, history, overfitPool, false);
    }
 
+   public static String pickRecommendBets(List<Hm> draws, boolean pl3) {
+      if (draws == null || draws.size() < 40) {
+         return "";
+      }
+      List<String> codes = new ArrayList<>(draws.size());
+      for (Hm hm : draws) {
+         if (hm != null) {
+            codes.add(hm.toString());
+         }
+      }
+      return Flow1000Ranker.csv(Flow1000Ranker.sanma(Flow1000Ranker.matrix(codes), pl3));
+   }
+
    public static String pickRecommendBets(String pred, List<HmCache.CompareDto> history, String overfitPool, boolean pl3) {
+      int[][] fromCompare = digitsFromCompares(history);
+      if (fromCompare.length >= 40) {
+         return Flow1000Ranker.csv(Flow1000Ranker.sanma(fromCompare, pl3));
+      }
       List<String> all = parseBets(pred);
       if (all.isEmpty()) {
          return "";

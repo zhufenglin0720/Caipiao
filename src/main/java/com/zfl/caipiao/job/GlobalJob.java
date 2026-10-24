@@ -60,8 +60,8 @@ public class GlobalJob {
       String raw1000Sd = predictDadi1000(HmCache.getSdCache(), HmCache.getSdCompareCache(), RuleBasedPredictUtils.GameKind.SD_3D, sdOverfitPool);
       this.saveStraightDadi(true, raw200, raw1000Sd);
       String zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
-      String sdRecommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
-      String sdFeedback = RecommendBetUtils.pickExpertBets(raw200, HmCache.getSdCompareCache(), sdOverfitPool, false);
+      String sdRecommend = RecommendBetUtils.pickRecommendBets(HmCache.getSdCache(), false);
+      String sdFeedback = sdRecommend;
       String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
       String sdShuangDan = RuleBasedShuangDanUtils.get3dShuangDan();
       if (StrUtil.isNotBlank(sdRecommend)) {
@@ -86,8 +86,8 @@ public class GlobalJob {
       String raw1000Pl3 = predictDadi1000(HmCache.getPl3Cache(), HmCache.getPl3CompareCache(), RuleBasedPredictUtils.GameKind.PL3, pl3OverfitPool);
       this.saveStraightDadi(false, raw200, raw1000Pl3);
       zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
-      String pl3Recommend = RecommendBetUtils.pickRecommendBets(raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
-      String pl3Feedback = RecommendBetUtils.pickExpertBets(raw200, HmCache.getPl3CompareCache(), pl3OverfitPool, true);
+      String pl3Recommend = RecommendBetUtils.pickRecommendBets(HmCache.getPl3Cache(), true);
+      String pl3Feedback = pl3Recommend;
       String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
       String pl3ShuangDan = RuleBasedShuangDanUtils.getPl3ShuangDan();
       if (StrUtil.isNotBlank(pl3Recommend)) {

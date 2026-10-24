@@ -85,6 +85,20 @@ public final class RuleBasedDingWeiUtils {
    public static String predict(List<Hm> history, List<HmCache.CompareDto> compares, RuleBasedDingWeiUtils.GameKind kind) {
       if (history != null && history.size() >= 30) {
          RuleBasedDingWeiUtils.GameKind gameKind = kind == null ? RuleBasedDingWeiUtils.GameKind.SD_3D : kind;
+         boolean pl3 = gameKind == RuleBasedDingWeiUtils.GameKind.PL3;
+         List<String> codes = new ArrayList<>(history.size());
+         for (Hm hm : history) {
+            if (hm != null) {
+               codes.add(hm.toString());
+            }
+         }
+         int[][] top7 = Flow1000Ranker.digitTop(Flow1000Ranker.matrix(codes), pl3, 7);
+         String result = format(top7);
+         log.info("七码定位[{}] {}", gameKind, result);
+         return result;
+      }
+      if (history != null && history.size() >= 30) {
+         RuleBasedDingWeiUtils.GameKind gameKind = kind == null ? RuleBasedDingWeiUtils.GameKind.SD_3D : kind;
          RuleBasedDingWeiUtils.PosProfile[] profiles = gameKind == RuleBasedDingWeiUtils.GameKind.PL3 ? PROFILE_PL3 : PROFILE_3D;
          RuleBasedDingWeiUtils.PosTune[] baseTunes = gameKind == RuleBasedDingWeiUtils.GameKind.PL3 ? TUNE_PL3 : TUNE_3D;
          double[][] linear = gameKind == RuleBasedDingWeiUtils.GameKind.PL3 ? LINEAR_PL3 : LINEAR_3D;
