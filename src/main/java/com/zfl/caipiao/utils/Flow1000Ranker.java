@@ -53,6 +53,14 @@ public final class Flow1000Ranker {
     static SanmaPick plPick = SanmaPick.B30;
     static boolean plBurstPool = false;
 
+    /** 三码平移窗口。衰减小于 1 时，窗口里越近的期越决定百十个差。 */
+    static int sdWindow = 16;
+    static int plWindow = 13;
+    static double sdDecay = 1.0;
+    static double plDecay = 0.60;
+    static boolean sdRecentTie = false;
+    static boolean plRecentTie = true;
+
     private static final SanmaPick[] META_ORDER = {
             SanmaPick.BOX5, SanmaPick.BOX4, SanmaPick.T10, SanmaPick.HAM, SanmaPick.B30
     };
@@ -85,8 +93,8 @@ public final class Flow1000Ranker {
 
     public static String describe(boolean pl3) {
         return pl3
-                ? "500排三:三码20注近30热6码，再按近12期直选差环移±1"
-                : "乐彩3D:三码20注遗漏12的6码，再按近35期直选差环移±1";
+                ? "500排三:三码20注近30热6码，再按近13期衰减0.60的直选差环移±1"
+                : "乐彩3D:三码20注遗漏12的6码，再按近16期直选差环移±1";
     }
 
     public static String csv(int[] ids) {
@@ -108,10 +116,342 @@ public final class Flow1000Ranker {
             return new int[0];
         }
         int end = digits.length;
+        return shiftSanma(digits, end, pl3);
+    }
+
+    private static int[] shiftSanma(int[][] digits, int end, boolean pl3) {
         int[] base = base20(digits, end, pl3);
-        int window = pl3 ? 12 : 35;
+        int window = pl3 ? plWindow : sdWindow;
         int[] off = fitShift(digits, end, pl3, window, 1, true);
         return applyShift(base, off[0], off[1], off[2], true, false);
+    }
+
+    private static double[][] basePos(int[][] digits, int end, boolean pl3) {
+        double[][] pos = new double[3][10];
+        DigitMode mode = pl3 ? DigitMode.HOT30 : DigitMode.BELL12;
+        for (int p = 0; p < 3; p++) {
+            pos[p] = modeScore(mode, digits, end, p);
+        }
+        return pos;
+    }
+
+    /** 热组多留 depth 个顺序，其余组留 1 个，总数不超过 20。multi 是享受多顺序的组数。 */
+    private static int[] mixedSix(double[][] pos, int ban, int multi, int depth) {
+        double[] heat = new double[10];
+        for (int p = 0; p < 3; p++) {
+            for (int x = 0; x < 10; x++) {
+                heat[x] += pos[p][x];
+            }
+        }
+        int[] six = topK(heat, 6);
+        int[][] ids = new int[20][6];
+        double[][] sc = new double[20][6];
+        int[] pc = new int[20];
+        double[] best = new double[20];
+        int g = 0;
+        for (int i = 0; i < six.length; i++) {
+            for (int j = i + 1; j < six.length; j++) {
+                for (int k = j + 1; k < six.length; k++) {
+                    int[] d = {six[i], six[j], six[k]};
+                    int n = 0;
+                    for (int a = 0; a < 3; a++) {
+                        for (int b = 0; b < 3; b++) {
+                            if (b == a) {
+                                continue;
+                            }
+                            int c = 3 - a - b;
+                            int id = d[a] * 100 + d[b] * 10 + d[c];
+                            boolean seen = false;
+                            for (int u = 0; u < n; u++) {
+                                if (ids[g][u] == id) {
+                                    seen = true;
+                                    break;
+                                }
+                            }
+                            if (seen || id == ban) {
+                                continue;
+                            }
+                            ids[g][n] = id;
+                            sc[g][n] = seqScore(id, pos);
+                            n++;
+                        }
+                    }
+                    for (int a = 1; a < n; a++) {
+                        int id = ids[g][a];
+                        double s = sc[g][a];
+                        int b = a;
+                        while (b > 0 && sc[g][b - 1] < s) {
+                            ids[g][b] = ids[g][b - 1];
+                            sc[g][b] = sc[g][b - 1];
+                            b--;
+                        }
+                        ids[g][b] = id;
+                        sc[g][b] = s;
+                    }
+                    pc[g] = n;
+                    best[g] = n > 0 ? sc[g][0] : -1e18;
+                    g++;
+                }
+            }
+        }
+        Integer[] order = new Integer[g];
+        for (int i = 0; i < g; i++) {
+            order[i] = i;
+        }
+        Arrays.sort(order, (a, b) -> {
+            int cmp = Double.compare(best[b], best[a]);
+            return cmp != 0 ? cmp : Integer.compare(ids[a][0], ids[b][0]);
+        });
+        int[] out = new int[20];
+        boolean[] used = new boolean[1000];
+        int f = 0;
+        for (int rank = 0; rank < g && f < 20; rank++) {
+            int gi = order[rank];
+            int take = rank < multi ? depth : 1;
+            if (take > pc[gi]) {
+                take = pc[gi];
+            }
+            for (int u = 0; u < take && f < 20; u++) {
+                int id = ids[gi][u];
+                if (used[id]) {
+                    continue;
+                }
+                used[id] = true;
+                out[f++] = id;
+            }
+        }
+        return Arrays.copyOf(out, f);
+    }
+
+    private static void mixScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int cacheFrom = Math.max(50, n - 230);
+        int r = 1;
+        int dim = 3;
+        int mixes = 6;
+        int[] multi = {0, 3, 5, 8, 4, 6};
+        int[] depth = {2, 2, 2, 2, 3, 3};
+        boolean[][][][][] zx = new boolean[mixes][n][dim][dim][dim];
+        boolean[][][][][] grp = new boolean[mixes][n][dim][dim][dim];
+        for (int t = cacheFrom; t < n; t++) {
+            double[][] pos = basePos(digits, t, pl3);
+            int ban = code(digits[t - 1]);
+            int id = code(digits[t]);
+            int gk = groupKey(id);
+            for (int k = 0; k < mixes; k++) {
+                int[] bets = mixedSix(pos, ban, multi[k], depth[k]);
+                for (int bet : bets) {
+                    for (int dh = -r; dh <= r; dh++) {
+                        for (int dt = -r; dt <= r; dt++) {
+                            for (int du = -r; du <= r; du++) {
+                                int sid = shiftId(bet, dh, dt, du, true);
+                                if (sid == id) {
+                                    zx[k][t][dh + r][dt + r][du + r] = true;
+                                }
+                                if (groupKey(sid) == gk) {
+                                    grp[k][t][dh + r][dt + r][du + r] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        int window = pl3 ? plWindow : sdWindow;
+        double decay = pl3 ? plDecay : sdDecay;
+        boolean recentTie = pl3 ? plRecentTie : sdRecentTie;
+        sb.append("===== ").append(name).append(" =====\n");
+        for (int k = 0; k < mixes; k++) {
+            int[] hit = countMix(zx[k], grp[k], n, window, decay, recentTie);
+            sb.append(String.format(Locale.ROOT, "热组%d留%d序  近100 %d直%d组 | 前100 %d直%d组%n",
+                    multi[k], depth[k], hit[0], hit[1], hit[2], hit[3]));
+        }
+        int[] adapt = new int[4];
+        for (int t = n - 200; t < n; t++) {
+            int bucket = t >= n - 100 ? 0 : 2;
+            int bestZ = -1;
+            int bestG = -1;
+            int bestK = 0;
+            for (int k = 0; k < mixes; k++) {
+                int[] off = mixOffset(zx[k], grp[k], t, window, decay, recentTie);
+                int z = 0;
+                int g = 0;
+                int from = Math.max(0, t - window);
+                for (int s = from; s < t; s++) {
+                    int w = periodWeight(t - 1 - s, decay);
+                    if (zx[k][s][off[0] + r][off[1] + r][off[2] + r]) {
+                        z += w;
+                    }
+                    if (grp[k][s][off[0] + r][off[1] + r][off[2] + r]) {
+                        g += w;
+                    }
+                }
+                if (z > bestZ || (z == bestZ && g > bestG)) {
+                    bestZ = z;
+                    bestG = g;
+                    bestK = k;
+                }
+            }
+            int[] off = mixOffset(zx[bestK], grp[bestK], t, window, decay, recentTie);
+            if (zx[bestK][t][off[0] + r][off[1] + r][off[2] + r]) {
+                adapt[bucket]++;
+            }
+            if (grp[bestK][t][off[0] + r][off[1] + r][off[2] + r]) {
+                adapt[bucket + 1]++;
+            }
+        }
+        sb.append(String.format(Locale.ROOT, "按近期直选切换  近100 %d直%d组 | 前100 %d直%d组%n",
+                adapt[0], adapt[1], adapt[2], adapt[3]));
+    }
+
+    private static int[] countMix(boolean[][][][] zx, boolean[][][][] grp, int n, int window,
+                                  double decay, boolean recentTie) {
+        int[] hit = new int[4];
+        int[] froms = {n - 100, n - 200};
+        int[] tos = {n, n - 100};
+        for (int b = 0; b < froms.length; b++) {
+            for (int t = froms[b]; t < tos[b]; t++) {
+                int[] off = mixOffset(zx, grp, t, window, decay, recentTie);
+                if (zx[t][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                    hit[b * 2]++;
+                }
+                if (grp[t][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                    hit[b * 2 + 1]++;
+                }
+            }
+        }
+        return hit;
+    }
+
+    private static int[] mixOffset(boolean[][][][] zx, boolean[][][][] grp, int end, int window,
+                                   double decay, boolean recentTie) {
+        int from = Math.max(0, end - window);
+        int bestZ = -1;
+        int bestG = -1;
+        int bestL1 = 99;
+        int bestLastZ = -1;
+        int bestLastG = -1;
+        int bh = 0;
+        int bt = 0;
+        int bu = 0;
+        for (int dh = -1; dh <= 1; dh++) {
+            for (int dt = -1; dt <= 1; dt++) {
+                for (int du = -1; du <= 1; du++) {
+                    int z = 0;
+                    int g = 0;
+                    int lastZ = -1;
+                    int lastG = -1;
+                    for (int s = from; s < end; s++) {
+                        int w = periodWeight(end - 1 - s, decay);
+                        if (zx[s][dh + 1][dt + 1][du + 1]) {
+                            z += w;
+                            lastZ = s;
+                        }
+                        if (grp[s][dh + 1][dt + 1][du + 1]) {
+                            g += w;
+                            lastG = s;
+                        }
+                    }
+                    int l1 = Math.abs(dh) + Math.abs(dt) + Math.abs(du);
+                    if (betterShift(z, g, lastZ, lastG, l1, bestZ, bestG, bestLastZ, bestLastG, bestL1, recentTie)) {
+                        bestZ = z;
+                        bestG = g;
+                        bestL1 = l1;
+                        bestLastZ = lastZ;
+                        bestLastG = lastG;
+                        bh = dh;
+                        bt = dt;
+                        bu = du;
+                    }
+                }
+            }
+        }
+        return new int[]{bh, bt, bu};
+    }
+
+    /** 底稿的冷热窗口也按近期直选挑，不把 3D 遗漏12、排三热30 写死。 */
+    private static void modeScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int cacheFrom = Math.max(50, n - 230);
+        DigitMode[] modes = {
+                DigitMode.HOT8, DigitMode.HOT12, DigitMode.HOT20, DigitMode.HOT30,
+                DigitMode.BELL5, DigitMode.BELL8, DigitMode.BELL12, DigitMode.COLD
+        };
+        int dim = 3;
+        boolean[][][][][] zx = new boolean[modes.length][n][dim][dim][dim];
+        boolean[][][][][] grp = new boolean[modes.length][n][dim][dim][dim];
+        for (int t = cacheFrom; t < n; t++) {
+            int ban = code(digits[t - 1]);
+            int id = code(digits[t]);
+            int gk = groupKey(id);
+            for (int k = 0; k < modes.length; k++) {
+                double[][] pos = new double[3][10];
+                for (int p = 0; p < 3; p++) {
+                    pos[p] = modeScore(modes[k], digits, t, p);
+                }
+                int[] bets = groups20(pos, ban, 3);
+                for (int bet : bets) {
+                    for (int dh = -1; dh <= 1; dh++) {
+                        for (int dt = -1; dt <= 1; dt++) {
+                            for (int du = -1; du <= 1; du++) {
+                                int sid = shiftId(bet, dh, dt, du, true);
+                                if (sid == id) {
+                                    zx[k][t][dh + 1][dt + 1][du + 1] = true;
+                                }
+                                if (groupKey(sid) == gk) {
+                                    grp[k][t][dh + 1][dt + 1][du + 1] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        int window = pl3 ? plWindow : sdWindow;
+        double decay = pl3 ? plDecay : sdDecay;
+        boolean recentTie = pl3 ? plRecentTie : sdRecentTie;
+        sb.append("===== ").append(name).append(" 底稿 =====\n");
+        for (int k = 0; k < modes.length; k++) {
+            int[] hit = countMix(zx[k], grp[k], n, window, decay, recentTie);
+            sb.append(String.format(Locale.ROOT, "%-8s 近100 %d直%d组 | 前100 %d直%d组%n",
+                    modes[k], hit[0], hit[1], hit[2], hit[3]));
+        }
+        int[] adapt = new int[4];
+        for (int t = n - 200; t < n; t++) {
+            int bucket = t >= n - 100 ? 0 : 2;
+            int bestZ = -1;
+            int bestG = -1;
+            int bestK = 0;
+            for (int k = 0; k < modes.length; k++) {
+                int[] off = mixOffset(zx[k], grp[k], t, window, decay, recentTie);
+                int z = 0;
+                int g = 0;
+                int from = Math.max(0, t - window);
+                for (int s = from; s < t; s++) {
+                    int w = periodWeight(t - 1 - s, decay);
+                    if (zx[k][s][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                        z += w;
+                    }
+                    if (grp[k][s][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                        g += w;
+                    }
+                }
+                if (z > bestZ || (z == bestZ && g > bestG)) {
+                    bestZ = z;
+                    bestG = g;
+                    bestK = k;
+                }
+            }
+            int[] off = mixOffset(zx[bestK], grp[bestK], t, window, decay, recentTie);
+            if (zx[bestK][t][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                adapt[bucket]++;
+            }
+            if (grp[bestK][t][off[0] + 1][off[1] + 1][off[2] + 1]) {
+                adapt[bucket + 1]++;
+            }
+        }
+        sb.append(String.format(Locale.ROOT, "按近期直选换底  近100 %d直%d组 | 前100 %d直%d组%n",
+                adapt[0], adapt[1], adapt[2], adapt[3]));
     }
 
     public static int[] pool(int[][] digits, boolean pl3, int limit) {
@@ -1341,8 +1681,15 @@ public final class Flow1000Ranker {
         return Arrays.copyOf(out, f);
     }
 
-    /** 用窗口内已经开出的号，挑使直选最多的百十个平移。平局先看组选，再偏向不平移。 */
+    /** 用窗口内已经开出的号，挑使直选最多的百十个平移。越近的期权重越大。平局先看组选，排三再看最近一次命中。 */
     private static int[] fitShift(int[][] digits, int end, boolean pl3, int window, int radius, boolean wrap) {
+        double decay = pl3 ? plDecay : sdDecay;
+        boolean recentTie = pl3 ? plRecentTie : sdRecentTie;
+        return fitShift(digits, end, pl3, window, radius, wrap, decay, recentTie);
+    }
+
+    private static int[] fitShift(int[][] digits, int end, boolean pl3, int window, int radius, boolean wrap,
+                                  double decay, boolean recentTie) {
         int from = Math.max(40, end - window);
         int m = end - from;
         int[][] bets = new int[m][];
@@ -1357,6 +1704,8 @@ public final class Flow1000Ranker {
         int bestZ = -1;
         int bestG = -1;
         int bestL1 = 99;
+        int bestLastZ = -1;
+        int bestLastG = -1;
         int bh = 0;
         int bt = 0;
         int bu = 0;
@@ -1365,6 +1714,8 @@ public final class Flow1000Ranker {
                 for (int du = -radius; du <= radius; du++) {
                     int z = 0;
                     int g = 0;
+                    int lastZ = -1;
+                    int lastG = -1;
                     for (int i = 0; i < m; i++) {
                         boolean hz = false;
                         boolean hg = false;
@@ -1380,18 +1731,23 @@ public final class Flow1000Ranker {
                                 hg = true;
                             }
                         }
+                        int w = periodWeight(m - 1 - i, decay);
                         if (hz) {
-                            z++;
+                            z += w;
+                            lastZ = i;
                         }
                         if (hg) {
-                            g++;
+                            g += w;
+                            lastG = i;
                         }
                     }
                     int l1 = Math.abs(dh) + Math.abs(dt) + Math.abs(du);
-                    if (z > bestZ || (z == bestZ && g > bestG) || (z == bestZ && g == bestG && l1 < bestL1)) {
+                    if (betterShift(z, g, lastZ, lastG, l1, bestZ, bestG, bestLastZ, bestLastG, bestL1, recentTie)) {
                         bestZ = z;
                         bestG = g;
                         bestL1 = l1;
+                        bestLastZ = lastZ;
+                        bestLastG = lastG;
                         bh = dh;
                         bt = dt;
                         bu = du;
@@ -1400,6 +1756,37 @@ public final class Flow1000Ranker {
             }
         }
         return new int[]{bh, bt, bu};
+    }
+
+    /** 距今 0 期权重 1000。衰减越小于 1，越只看窗口末端的走势。 */
+    private static int periodWeight(int age, double decay) {
+        if (decay >= 0.999) {
+            return 1000;
+        }
+        if (age <= 0) {
+            return 1000;
+        }
+        return (int) Math.round(1000.0 * Math.pow(decay, age));
+    }
+
+    private static boolean betterShift(int z, int g, int lastZ, int lastG, int l1,
+                                       int bestZ, int bestG, int bestLastZ, int bestLastG, int bestL1,
+                                       boolean recentTie) {
+        if (z != bestZ) {
+            return z > bestZ;
+        }
+        if (g != bestG) {
+            return g > bestG;
+        }
+        if (recentTie) {
+            if (lastZ != bestLastZ) {
+                return lastZ > bestLastZ;
+            }
+            if (lastG != bestLastG) {
+                return lastG > bestLastG;
+            }
+        }
+        return l1 < bestL1;
     }
 
     private static void shiftSearch(StringBuilder sb, String name, int[][] digits, boolean pl3) {
@@ -1670,6 +2057,233 @@ public final class Flow1000Ranker {
             }
         }
         return new int[]{bh, bt, bu};
+    }
+
+    /** 与线上 fitShift 同一套权重：直选优先，组选其次，再看窗口末端最近一次命中。 */
+    private static int[] bestOffsetWeighted(boolean[][][][] zx, boolean[][][][] grp, int end, int window,
+                                            int radius, double decay, boolean recentTie) {
+        int from = Math.max(0, end - window);
+        int bestZ = -1;
+        int bestG = -1;
+        int bestL1 = 99;
+        int bestLastZ = -1;
+        int bestLastG = -1;
+        int bh = 0;
+        int bt = 0;
+        int bu = 0;
+        int r = SHIFT_R;
+        for (int dh = -radius; dh <= radius; dh++) {
+            for (int dt = -radius; dt <= radius; dt++) {
+                for (int du = -radius; du <= radius; du++) {
+                    int z = 0;
+                    int g = 0;
+                    int lastZ = -1;
+                    int lastG = -1;
+                    for (int s = from; s < end; s++) {
+                        int w = periodWeight(end - 1 - s, decay);
+                        if (zx[s][dh + r][dt + r][du + r]) {
+                            z += w;
+                            lastZ = s;
+                        }
+                        if (grp[s][dh + r][dt + r][du + r]) {
+                            g += w;
+                            lastG = s;
+                        }
+                    }
+                    int l1 = Math.abs(dh) + Math.abs(dt) + Math.abs(du);
+                    if (betterShift(z, g, lastZ, lastG, l1, bestZ, bestG, bestLastZ, bestLastG, bestL1, recentTie)) {
+                        bestZ = z;
+                        bestG = g;
+                        bestL1 = l1;
+                        bestLastZ = lastZ;
+                        bestLastG = lastG;
+                        bh = dh;
+                        bt = dt;
+                        bu = du;
+                    }
+                }
+            }
+        }
+        return new int[]{bh, bt, bu};
+    }
+
+    private static int[] packTrend(boolean[] hz, boolean[] hg, int n) {
+        int[] out = new int[10];
+        int[] from = {n - 10, n - 10, n - 20, n - 20, n - 30, n - 30, n - 50, n - 50, n - 100, n - 100};
+        int[] to = {n, n, n, n, n, n, n, n, n - 50, n - 50};
+        for (int i = 0; i < from.length; i++) {
+            int hit = 0;
+            boolean direct = i % 2 == 0;
+            for (int t = from[i]; t < to[i]; t++) {
+                if (direct ? hz[t] : hg[t]) {
+                    hit++;
+                }
+            }
+            out[i] = hit;
+        }
+        return out;
+    }
+
+    private static boolean betterTrend(int[] a, int[] b) {
+        int[] order = {4, 5, 2, 3, 0, 1, 6, 7};
+        for (int i : order) {
+            if (a[i] != b[i]) {
+                return a[i] > b[i];
+            }
+        }
+        return false;
+    }
+
+    private static String trendText(int[] hit) {
+        return String.format(Locale.ROOT, "近10 %d直%d组 | 近20 %d直%d组 | 近30 %d直%d组 | 近50 %d直%d组 | 前50 %d直%d组",
+                hit[0], hit[1], hit[2], hit[3], hit[4], hit[5], hit[6], hit[7], hit[8], hit[9]);
+    }
+
+    private static int[] trendHitsOf(boolean[][][][] zx, boolean[][][][] grp, int n,
+                                     int[] dh, int[] dt, int[] du) {
+        boolean[] hz = new boolean[n];
+        boolean[] hg = new boolean[n];
+        int r = SHIFT_R;
+        for (int t = n - 100; t < n; t++) {
+            hz[t] = zx[t][dh[t] + r][dt[t] + r][du[t] + r];
+            hg[t] = grp[t][dh[t] + r][dt[t] + r][du[t] + r];
+        }
+        return packTrend(hz, hg, n);
+    }
+
+    private static int[] adaptiveHitsOf(boolean[][][][] zx, boolean[][][][] grp, int n, int[] windows,
+                                        int trend, int[][] dh, int[][] dt, int[][] du) {
+        boolean[] hz = new boolean[n];
+        boolean[] hg = new boolean[n];
+        int r = SHIFT_R;
+        for (int t = n - 100; t < n; t++) {
+            int w = pickWindow(zx, grp, t, windows, trend, dh, dt, du);
+            hz[t] = zx[t][dh[w][t] + r][dt[w][t] + r][du[w][t] + r];
+            hg[t] = grp[t][dh[w][t] + r][dt[w][t] + r][du[w][t] + r];
+        }
+        return packTrend(hz, hg, n);
+    }
+
+    private static int pickWindow(boolean[][][][] zx, boolean[][][][] grp, int end, int[] windows, int trend,
+                                  int[][] dh, int[][] dt, int[][] du) {
+        int bestW = windows[0];
+        int bestZ = -1;
+        int bestG = -1;
+        int bestZ10 = -1;
+        int bestG10 = -1;
+        int r = SHIFT_R;
+        int from = Math.max(0, end - trend);
+        int recentFrom = Math.max(from, end - 10);
+        for (int w : windows) {
+            int z = 0;
+            int g = 0;
+            int z10 = 0;
+            int g10 = 0;
+            for (int s = from; s < end; s++) {
+                boolean hz = zx[s][dh[w][s] + r][dt[w][s] + r][du[w][s] + r];
+                boolean hg = grp[s][dh[w][s] + r][dt[w][s] + r][du[w][s] + r];
+                if (hz) {
+                    z++;
+                }
+                if (hg) {
+                    g++;
+                }
+                if (s >= recentFrom) {
+                    if (hz) {
+                        z10++;
+                    }
+                    if (hg) {
+                        g10++;
+                    }
+                }
+            }
+            boolean better = z > bestZ || (z == bestZ && g > bestG)
+                    || (z == bestZ && g == bestG && z10 > bestZ10)
+                    || (z == bestZ && g == bestG && z10 == bestZ10 && g10 > bestG10)
+                    || (z == bestZ && g == bestG && z10 == bestZ10 && g10 == bestG10 && w < bestW);
+            if (better) {
+                bestZ = z;
+                bestG = g;
+                bestZ10 = z10;
+                bestG10 = g10;
+                bestW = w;
+            }
+        }
+        return bestW;
+    }
+
+    /** 窗口 6 到 60。按近30直选、近30组选、近20直选、近20组选留下，直选优先于组选。 */
+    private static void trendScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int cacheFrom = Math.max(50, n - 360);
+        int r = SHIFT_R;
+        int dim = r * 2 + 1;
+        boolean[][][][] zx = new boolean[n][dim][dim][dim];
+        boolean[][][][] grp = new boolean[n][dim][dim][dim];
+        for (int t = cacheFrom; t < n; t++) {
+            int[] bets = base20(digits, t, pl3);
+            markShift(bets, bets.length, code(digits[t]), groupKey(code(digits[t])), zx, grp, t, true);
+        }
+        int span = 160;
+        int w0 = 6;
+        int wN = 60;
+        double[] decays = {0.60, 0.75, 0.85, 0.92, 1.0};
+        int[][][][] dh = new int[decays.length][2][wN + 1][n];
+        int[][][][] dt = new int[decays.length][2][wN + 1][n];
+        int[][][][] du = new int[decays.length][2][wN + 1][n];
+        for (int di = 0; di < decays.length; di++) {
+            boolean[] ties = decays[di] >= 0.999 ? new boolean[]{false, true} : new boolean[]{true};
+            for (boolean recentTie : ties) {
+                int ti = recentTie ? 1 : 0;
+                for (int window = w0; window <= wN; window++) {
+                    for (int t = n - span; t < n; t++) {
+                        int[] off = bestOffsetWeighted(zx, grp, t, window, 1, decays[di], recentTie);
+                        dh[di][ti][window][t] = off[0];
+                        dt[di][ti][window][t] = off[1];
+                        du[di][ti][window][t] = off[2];
+                    }
+                }
+            }
+        }
+        int curW = pl3 ? 12 : 35;
+        int[] current = trendHitsOf(zx, grp, n, dh[4][0][curW], dt[4][0][curW], du[4][0][curW]);
+        sb.append("===== ").append(name).append(" =====\n");
+        sb.append(String.format(Locale.ROOT, "当前 W%d 衰减1 %s%n", curW, trendText(current)));
+        int[] best = current;
+        String bestLabel = "当前 W" + curW;
+        for (int di = 0; di < decays.length; di++) {
+            boolean[] ties = decays[di] >= 0.999 ? new boolean[]{false, true} : new boolean[]{true};
+            for (boolean recentTie : ties) {
+                int ti = recentTie ? 1 : 0;
+                sb.append(String.format(Locale.ROOT, "---- 衰减%.2f %s ----%n", decays[di], recentTie ? "近端平局" : "小平移平局"));
+                for (int window = w0; window <= wN; window++) {
+                    int[] hit = trendHitsOf(zx, grp, n, dh[di][ti][window], dt[di][ti][window], du[di][ti][window]);
+                    String label = String.format(Locale.ROOT, "W%02d 衰减%.2f%s", window, decays[di], recentTie ? "近" : "平");
+                    sb.append(String.format(Locale.ROOT, "%-16s %s%n", label, trendText(hit)));
+                    if (betterTrend(hit, best)) {
+                        best = hit;
+                        bestLabel = label;
+                    }
+                }
+            }
+        }
+        int[] adaptWindows = {6, 8, 10, 12, 14, 16, 20, 24, 30, 35, 40, 50};
+        sb.append("---- 按最近走势挑窗口 ----\n");
+        for (int trend : new int[]{12, 16, 20, 24, 30}) {
+            for (int di = 0; di < decays.length; di++) {
+                if (decays[di] != 0.75 && decays[di] != 0.85 && decays[di] != 1.0) {
+                    continue;
+                }
+                int[] hit = adaptiveHitsOf(zx, grp, n, adaptWindows, trend, dh[di][1], dt[di][1], du[di][1]);
+                String label = String.format(Locale.ROOT, "自适应L%d 衰减%.2f", trend, decays[di]);
+                sb.append(String.format(Locale.ROOT, "%-16s %s%n", label, trendText(hit)));
+                if (betterTrend(hit, best)) {
+                    best = hit;
+                    bestLabel = label;
+                }
+            }
+        }
+        sb.append("留下 ").append(bestLabel).append("  ").append(trendText(best)).append('\n');
     }
 
     private static int[] groups20(double[][] pos, int ban, int how) {
@@ -2785,6 +3399,35 @@ public final class Flow1000Ranker {
             repeatScan(sb, "福彩3D", sd, false);
             repeatScan(sb, "排列三", pl, true);
             Path out = Path.of("reports/sanma_repeat.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "dash".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("组六平移之上，热组多留顺序。留几组、留几个顺序按最近窗口直选现算，平移也按同一窗口重算。\n");
+            sb.append("热组0留2序就是现在的每组一个顺序。前100是再往前100期。\n");
+            int[][] sdLocal = parseXlsx(Path.of("D:/彩票/3D.xlsx"));
+            int[][] plLocal = parseXlsx(Path.of("D:/彩票/排列三.xlsx"));
+            sb.append("3D期数=").append(sdLocal.length).append(" 排三期数=").append(plLocal.length).append('\n');
+            mixScan(sb, "福彩3D", sdLocal, false);
+            modeScan(sb, "福彩3D", sdLocal, false);
+            mixScan(sb, "排列三", plLocal, true);
+            modeScan(sb, "排列三", plLocal, true);
+            Path out = Path.of("reports/sanma_dasheng.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "trend".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("三码窗口按最近走势重扫。窗口内越近的期权重越大。\n");
+            sb.append("排序：近30直选、近30组选、近20直选、近20组选、近10直选、近10组选，再看近50。前50只作对照。\n");
+            trendScan(sb, "福彩3D", sd, false);
+            trendScan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_trend.txt");
             Files.createDirectories(out.getParent());
             Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
             System.out.println(sb);

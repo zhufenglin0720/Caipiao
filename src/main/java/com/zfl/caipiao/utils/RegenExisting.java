@@ -41,6 +41,12 @@ public final class RegenExisting {
         Hist pl = readHist(PL_HIST);
         System.out.println("3D历史 " + sd.issues.size() + " 期 首=" + sd.issues.get(0) + " 末=" + sd.issues.get(sd.issues.size() - 1));
         System.out.println("排三历史 " + pl.issues.size() + " 期 首=" + pl.issues.get(0) + " 末=" + pl.issues.get(pl.issues.size() - 1));
+        if (args != null && args.length > 0 && "sanma".equals(args[0])) {
+            regenSanma("福彩3D", SD_COMPARE, sd, false);
+            regenSanma("排列三", PL_COMPARE, pl, true);
+            System.out.println("三码写回完成。重启应用后页面会读到新表。");
+            return;
+        }
         regenCompare("福彩3D", SD_COMPARE, sd, false);
         regenCompare("排列三", PL_COMPARE, pl, true);
         regenDadi("福彩3D", SD_DADI, sd, false);
@@ -85,6 +91,131 @@ public final class RegenExisting {
         System.out.printf(Locale.ROOT, "%s 对比 重写%d 保留%d 其中未开奖按全历史预测%d | 末行%s 三码%d注 大底%d注 七码%s 双胆%s 定位%s%n",
                 name, updated, kept, future, back.get("A"),
                 bets(back.get("C")), bets(back.get("E")), back.get("I"), back.get("G"), back.get("F"));
+    }
+
+    /** 只重写三码预测和推荐号码，其它列原样保留。 */
+    private static void regenSanma(String name, Path file, Hist hist, boolean pl3) throws Exception {
+        Sheet sheet = readSheet(file);
+        List<Map<String, String>> before = new ArrayList<>();
+        for (Map<String, String> row : sheet.rows) {
+            before.add(new LinkedHashMap<>(row));
+        }
+        int updated = 0;
+        int kept = 0;
+        int future = 0;
+        int zx = 0;
+        int grp = 0;
+        int judged = 0;
+        for (int i = 1; i < sheet.rows.size(); i++) {
+            Map<String, String> row = sheet.rows.get(i);
+            String qh = row.getOrDefault("A", "").trim();
+            Pack pack = predictSanma(hist, qh, pl3);
+            if (pack == null) {
+                kept++;
+                System.out.println(name + " 三码 " + qh + " 历史不足或对不上，原值保留");
+                continue;
+            }
+            if (pack.future) {
+                future++;
+            }
+            row.put("B", pack.sanma);
+            row.put("C", pack.sanma);
+            updated++;
+            String real = row.getOrDefault("J", "").trim();
+            if (real.length() >= 3 && real.chars().allMatch(Character::isDigit)) {
+                judged++;
+                int id = Integer.parseInt(real.substring(real.length() - 3));
+                if (hasId(pack.sanma, id)) {
+                    zx++;
+                }
+                if (hasGroup(pack.sanma, id)) {
+                    grp++;
+                }
+            }
+        }
+        writeSheet(file, sheet);
+        List<Map<String, String>> backRows = readSheet(file).rows;
+        if (backRows.size() != before.size()) {
+            throw new IllegalStateException(name + " 三码写回后行数变了");
+        }
+        for (int i = 0; i < before.size(); i++) {
+            Map<String, String> old = before.get(i);
+            Map<String, String> now = backRows.get(i);
+            for (Map.Entry<String, String> e : old.entrySet()) {
+                String col = e.getKey();
+                if ("B".equals(col) || "C".equals(col)) {
+                    continue;
+                }
+                if (!same(e.getValue(), now.get(col))) {
+                    throw new IllegalStateException(name + " 三码写回后列" + col + "变了 期号=" + old.get("A"));
+                }
+            }
+        }
+        Map<String, String> back = backRows.get(backRows.size() - 1);
+        System.out.printf(Locale.ROOT,
+                "%s 三码 重写%d 保留%d 未开奖%d | 已开奖%d期 直选%d 组选%d | 末行%s %d注 %s%n",
+                name, updated, kept, future, judged, zx, grp, back.get("A"), bets(back.get("C")),
+                Flow1000Ranker.describe(pl3));
+    }
+
+    private static Pack predictSanma(Hist hist, String qh, boolean pl3) {
+        if (qh.isEmpty() || !qh.chars().allMatch(Character::isDigit)) {
+            return null;
+        }
+        String key = (pl3 ? "ps:" : "ss:") + qh;
+        Pack cached = CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Integer ix = hist.index.get(qh);
+        int[][] prefix;
+        boolean future = false;
+        if (ix != null) {
+            prefix = copyPrefix(hist.digits, ix);
+        } else {
+            long n = Long.parseLong(qh);
+            long last = Long.parseLong(hist.issues.get(hist.issues.size() - 1));
+            if (n <= last) {
+                return null;
+            }
+            prefix = hist.digits;
+            future = true;
+        }
+        if (prefix.length < 40) {
+            return null;
+        }
+        Pack pack = new Pack();
+        pack.future = future;
+        pack.sanma = Flow1000Ranker.csv(Flow1000Ranker.sanma(prefix, pl3));
+        CACHE.put(key, pack);
+        return pack;
+    }
+
+    private static boolean hasId(String csv, int id) {
+        String token = String.format(Locale.ROOT, "%03d", id);
+        for (String part : csv.split(",")) {
+            if (token.equals(part.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasGroup(String csv, int id) {
+        int key = groupKey(id);
+        for (String part : csv.split(",")) {
+            String s = part.trim();
+            if (s.length() == 3 && s.chars().allMatch(Character::isDigit) && groupKey(Integer.parseInt(s)) == key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int groupKey(int id) {
+        int[] d = {id / 100, (id / 10) % 10, id % 10};
+        java.util.Arrays.sort(d);
+        return d[0] * 100 + d[1] * 10 + d[2];
     }
 
     private static void regenDadi(String name, Path file, Hist hist, boolean pl3) throws Exception {
