@@ -42,8 +42,12 @@ public final class RegenExisting {
         System.out.println("3D历史 " + sd.issues.size() + " 期 首=" + sd.issues.get(0) + " 末=" + sd.issues.get(sd.issues.size() - 1));
         System.out.println("排三历史 " + pl.issues.size() + " 期 首=" + pl.issues.get(0) + " 末=" + pl.issues.get(pl.issues.size() - 1));
         if (args != null && args.length > 0 && "sanma".equals(args[0])) {
-            regenSanma("福彩3D", SD_COMPARE, sd, false);
-            regenSanma("排列三", PL_COMPARE, pl, true);
+            int last = 0;
+            if (args.length > 1) {
+                last = Integer.parseInt(args[1]);
+            }
+            regenSanma("福彩3D", SD_COMPARE, sd, false, last);
+            regenSanma("排列三", PL_COMPARE, pl, true, last);
             System.out.println("三码写回完成。重启应用后页面会读到新表。");
             return;
         }
@@ -93,8 +97,8 @@ public final class RegenExisting {
                 bets(back.get("C")), bets(back.get("E")), back.get("I"), back.get("G"), back.get("F"));
     }
 
-    /** 只重写三码预测和推荐号码，其它列原样保留。 */
-    private static void regenSanma(String name, Path file, Hist hist, boolean pl3) throws Exception {
+    /** 只重写三码预测和推荐号码，其它列原样保留。lastN>0 时只改表尾 lastN 期。 */
+    private static void regenSanma(String name, Path file, Hist hist, boolean pl3, int lastN) throws Exception {
         Sheet sheet = readSheet(file);
         List<Map<String, String>> before = new ArrayList<>();
         for (Map<String, String> row : sheet.rows) {
@@ -106,10 +110,15 @@ public final class RegenExisting {
         int zx = 0;
         int grp = 0;
         int judged = 0;
-        for (int i = 1; i < sheet.rows.size(); i++) {
+        int start = 1;
+        if (lastN > 0) {
+            start = Math.max(1, sheet.rows.size() - lastN);
+            System.out.println(name + " 用当前近10规则回放表尾" + lastN + "期");
+        }
+        for (int i = start; i < sheet.rows.size(); i++) {
             Map<String, String> row = sheet.rows.get(i);
             String qh = row.getOrDefault("A", "").trim();
-            Pack pack = predictSanma(hist, qh, pl3);
+            Pack pack = predictSanma(hist, qh, pl3, lastN > 0);
             if (pack == null) {
                 kept++;
                 System.out.println(name + " 三码 " + qh + " 历史不足或对不上，原值保留");
@@ -125,12 +134,20 @@ public final class RegenExisting {
             if (real.length() >= 3 && real.chars().allMatch(Character::isDigit)) {
                 judged++;
                 int id = Integer.parseInt(real.substring(real.length() - 3));
-                if (hasId(pack.sanma, id)) {
+                boolean hitZ = hasId(pack.sanma, id);
+                boolean hitG = hasGroup(pack.sanma, id);
+                if (hitZ) {
                     zx++;
                 }
-                if (hasGroup(pack.sanma, id)) {
+                if (hitG) {
                     grp++;
                 }
+                if (lastN > 0) {
+                    System.out.printf(Locale.ROOT, "  %s %s 开奖%s%n",
+                            qh, hitZ ? "直选" : hitG ? "组选" : "未中", real);
+                }
+            } else if (lastN > 0) {
+                System.out.printf(Locale.ROOT, "  %s 未开奖 %d注%n", qh, bets(pack.sanma));
             }
         }
         writeSheet(file, sheet);
@@ -158,11 +175,11 @@ public final class RegenExisting {
                 Flow1000Ranker.describe(pl3));
     }
 
-    private static Pack predictSanma(Hist hist, String qh, boolean pl3) {
+    private static Pack predictSanma(Hist hist, String qh, boolean pl3, boolean lockLatest) {
         if (qh.isEmpty() || !qh.chars().allMatch(Character::isDigit)) {
             return null;
         }
-        String key = (pl3 ? "ps:" : "ss:") + qh;
+        String key = (lockLatest ? "L" : "") + (pl3 ? "ps:" : "ss:") + qh;
         Pack cached = CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -186,7 +203,9 @@ public final class RegenExisting {
         }
         Pack pack = new Pack();
         pack.future = future;
-        pack.sanma = Flow1000Ranker.csv(Flow1000Ranker.sanma(prefix, pl3));
+        pack.sanma = Flow1000Ranker.csv(lockLatest
+                ? Flow1000Ranker.sanmaLocked(hist.digits, prefix, pl3)
+                : Flow1000Ranker.sanma(prefix, pl3));
         CACHE.put(key, pack);
         return pack;
     }
