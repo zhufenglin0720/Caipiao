@@ -23,8 +23,8 @@ import java.util.zip.ZipFile;
  * <p>
  * 乐彩网、500 彩票网、购彩大神共用的定位框架：同位冷热、遗漏回补、邻期转移、
  * 重号、邻号（不绕 0/9）、跨位重号。每位先按近窗命中选出冷热窗口，再对 000–999
- * 打分。三码 10 注不拿名次最前的 10 个，而在全量排序上比较几种取法，用近期
- * 直选命中最高的那种（爆流带 / 定位复式 / 邻号）。
+ * 打分。三码 20 注只看最近 30 期：同一组多留顺序，用来补直选位置不对；
+ * 只在一个位置上补 ±1，用来补组选和直选的单位置差。3D 和排列三各自现算。
  */
 public final class Flow1000Ranker {
 
@@ -52,6 +52,10 @@ public final class Flow1000Ranker {
     static Strategy plStrategy = Strategy.COLD;
     static SanmaPick plPick = SanmaPick.B30;
     static boolean plBurstPool = false;
+
+    /** 旧平移扫描还在用。线上三码不再读这些窗口，只按最近 30 期现算。 */
+    private static String sdCoverNote = "";
+    private static String plCoverNote = "";
 
     /** 三码平移窗口。衰减小于 1 时，窗口里越近的期越决定百十个差。 */
     static int sdWindow = 16;
@@ -92,9 +96,12 @@ public final class Flow1000Ranker {
     }
 
     public static String describe(boolean pl3) {
-        return pl3
-                ? "500排三:三码20注近30热6码，再按近13期衰减0.60的直选差环移±1"
-                : "乐彩3D:三码20注遗漏12的6码，再按近16期直选差环移±1";
+        String note = pl3 ? plCoverNote : sdCoverNote;
+        String game = pl3 ? "排列三" : "福彩3D";
+        if (note == null || note.isEmpty()) {
+            return game + ":三码20注只看近30期，组内顺序和单位置±1按直选、组选现算";
+        }
+        return game + ":三码20注近30 " + note;
     }
 
     public static String csv(int[] ids) {
@@ -120,10 +127,317 @@ public final class Flow1000Ranker {
     }
 
     private static int[] shiftSanma(int[][] digits, int end, boolean pl3) {
+        return nearSanma(digits, end, pl3);
+    }
+
+    /** 改法之前的整组平移，只留给近30期对照。 */
+    private static int[] legacyShiftSanma(int[][] digits, boolean pl3) {
+        int end = digits.length;
         int[] base = base20(digits, end, pl3);
         int window = pl3 ? plWindow : sdWindow;
         int[] off = fitShift(digits, end, pl3, window, 1, true);
         return applyShift(base, off[0], off[1], off[2], true, false);
+    }
+
+    /**
+     * 最近 30 期里现算。直选优先，组选其次，越近的期权重越大。
+     * 一组一序再平移始终留在候选里。多留一个顺序，补直选位置不对；
+     * 只在一个位置上补 ±1，补组选和直选的单位置差。平局就少改票。
+     * 定位底和窗口按玩法分开，不在这里重选。最近 30 期只决定要不要给前 4 组再留一个顺序，
+     * 以及要不要只补百、十、个中的一位 ±1。直选、组选没有更高，就保持原来的平移。
+     */
+    private static int[] nearSanma(int[][] digits, int end, boolean pl3) {
+        if (end < 80) {
+            return base20(digits, end, pl3);
+        }
+        NearPick pick = pickNear(digits, end, pl3);
+        if (pl3) {
+            plCoverNote = pick.text();
+        } else {
+            sdCoverNote = pick.text();
+        }
+        return realize(digits, end, pick);
+    }
+
+    private static final class NearPick {
+        final DigitMode mode;
+        final int window;
+        final double decay;
+        final boolean recentTie;
+        final boolean extraOrder;
+        final int nudgePos;
+        int[] liveOff;
+        int[] liveBase;
+
+        NearPick(DigitMode mode, int window, double decay, boolean recentTie, boolean extraOrder, int nudgePos) {
+            this.mode = mode;
+            this.window = window;
+            this.decay = decay;
+            this.recentTie = recentTie;
+            this.extraOrder = extraOrder;
+            this.nudgePos = nudgePos;
+        }
+
+        int cost() {
+            return (extraOrder ? 4 : 0) + (nudgePos >= 0 ? 2 : 0);
+        }
+
+        String text() {
+            String nudge = nudgePos < 0 ? "不补邻号" : (nudgePos == 0 ? "百" : nudgePos == 1 ? "十" : "个") + "位±1";
+            String order = extraOrder ? "前4组再留1序" : "一组一序";
+            return String.format(Locale.ROOT, "%s 窗%d 衰减%.2f%s %s %s",
+                    mode, window, decay, recentTie ? " 近端平局" : "", order, nudge);
+        }
+    }
+
+    private static NearPick defaultPick(boolean pl3) {
+        if (pl3) {
+            return new NearPick(DigitMode.HOT30, 13, 0.60, true, false, -1);
+        }
+        return new NearPick(DigitMode.BELL12, 16, 1.0, false, false, -1);
+    }
+
+    private static NearPick pickNear(int[][] digits, int end, boolean pl3) {
+        NearPick base = defaultPick(pl3);
+        int look = 30;
+        int low = Math.max(40, end - look - base.window);
+        int from = Math.max(low + base.window, end - look);
+        if (from >= end) {
+            return base;
+        }
+        int[][] bets = new int[end + 1][];
+        int[] draw = new int[end];
+        int[] gk = new int[end];
+        for (int t = low; t < end; t++) {
+            draw[t] = code(digits[t]);
+            gk[t] = groupKey(draw[t]);
+            bets[t] = baseByMode(digits, t, base.mode);
+        }
+        bets[end] = baseByMode(digits, end, base.mode);
+        int[][] offs = new int[end][];
+        for (int s = from; s < end; s++) {
+            offs[s] = offOnCache(bets, draw, gk, s, base.window, base.decay, base.recentTie);
+        }
+        int[] liveOff = offOnCache(bets, draw, gk, end, base.window, base.decay, base.recentTie);
+        NearPick best = base;
+        int bestZ = -1;
+        int bestG = -1;
+        int bestLastZ = -1;
+        int bestLastG = -1;
+        int bestCost = Integer.MAX_VALUE;
+        for (boolean extra : new boolean[]{false, true}) {
+            for (int nudge = -1; nudge <= 2; nudge++) {
+                NearPick pick = new NearPick(base.mode, base.window, base.decay, base.recentTie, extra, nudge);
+                int z = 0;
+                int g = 0;
+                int lastZ = -1;
+                int lastG = -1;
+                int i = 0;
+                for (int s = from; s < end; s++, i++) {
+                    int[] tickets = shapeTickets(bets[s], offs[s], extra, nudge);
+                    int w = i + 1;
+                    if (has(tickets, draw[s])) {
+                        z += w;
+                        lastZ = i;
+                    }
+                    if (groupHit(tickets, draw[s])) {
+                        g += w;
+                        lastG = i;
+                    }
+                }
+                if (betterCover(z, g, lastZ, lastG, pick.cost(),
+                        bestZ, bestG, bestLastZ, bestLastG, bestCost)) {
+                    bestZ = z;
+                    bestG = g;
+                    bestLastZ = lastZ;
+                    bestLastG = lastG;
+                    bestCost = pick.cost();
+                    best = pick;
+                    best.liveOff = liveOff;
+                    best.liveBase = bets[end];
+                }
+            }
+        }
+        return best;
+    }
+
+    private static int[] realize(int[][] digits, int end, NearPick pick) {
+        if (pick.liveBase != null && pick.liveOff != null) {
+            return shapeTickets(pick.liveBase, pick.liveOff, pick.extraOrder, pick.nudgePos);
+        }
+        int low = Math.max(40, end - 30 - pick.window);
+        int[][] bets = new int[end + 1][];
+        int[] draw = new int[end];
+        int[] gk = new int[end];
+        for (int t = low; t < end; t++) {
+            draw[t] = code(digits[t]);
+            gk[t] = groupKey(draw[t]);
+            bets[t] = baseByMode(digits, t, pick.mode);
+        }
+        int[] off = offOnCache(bets, draw, gk, end, pick.window, pick.decay, pick.recentTie);
+        return shapeTickets(baseByMode(digits, end, pick.mode), off, pick.extraOrder, pick.nudgePos);
+    }
+
+    private static int[] offOnCache(int[][] bets, int[] draw, int[] gk, int end, int window,
+                                    double decay, boolean recentTie) {
+        int from = Math.max(0, end - window);
+        int bestZ = -1;
+        int bestG = -1;
+        int bestL1 = 99;
+        int bestLastZ = -1;
+        int bestLastG = -1;
+        int bh = 0;
+        int bt = 0;
+        int bu = 0;
+        for (int dh = -1; dh <= 1; dh++) {
+            for (int dt = -1; dt <= 1; dt++) {
+                for (int du = -1; du <= 1; du++) {
+                    int z = 0;
+                    int g = 0;
+                    int lastZ = -1;
+                    int lastG = -1;
+                    for (int s = from; s < end; s++) {
+                        int[] row = bets[s];
+                        if (row == null) {
+                            continue;
+                        }
+                        boolean hz = false;
+                        boolean hg = false;
+                        for (int bet : row) {
+                            int sid = shiftId(bet, dh, dt, du, true);
+                            if (sid == draw[s]) {
+                                hz = true;
+                            }
+                            if (sid >= 0 && groupKey(sid) == gk[s]) {
+                                hg = true;
+                            }
+                        }
+                        int w = periodWeight(end - 1 - s, decay);
+                        if (hz) {
+                            z += w;
+                            lastZ = s;
+                        }
+                        if (hg) {
+                            g += w;
+                            lastG = s;
+                        }
+                    }
+                    int l1 = Math.abs(dh) + Math.abs(dt) + Math.abs(du);
+                    if (betterShift(z, g, lastZ, lastG, l1, bestZ, bestG, bestLastZ, bestLastG, bestL1, recentTie)) {
+                        bestZ = z;
+                        bestG = g;
+                        bestL1 = l1;
+                        bestLastZ = lastZ;
+                        bestLastG = lastG;
+                        bh = dh;
+                        bt = dt;
+                        bu = du;
+                    }
+                }
+            }
+        }
+        return new int[]{bh, bt, bu};
+    }
+
+    private static int[] shapeTickets(int[] base, int[] off, boolean extra, int nudgePos) {
+        if (base == null || off == null) {
+            return new int[0];
+        }
+        if (!extra && nudgePos < 0) {
+            return applyShift(base, off[0], off[1], off[2], true, false);
+        }
+        int[] out = new int[20];
+        boolean[] used = new boolean[1000];
+        int f = 0;
+        int reserve = (extra ? 4 : 0) + (nudgePos >= 0 ? 2 : 0);
+        int keep = 20 - reserve;
+        for (int i = 0; i < base.length && f < keep; i++) {
+            f = addPlain(out, used, f, shiftId(base[i], off[0], off[1], off[2], true));
+        }
+        if (extra) {
+            int n = Math.min(4, base.length);
+            for (int i = 0; i < n && f < 20; i++) {
+                int alt = altOrder(base[i]);
+                if (alt >= 0) {
+                    f = addPlain(out, used, f, shiftId(alt, off[0], off[1], off[2], true));
+                }
+            }
+        }
+        if (nudgePos >= 0 && base.length > 0 && f < 20) {
+            int id = shiftId(base[0], off[0], off[1], off[2], true);
+            f = addPlain(out, used, f, shiftOne(id, nudgePos, 1, true));
+            if (f < 20) {
+                f = addPlain(out, used, f, shiftOne(id, nudgePos, -1, true));
+            }
+        }
+        for (int i = 0; i < base.length && f < 20; i++) {
+            f = addPlain(out, used, f, shiftId(base[i], off[0], off[1], off[2], true));
+        }
+        return Arrays.copyOf(out, f);
+    }
+
+    private static int[] baseByMode(int[][] digits, int end, DigitMode mode) {
+        double[][] pos = new double[3][10];
+        for (int p = 0; p < 3; p++) {
+            pos[p] = modeScore(mode, digits, end, p);
+        }
+        int ban = end > 0 ? code(digits[end - 1]) : -1;
+        return groups20(pos, ban, 3);
+    }
+
+    private static int shiftOne(int id, int pos, int delta, boolean wrap) {
+        if (id < 0) {
+            return -1;
+        }
+        int dh = pos == 0 ? delta : 0;
+        int dt = pos == 1 ? delta : 0;
+        int du = pos == 2 ? delta : 0;
+        return shiftId(id, dh, dt, du, wrap);
+    }
+
+    private static int altOrder(int id) {
+        int a = id / 100;
+        int b = (id / 10) % 10;
+        int c = id % 10;
+        int[] cand = {
+                a * 100 + c * 10 + b,
+                b * 100 + a * 10 + c,
+                b * 100 + c * 10 + a,
+                c * 100 + a * 10 + b,
+                c * 100 + b * 10 + a
+        };
+        for (int x : cand) {
+            if (x != id) {
+                return x;
+            }
+        }
+        return -1;
+    }
+
+    private static int addPlain(int[] out, boolean[] used, int f, int id) {
+        if (f >= out.length || id < 0 || used[id]) {
+            return f;
+        }
+        used[id] = true;
+        out[f] = id;
+        return f + 1;
+    }
+
+    private static boolean betterCover(int z, int g, int lastZ, int lastG, int extra,
+                                       int bestZ, int bestG, int bestLastZ, int bestLastG, int bestExtra) {
+        if (z != bestZ) {
+            return z > bestZ;
+        }
+        if (g != bestG) {
+            return g > bestG;
+        }
+        if (lastZ != bestLastZ) {
+            return lastZ > bestLastZ;
+        }
+        if (lastG != bestLastG) {
+            return lastG > bestLastG;
+        }
+        return extra < bestExtra;
     }
 
     private static double[][] basePos(int[][] digits, int end, boolean pl3) {
@@ -3393,6 +3707,29 @@ public final class Flow1000Ranker {
     public static void main(String[] args) throws Exception {
         int[][] sd = loadGame(true);
         int[][] pl = loadGame(false);
+        if (args != null && args.length > 0 && "gap30".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("最近30期，预测号离开奖号的差。只看这30期。\n");
+            gap30(sb, "福彩3D", sd, false);
+            gap30(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_gap30.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "near".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("三码只回看最近30期来决定要不要补顺序、补哪一位。3D和排三分开。\n");
+            sb.append("原平移一直留在候选里。补了顺序或单位置±1却没有更高的直选、组选，就维持原票。\n");
+            nearReport(sb, "福彩3D", sd, false);
+            nearReport(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_near30.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "rep".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             sb.append("三码与上一期预测相同的号码，看这些重复号是否直选或组选命中。\n");
@@ -3535,6 +3872,163 @@ public final class Flow1000Ranker {
         Files.createDirectories(out.getParent());
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
         System.out.println(sb);
+    }
+
+    /** 最近 30 期，平移结果离开奖号有多近。 */
+    private static void gap30(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(41, n - 30);
+        int[] kind = new int[4];
+        int[] pos = new int[3];
+        int[] signPos = new int[3];
+        int[] signNeg = new int[3];
+        int wrapGap = 0;
+        int lineGap = 0;
+        int zx = 0;
+        int grp = 0;
+        int orderZx = 0;
+        int orderGrp = 0;
+        int nudgeZx = 0;
+        int nudgeGrp = 0;
+        sb.append("===== ").append(name).append(" =====\n");
+        for (int t = from; t < n; t++) {
+            int[][] hist = Arrays.copyOf(digits, t);
+            int[] bets = legacyShiftSanma(hist, pl3);
+            int id = code(digits[t]);
+            int[] base = base20(hist, hist.length, pl3);
+            int[] off = fitShift(hist, hist.length, pl3, pl3 ? plWindow : sdWindow, 1, true);
+            int[] withOrder = shapeTickets(base, off, true, -1);
+            int[] withNudge = shapeTickets(base, off, false, pl3 ? 2 : 0);
+            if (has(withOrder, id)) {
+                orderZx++;
+            }
+            if (groupHit(withOrder, id)) {
+                orderGrp++;
+            }
+            if (has(withNudge, id)) {
+                nudgeZx++;
+            }
+            if (groupHit(withNudge, id)) {
+                nudgeGrp++;
+            }
+            if (has(bets, id)) {
+                zx++;
+                kind[0]++;
+                continue;
+            }
+            if (groupHit(bets, id)) {
+                grp++;
+                kind[1]++;
+                sb.append(String.format(Locale.ROOT, "顺序 %03d%n", id));
+                continue;
+            }
+            int close = closestBet(bets, id);
+            int[] diff = posDiff(close, id);
+            int nz = 0;
+            int at = -1;
+            for (int p = 0; p < 3; p++) {
+                if (diff[p] != 0) {
+                    nz++;
+                    at = p;
+                }
+            }
+            int ad = at < 0 ? 0 : Math.abs(diff[at]);
+            int circ = at < 0 ? 0 : Math.min(ad, 10 - ad);
+            if (nz == 1 && circ == 1) {
+                kind[2]++;
+                pos[at]++;
+                if (diff[at] > 0) {
+                    signPos[at]++;
+                } else {
+                    signNeg[at]++;
+                }
+                if (ad == 9) {
+                    wrapGap++;
+                } else {
+                    lineGap++;
+                }
+                sb.append(String.format(Locale.ROOT, "差1 %03d 近%03d %s%+d%n",
+                        id, close, at == 0 ? "百" : at == 1 ? "十" : "个", diff[at]));
+            } else {
+                kind[3]++;
+                sb.append(String.format(Locale.ROOT, "较远 %03d 近%03d 位差%d%n", id, close, nz));
+            }
+        }
+        sb.append(String.format(Locale.ROOT,
+                "直选%d 只差顺序%d 单位置差1 %d 较远%d | 百%d 十%d 个%d | + %d/%d/%d - %d/%d/%d | 环差%d 直差%d%n",
+                kind[0], kind[1], kind[2], kind[3], pos[0], pos[1], pos[2],
+                signPos[0], signPos[1], signPos[2], signNeg[0], signNeg[1], signNeg[2], wrapGap, lineGap));
+        sb.append(String.format(Locale.ROOT, "平移命中 %d直 %d组%n", zx, grp + zx));
+        sb.append(String.format(Locale.ROOT, "同平移再留前4组第二序 %d直 %d组 | 同平移再补%s位±1 %d直 %d组%n",
+                orderZx, orderGrp, pl3 ? "个" : "百", nudgeZx, nudgeGrp));
+    }
+
+    private static int closestBet(int[] bets, int id) {
+        int best = bets.length == 0 ? -1 : bets[0];
+        int bestNz = 9;
+        int bestAbs = 99;
+        for (int bet : bets) {
+            int[] diff = posDiff(bet, id);
+            int nz = 0;
+            int abs = 0;
+            for (int p = 0; p < 3; p++) {
+                if (diff[p] != 0) {
+                    nz++;
+                    abs += Math.min(Math.abs(diff[p]), 10 - Math.abs(diff[p]));
+                }
+            }
+            if (nz < bestNz || (nz == bestNz && abs < bestAbs)) {
+                bestNz = nz;
+                bestAbs = abs;
+                best = bet;
+            }
+        }
+        return best;
+    }
+
+    /** 开奖减预测。差 9 或 -9 留着，用来区分 0/9 是不是环上的差 1。 */
+    private static int[] posDiff(int bet, int id) {
+        return new int[]{
+                id / 100 - bet / 100,
+                (id / 10) % 10 - (bet / 10) % 10,
+                id % 10 - bet % 10
+        };
+    }
+
+    /** 最近 30 期逐期现算，并给出下一期的 20 注。旧平移只作对照。 */
+    private static void nearReport(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int zx = 0;
+        int grp = 0;
+        int lzx = 0;
+        int lgrp = 0;
+        int periods = 0;
+        for (int t = from; t < n; t++) {
+            periods++;
+            int[][] hist = Arrays.copyOf(digits, t);
+            int id = code(digits[t]);
+            int[] bets = sanma(hist, pl3);
+            int[] old = legacyShiftSanma(hist, pl3);
+            if (has(bets, id)) {
+                zx++;
+            }
+            if (groupHit(bets, id)) {
+                grp++;
+            }
+            if (has(old, id)) {
+                lzx++;
+            }
+            if (groupHit(old, id)) {
+                lgrp++;
+            }
+        }
+        int[] next = sanma(digits, pl3);
+        sb.append("===== ").append(name).append(" =====\n");
+        sb.append(String.format(Locale.ROOT, "近%d期 现算 %d直%d组 | 旧平移 %d直%d组%n",
+                periods, zx, grp, lzx, lgrp));
+        sb.append(describe(pl3)).append('\n');
+        sb.append("下一期 ").append(csv(next)).append('\n');
     }
 
     private static void reportLocked(StringBuilder sb, String name, int[][] digits, boolean pl3) {

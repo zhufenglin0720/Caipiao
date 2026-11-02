@@ -493,6 +493,7 @@
         tbody tr:last-child td { border-bottom: none; }
 
         .success { color: var(--success); font-weight: 600; }
+        .group-hit { color: var(--accent-light); font-weight: 600; }
         .fail { color: var(--fail); font-weight: 600; }
 
         table {
@@ -3583,6 +3584,24 @@
         return bets.split(',').includes(realHm);
     }
 
+    /** 三码命中：直选=顺序一致；组选=三位数字相同、顺序不同。 */
+    function sanmaHit(item, realHm) {
+        if (!realHm) return { kind: 'none', bet: null };
+        const bets = topSanmaBets(item);
+        if (!bets) return { kind: 'none', bet: null };
+        const list = bets.split(',').map(s => s.trim()).filter(Boolean);
+        if (list.includes(realHm)) return { kind: 'zx', bet: realHm };
+        const target = realHm.length === 3 ? realHm : String(realHm).padStart(3, '0').slice(-3);
+        if (target.length !== 3) return { kind: 'none', bet: null };
+        const key = sortedDigitKey(target);
+        const groupBet = list.find(t => {
+            const code = t.length === 3 ? t : t.padStart(3, '0').slice(-3);
+            return code.length === 3 && sortedDigitKey(code) === key;
+        });
+        if (groupBet) return { kind: 'group', bet: groupBet };
+        return { kind: 'none', bet: null };
+    }
+
     function checkOverfitZx(overfitHm, realHm) {
         if (!overfitHm || !realHm) return false;
         return getOverfitHitPosition(overfitHm, realHm) > 0;
@@ -3830,20 +3849,29 @@
             return;
         }
 
-        let sanmaSuccess = 0, qimaSuccess = 0;
+        let sanmaZx = 0, sanmaGroup = 0, qimaSuccess = 0;
         const total = compareData.length;
         const sanmaTotal = compareData.filter(i => i.aiRecommendHm || i.aiHm).length;
         const qimaTotal = compareData.filter(i => i.aiDingWeiHm).length;
         compareData.forEach(item => {
-            if (checkMatch(item, item.realHm)) sanmaSuccess++;
+            const hit = sanmaHit(item, item.realHm);
+            if (hit.kind === 'zx') sanmaZx++;
+            else if (hit.kind === 'group') sanmaGroup++;
             if (checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) qimaSuccess++;
         });
-        const sanmaRate = sanmaTotal > 0 ? ((sanmaSuccess / sanmaTotal) * 100).toFixed(1) : 0;
+        const sanmaRate = sanmaTotal > 0 ? ((sanmaZx / sanmaTotal) * 100).toFixed(1) : 0;
+        const groupRate = sanmaTotal > 0 ? ((sanmaGroup / sanmaTotal) * 100).toFixed(1) : 0;
         const qimaRate = qimaTotal > 0 ? ((qimaSuccess / qimaTotal) * 100).toFixed(1) : 0;
+        const zxLabel = tab === 'sanma' ? '直选命中' : '三码命中(命中期数/预测总期数)';
+        const zxRateLabel = tab === 'sanma' ? '直选命中率' : '三码命中率';
+        const groupCards = tab === 'sanma' ? `
+            <div class="stat-card"><div class="stat-value">${sanmaGroup}/${sanmaTotal}</div><div class="stat-label">组选命中</div></div>
+            <div class="stat-card"><div class="stat-value">${groupRate}%</div><div class="stat-label">组选命中率</div></div>` : '';
         el.innerHTML = `
             <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">总期数</div></div>
-            <div class="stat-card"><div class="stat-value">${sanmaSuccess}/${sanmaTotal}</div><div class="stat-label">三码命中(命中期数/预测总期数)</div></div>
-            <div class="stat-card"><div class="stat-value">${sanmaRate}%</div><div class="stat-label">三码命中率</div></div>
+            <div class="stat-card"><div class="stat-value">${sanmaZx}/${sanmaTotal}</div><div class="stat-label">${zxLabel}</div></div>
+            <div class="stat-card"><div class="stat-value">${sanmaRate}%</div><div class="stat-label">${zxRateLabel}</div></div>
+            ${groupCards}
             <div class="stat-card"><div class="stat-value">${qimaSuccess}/${qimaTotal}</div><div class="stat-label">七码命中(命中期数/预测总期数)</div></div>
             <div class="stat-card"><div class="stat-value">${qimaRate}%</div><div class="stat-label">七码命中率</div></div>
         `;
@@ -3991,17 +4019,20 @@
                 const copyText = displayHm
                     ? String(displayHm).split(',').map(s => s.trim()).filter(Boolean).join(',')
                     : '';
-                const isMatch = checkMatch(item, item.realHm);
-                const matchText = isMatch ? '✓ 命中' : '✗ 未命中';
+                const hit = sanmaHit(item, item.realHm);
+                const matchText = hit.kind === 'zx' ? '✓ 直选命中'
+                    : hit.kind === 'group' ? '✓ 组选命中'
+                    : '✗ 未命中';
+                const matchCls = hit.kind === 'zx' ? 'success' : hit.kind === 'group' ? 'group-hit' : 'fail';
                 row.innerHTML = `
                     <td>
                         <div class="predict-copy-cell">
-                            <div class="predict-balls">${formatBalls(displayHm)}</div>
+                            <div class="predict-balls">${formatBalls(displayHm, hit.bet)}</div>
                             ${copyText ? '<button type="button" class="dadi-copy-btn row-copy-btn">一键复制</button>' : ''}
                         </div>
                     </td>
                     <td>${realBalls}</td>
-                    <td class="${isMatch ? 'success' : 'fail'}">${matchText}</td>`;
+                    <td class="${matchCls}">${matchText}</td>`;
                 const sanmaCopyBtn = row.querySelector('.row-copy-btn');
                 if (sanmaCopyBtn) sanmaCopyBtn.onclick = () => copyPredictText(sanmaCopyBtn, copyText);
             }
