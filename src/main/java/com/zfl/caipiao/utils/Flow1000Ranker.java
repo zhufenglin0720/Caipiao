@@ -23,8 +23,8 @@ import java.util.zip.ZipFile;
  * <p>
  * 乐彩网、500 彩票网、购彩大神共用的定位框架：同位冷热、遗漏回补、邻期转移、
  * 重号、邻号（不绕 0/9）、跨位重号。每位先按近窗命中选出冷热窗口，再对 000–999
- * 打分。三码 20 注只看最近 30 期：同一组多留顺序，用来补直选位置不对；
- * 只在一个位置上补 ±1，用来补组选和直选的单位置差。3D 和排列三各自现算。
+ * 打分。三码 20 注按最近 30 期走期：直选至少 4 期，组选尽量多。
+ * 每期按离上一期最近的号码截取，避免 10 期窗口里 20 注基本不变。3D 和排列三各自现算。
  */
 public final class Flow1000Ranker {
 
@@ -99,9 +99,9 @@ public final class Flow1000Ranker {
         String note = pl3 ? plCoverNote : sdCoverNote;
         String game = pl3 ? "排列三" : "福彩3D";
         if (note == null || note.isEmpty()) {
-            return game + ":三码20注近10 " + highRule(pl3).text();
+            return game + ":三码20注近30 " + highRule(pl3).text();
         }
-        return game + ":三码20注近10 " + note;
+        return game + ":三码20注近30 " + note;
     }
 
     public static String csv(int[] ids) {
@@ -127,7 +127,7 @@ public final class Flow1000Ranker {
     }
 
     /**
-     * 用 train 上选出的近 10 期规则，回放到 prefix 这一期。
+     * 用 train 上选出的近 30 期规则，回放到 prefix 这一期。
      * 用来把「留下」的那条规则写回最近几期，而不是每一期再另选一条。
      */
     public static int[] sanmaLocked(int[][] train, int[][] prefix, boolean pl3) {
@@ -162,7 +162,7 @@ public final class Flow1000Ranker {
         }
         TenRule rule = highRule(pl3);
         int[] now = tenTickets(digits, end, pl3, rule);
-        int from = Math.max(40, end - TEN_LOOK);
+        int from = Math.max(40, end - 30);
         scoreWindow(digits, from, end, pl3, rule);
         String note = rule.text();
         if (pl3) {
@@ -210,12 +210,18 @@ public final class Flow1000Ranker {
         return Arrays.copyOf(out, f);
     }
 
-    /** 回测里留下的高胜率规则。3D 和排三分开。 */
+    /** 近 30 期留下的规则。直选至少 4，组选取更高的一条，并躲开每期几乎同一批号。 */
     private static TenRule highRule(boolean pl3) {
         if (pl3) {
-            return new TenRule(2, 15, 2, 2, 5, 1, 1);
+            TenRule rule = new TenRule(2, 30, 6, 2, 4, 0, 1);
+            rule.decay = 0.92;
+            rule.fresh = 6;
+            rule.cut = 2;
+            return rule;
         }
-        return new TenRule(4, 5, 4, 2, 3);
+        TenRule rule = new TenRule(9, 30, 7, 3, 2, 1, -1);
+        rule.cut = 2;
+        return rule;
     }
 
     private static final int TEN_LOOK = 10;
@@ -228,6 +234,14 @@ public final class Flow1000Ranker {
         final int c;
         final int pos;
         final int delta;
+        /** 小于 1 时，窗口里越近的期权重越大，热号不会整窗黏住。 */
+        double decay = 1;
+        /** 从 20 注末尾换上期邻域的注数。0 表示不换。 */
+        int fresh;
+        /** 0 嵌套截取，1 格子分最高，2 离上期最近，4 高分并留同组第二序，5 近号加跳号。 */
+        int cut;
+        /** cut=5 时近号保留的注数，其余留给离上期至少差两位的号。 */
+        int keep;
         int zx;
         int grp;
 
@@ -253,12 +267,28 @@ public final class Flow1000Ranker {
                 case 3 -> "冷位" + window + " " + a + "x" + b + "x" + c;
                 case 4 -> "跟号" + window + " " + a + "x" + b + "x" + c;
                 case 5 -> "近热6码" + window;
+                case 9 -> "热冷各半" + window + " " + a + "x" + b + "x" + c;
                 default -> "定位底不平移";
             };
+            if (decay < 0.999) {
+                body += String.format(Locale.ROOT, " 衰减%.2f", decay);
+            }
+            if (cut == 1) {
+                body += " 高分";
+            } else if (cut == 2) {
+                body += " 近上期";
+            } else if (cut == 4) {
+                body += " 二序";
+            } else if (cut == 5) {
+                body += " 近" + keep + "跳";
+            }
             if (pos >= 0) {
                 body += (pos == 0 ? " 百" : pos == 1 ? " 十" : " 个") + (delta > 0 ? "+1" : "-1");
             }
-            return "近10走期 " + zx + "直" + grp + "组 " + body;
+            if (fresh > 0) {
+                body += " 尾" + fresh + "上期邻域";
+            }
+            return "近30走期 " + zx + "直" + grp + "组 " + body;
         }
     }
 
@@ -364,24 +394,150 @@ public final class Flow1000Ranker {
 
     private static int[] tenTickets(int[][] digits, int end, boolean pl3, TenRule rule) {
         int[] bets = tenBase(digits, end, pl3, rule);
-        if (rule.pos < 0) {
-            return bets;
+        if (rule.pos >= 0) {
+            int[] off = {0, 0, 0};
+            off[rule.pos] = rule.delta;
+            bets = applyShift(bets, off[0], off[1], off[2], true, false);
         }
-        int[] off = {0, 0, 0};
-        off[rule.pos] = rule.delta;
-        return applyShift(bets, off[0], off[1], off[2], true, false);
+        if (rule.fresh > 0 && end > 0) {
+            bets = takeFill(bets, lastNeigh(code(digits[end - 1])), Math.max(0, 20 - rule.fresh));
+        }
+        return bets;
     }
 
     private static int[] tenBase(int[][] digits, int end, boolean pl3, TenRule rule) {
         return switch (rule.kind) {
             case 0 -> recentCodes(digits, end, rule.window, false);
             case 1 -> recentCodes(digits, end, rule.window, true);
-            case 2 -> rankBox20(digits, end, rule.window, new int[]{rule.a, rule.b, rule.c}, false);
-            case 3 -> rankBox20(digits, end, rule.window, new int[]{rule.a, rule.b, rule.c}, true);
-            case 4 -> transBox20(digits, end, rule.window, new int[]{rule.a, rule.b, rule.c});
-            case 5 -> sixPool20(digits, end, rule.window);
+            case 2, 3, 4 -> tenBox(digits, end, rule);
+            case 5 -> sixPool20(digits, end, rule.window, rule.decay);
+            case 9 -> mixHotCold(digits, end, rule);
             default -> base20(digits, end, pl3);
         };
+    }
+
+    private static int[] tenBox(int[][] digits, int end, TenRule rule) {
+        int[] take = {Math.min(10, rule.a), Math.min(10, rule.b), Math.min(10, rule.c)};
+        double[][] pos = boxPos(digits, end, rule);
+        if (rule.cut == 4) {
+            return scoreAndSecond(pos, take);
+        }
+        if (rule.cut <= 0) {
+            return boxCross(pos, take);
+        }
+        int last = end > 0 ? code(digits[end - 1]) : 0;
+        if (rule.cut == 5) {
+            return nearAndJump(pos, take, last, rule.keep > 0 ? rule.keep : 10);
+        }
+        return boxPick(pos, take, last, rule.cut);
+    }
+
+    /** 一部分留离上期最近的号，其余留给至少差两位、定位分更高的号。 */
+    private static int[] nearAndJump(double[][] pos, int[] take, int last, int keepNear) {
+        int[] near = boxPick(pos, take, last, 2);
+        int[] ranked = boxPick(pos, take, last, 1);
+        int[] jump = new int[ranked.length];
+        int[] close = new int[ranked.length];
+        int jf = 0;
+        int cf = 0;
+        for (int id : ranked) {
+            if (posHamming(id, last) >= 2) {
+                jump[jf++] = id;
+            } else {
+                close[cf++] = id;
+            }
+        }
+        int[] tail = new int[jf + cf];
+        System.arraycopy(jump, 0, tail, 0, jf);
+        System.arraycopy(close, 0, tail, jf, cf);
+        return takeFill(near, tail, Math.max(0, Math.min(20, keepNear)));
+    }
+
+    private static int posHamming(int a, int b) {
+        int h = 0;
+        if (a / 100 != b / 100) {
+            h++;
+        }
+        if ((a / 10) % 10 != (b / 10) % 10) {
+            h++;
+        }
+        if (a % 10 != b % 10) {
+            h++;
+        }
+        return h;
+    }
+
+    /** 10 注用 30 期热位，10 注用遗漏冷位。形状和截取相同。 */
+    private static int[] mixHotCold(int[][] digits, int end, TenRule rule) {
+        TenRule hot = new TenRule(2, rule.window, rule.a, rule.b, rule.c);
+        hot.decay = rule.decay;
+        hot.cut = rule.cut;
+        TenRule cold = new TenRule(3, rule.window, rule.a, rule.b, rule.c);
+        cold.cut = rule.cut;
+        return takeFill(tenBox(digits, end, hot), tenBox(digits, end, cold), 10);
+    }
+
+    /** 格子按定位分从高到低取，每个组选最多留两个顺序，用来补组选。 */
+    private static int[] scoreAndSecond(double[][] pos, int[] take) {
+        int[] a = topK(pos[0], Math.max(1, take[0]));
+        int[] b = topK(pos[1], Math.max(1, take[1]));
+        int[] c = topK(pos[2], Math.max(1, take[2]));
+        int nAll = a.length * b.length * c.length;
+        int[] all = new int[nAll];
+        double[] score = new double[nAll];
+        int n = 0;
+        for (int x : a) {
+            for (int y : b) {
+                for (int z : c) {
+                    int id = x * 100 + y * 10 + z;
+                    all[n] = id;
+                    score[n] = pos[0][x] + pos[1][y] + pos[2][z];
+                    n++;
+                }
+            }
+        }
+        Integer[] ord = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            ord[i] = i;
+        }
+        Arrays.sort(ord, (i, j) -> {
+            int cmp = Double.compare(score[j], score[i]);
+            return cmp != 0 ? cmp : Integer.compare(all[i], all[j]);
+        });
+        int[] out = new int[20];
+        boolean[] used = new boolean[1000];
+        boolean[] grouped = new boolean[1000];
+        int f = 0;
+        for (int i = 0; i < n && f < 20; i++) {
+            int id = all[ord[i]];
+            int g = groupKey(id);
+            if (grouped[g]) {
+                continue;
+            }
+            f = addPlain(out, used, f, id);
+            grouped[g] = true;
+            int second = secondOrder(id, pos);
+            if (second >= 0 && f < 20) {
+                f = addPlain(out, used, f, second);
+            }
+        }
+        return Arrays.copyOf(out, f);
+    }
+
+    private static int secondOrder(int id, double[][] pos) {
+        int best = -1;
+        double bestS = -1e18;
+        for (int perm : allPerms(id)) {
+            if (perm == id) {
+                continue;
+            }
+            double s = seqScore(perm, pos);
+            if (s > bestS) {
+                bestS = s;
+                best = perm;
+            }
+        }
+        return best;
     }
 
     /** 最近开出的原号，不够 20 再按新到旧补全序。不做加减。 */
@@ -415,7 +571,7 @@ public final class Flow1000Ranker {
         return f;
     }
 
-    private static int[] rankBox20(int[][] digits, int end, int w, int[] take, boolean cold) {
+    private static int[] rankBox20(int[][] digits, int end, int w, int[] take, boolean cold, double decay) {
         double[][] pos = new double[3][10];
         if (cold) {
             for (int p = 0; p < 3; p++) {
@@ -426,9 +582,12 @@ public final class Flow1000Ranker {
             }
         } else {
             int from = Math.max(0, end - w);
-            for (int t = from; t < end; t++) {
+            int len = end - from;
+            for (int i = 0; i < len; i++) {
+                double wgt = decay >= 0.999 ? 1.0 : Math.pow(decay, len - 1 - i);
+                int t = from + i;
                 for (int p = 0; p < 3; p++) {
-                    pos[p][digits[t][p]]++;
+                    pos[p][digits[t][p]] += wgt;
                 }
             }
         }
@@ -436,15 +595,18 @@ public final class Flow1000Ranker {
     }
 
     /** 上一期该位开了什么，这段里它后面最常跟什么。 */
-    private static int[] transBox20(int[][] digits, int end, int w, int[] take) {
+    private static int[] transBox20(int[][] digits, int end, int w, int[] take, double decay) {
         if (end < 2) {
             return new int[0];
         }
-        int[][][] trans = new int[3][10][10];
+        double[][][] trans = new double[3][10][10];
         int from = Math.max(1, end - w);
-        for (int t = from; t < end; t++) {
+        int len = end - from;
+        for (int i = 0; i < len; i++) {
+            double wgt = decay >= 0.999 ? 1.0 : Math.pow(decay, len - 1 - i);
+            int t = from + i;
             for (int p = 0; p < 3; p++) {
-                trans[p][digits[t - 1][p]][digits[t][p]]++;
+                trans[p][digits[t - 1][p]][digits[t][p]] += wgt;
             }
         }
         double[][] pos = new double[3][10];
@@ -478,14 +640,17 @@ public final class Flow1000Ranker {
     }
 
     /** 近窗出现最多的 6 个数字，组成 20 个组六，每组只留定位分最高的一个顺序。 */
-    private static int[] sixPool20(int[][] digits, int end, int w) {
+    private static int[] sixPool20(int[][] digits, int end, int w, double decay) {
         double[] heat = new double[10];
         double[][] pos = new double[3][10];
         int from = Math.max(0, end - w);
-        for (int t = from; t < end; t++) {
+        int len = end - from;
+        for (int i = 0; i < len; i++) {
+            double wgt = decay >= 0.999 ? 1.0 : Math.pow(decay, len - 1 - i);
+            int t = from + i;
             for (int p = 0; p < 3; p++) {
-                heat[digits[t][p]]++;
-                pos[p][digits[t][p]]++;
+                heat[digits[t][p]] += wgt;
+                pos[p][digits[t][p]] += wgt;
             }
         }
         int ban = end > 0 ? code(digits[end - 1]) : -1;
@@ -4204,6 +4369,29 @@ public final class Flow1000Ranker {
             System.out.println(sb);
             return;
         }
+        if (args != null && args.length > 0 && "jump".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("最新开奖跳开上期。20注里留一部分离上期至少差两位的号，再和现行比最近30期。\n");
+            jumpScan(sb, "福彩3D", sd, false);
+            jumpScan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_jump.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "w30".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("三码按30期窗口走期。直选至少4，组选尽量多。相邻两期有15注及以上相同就视为太黏，不留。\n");
+            sb.append("组选次数含直选。重合是相邻两期相同号码的平均占比。\n");
+            window30Scan(sb, "福彩3D", sd, false);
+            window30Scan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_w30.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "ten".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             sb.append("三码只回测最近10期，走期直选。不做按位加减。目标10期至少3直。\n");
@@ -4687,18 +4875,23 @@ public final class Flow1000Ranker {
 
     private static double[][] boxPos(int[][] digits, int end, TenRule rule) {
         if (rule.kind == 4) {
-            int[][][] trans = new int[3][10][10];
+            double[][][] trans = new double[3][10][10];
             int from = Math.max(1, end - rule.window);
-            for (int t = from; t < end; t++) {
+            int len = end - from;
+            for (int i = 0; i < len; i++) {
+                double wgt = rule.decay >= 0.999 ? 1.0 : Math.pow(rule.decay, len - 1 - i);
+                int t = from + i;
                 for (int p = 0; p < 3; p++) {
-                    trans[p][digits[t - 1][p]][digits[t][p]]++;
+                    trans[p][digits[t - 1][p]][digits[t][p]] += wgt;
                 }
             }
             double[][] pos = new double[3][10];
-            for (int p = 0; p < 3; p++) {
-                int prev = digits[end - 1][p];
-                for (int x = 0; x < 10; x++) {
-                    pos[p][x] = trans[p][prev][x];
+            if (end > 0) {
+                for (int p = 0; p < 3; p++) {
+                    int prev = digits[end - 1][p];
+                    for (int x = 0; x < 10; x++) {
+                        pos[p][x] = trans[p][prev][x];
+                    }
                 }
             }
             return pos;
@@ -4713,9 +4906,12 @@ public final class Flow1000Ranker {
             }
         } else {
             int from = Math.max(0, end - rule.window);
-            for (int t = from; t < end; t++) {
+            int len = end - from;
+            for (int i = 0; i < len; i++) {
+                double wgt = rule.decay >= 0.999 ? 1.0 : Math.pow(rule.decay, len - 1 - i);
+                int t = from + i;
                 for (int p = 0; p < 3; p++) {
-                    pos[p][digits[t][p]]++;
+                    pos[p][digits[t][p]] += wgt;
                 }
             }
         }
@@ -4890,6 +5086,479 @@ public final class Flow1000Ranker {
         }
         return new DailyFix(false, dh, dt, du, "上期较远，按原序近号每位最多移1"
                 + axisText("百", dh) + axisText("十", dt) + axisText("个", du));
+    }
+
+    /** 近号加跳号。只留下比现行更高的直选，或直选不掉、组选更多的规则。 */
+    private static void jumpScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int priorFrom = Math.max(40, from - 30);
+        sb.append("===== ").append(name).append(" =====\n");
+        Hit30 current = scoreLook(digits, from, n, pl3, highRule(pl3));
+        int lastId = code(digits[n - 1]);
+        sb.append(String.format(Locale.ROOT, "现行 重合%.0f%% %s 最新%s%03d%n",
+                current.overlap() * 100, current.rule.text(), lastWord(current.last), lastId));
+        List<TenRule> bases = jumpBases();
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<Hit30> better = new ArrayList<>();
+        List<Hit30> caught = new ArrayList<>();
+        for (TenRule baseRule : bases) {
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            for (int fresh : new int[]{0, 6}) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCache(digits, times, cache, rule);
+                        if (hit.zx < 4 || hit.overlap() >= 0.75) {
+                            continue;
+                        }
+                        if (hit.zx > current.zx || (hit.zx == current.zx && hit.grp > current.grp)) {
+                            keepBest(better, hit, 8);
+                        } else if (hit.last > 0 && current.last == 0 && hit.grp >= current.grp - 1) {
+                            keepBest(caught, hit, 6);
+                        }
+                    }
+                }
+            }
+        }
+        sb.append("基规则 ").append(bases.size()).append('\n');
+        if (better.isEmpty()) {
+            sb.append("没有规则在30期里超过现行的直选或组选。\n");
+        } else {
+            sb.append("---- 高于现行 ----\n");
+            for (Hit30 hit : better) {
+                if (priorFrom < from) {
+                    int[] pg = countLook(digits, priorFrom, from, pl3, hit.rule);
+                    hit.priorZ = pg[0];
+                    hit.priorG = pg[1];
+                }
+                sb.append(String.format(Locale.ROOT, "重合%.0f%% 前30 %d直%d组 最新%s %s%n",
+                        hit.overlap() * 100, hit.priorZ, hit.priorG, lastWord(hit.last), hit.rule.text()));
+            }
+        }
+        if (!caught.isEmpty()) {
+            sb.append("---- 组选差不多、最新一期命中 ----\n");
+            for (Hit30 hit : caught) {
+                sb.append(String.format(Locale.ROOT, "重合%.0f%% 最新%s %s%n",
+                        hit.overlap() * 100, lastWord(hit.last), hit.rule.text()));
+            }
+        }
+    }
+
+    private static String lastWord(int last) {
+        return last == 2 ? "直选" : last == 1 ? "组选" : "未中";
+    }
+
+    private static List<TenRule> jumpBases() {
+        List<TenRule> out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        double[] decays = {1, 0.92};
+        int[] keeps = {8, 10, 14};
+        int[] kinds = {2, 3, 4, 9};
+        List<int[]> shapes = new ArrayList<>();
+        for (int a = 1; a <= 7; a++) {
+            for (int b = 1; b <= 7; b++) {
+                for (int c = 1; c <= 7; c++) {
+                    int prod = a * b * c;
+                    if (prod >= 16 && prod <= 48) {
+                        shapes.add(new int[]{a, b, c});
+                    }
+                }
+            }
+        }
+        int[][] extra = {{6, 2, 4}, {5, 2, 4}, {7, 3, 2}, {10, 2, 2}, {2, 2, 10}, {5, 5, 5}, {8, 2, 3}, {3, 6, 2}};
+        for (int[] sh : extra) {
+            shapes.add(sh);
+        }
+        for (int[] sh : shapes) {
+            for (int kind : kinds) {
+                for (double decay : decays) {
+                    if (kind == 3 && decay < 0.999) {
+                        continue;
+                    }
+                    for (int keep : keeps) {
+                        String key = kind + ":" + sh[0] + ":" + sh[1] + ":" + sh[2] + ":" + decay + ":" + keep;
+                        if (!seen.add(key)) {
+                            continue;
+                        }
+                        TenRule rule = new TenRule(kind, 30, sh[0], sh[1], sh[2]);
+                        rule.decay = decay;
+                        rule.cut = 5;
+                        rule.keep = keep;
+                        out.add(rule);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 30 期窗口。直选至少 4，组选尽量多，相邻两期不能基本是同一批号。 */
+    private static void window30Scan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int priorFrom = Math.max(40, from - 30);
+        sb.append("===== ").append(name).append(" =====\n");
+        sb.append("期数 ").append(n).append(" 评估 ").append(from).append("..").append(n - 1);
+        if (priorFrom < from) {
+            sb.append(" 对照 ").append(priorFrom).append("..").append(from - 1);
+        }
+        sb.append('\n');
+        Hit30 current = scoreLook(digits, from, n, pl3, highRule(pl3));
+        sb.append(String.format(Locale.ROOT, "现行 重合%.0f%% 黏连%d/%d %s%n",
+                current.overlap() * 100, current.sticky, current.pairs, current.rule.text()));
+        sb.append("现行逐期").append(marks(digits, from, n, pl3, current.rule)).append('\n');
+        sb.append("下一期 ").append(csv(sanma(digits, pl3))).append('\n');
+        List<TenRule> bases = w30Bases();
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<Hit30> passed = new ArrayList<>();
+        List<Hit30> rich = new ArrayList<>();
+        Hit30 bestAny = null;
+        Hit30 bestHot = null;
+        for (TenRule baseRule : bases) {
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            for (int fresh : new int[]{0, 6}) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCache(digits, times, cache, rule);
+                        if (bestAny == null || hitBetter(hit, bestAny)) {
+                            bestAny = hit;
+                        }
+                        if ((rule.kind == 2 || rule.kind == 4 || rule.kind == 9)
+                                && (bestHot == null || hitBetter(hit, bestHot))) {
+                            bestHot = hit;
+                        }
+                        if (hit.zx >= 4) {
+                            passed.add(hit);
+                        } else if (hit.zx >= 3 && hit.overlap() < 0.75) {
+                            keepBest(rich, hit, 8);
+                        }
+                    }
+                }
+            }
+        }
+        sb.append("基规则 ").append(bases.size()).append(" 直选>=4 ").append(passed.size()).append('\n');
+        if (bestHot != null) {
+            sb.append(String.format(Locale.ROOT, "热位或跟号最高 重合%.0f%% %s%n",
+                    bestHot.overlap() * 100, bestHot.rule.text()));
+        }
+        List<Hit30> band = overlapBand(passed, 0.75);
+        String bandName = "重合<75%";
+        if (band.isEmpty()) {
+            band = overlapBand(passed, 0.85);
+            bandName = "重合<85%";
+        }
+        if (band.isEmpty()) {
+            band = passed;
+            bandName = "不限重合";
+        }
+        band.sort(Flow1000Ranker::hitOrder);
+        sb.append("---- ").append(bandName).append(" 按组选 ----\n");
+        int show = Math.min(12, band.size());
+        for (int i = 0; i < show; i++) {
+            Hit30 hit = band.get(i);
+            sb.append(String.format(Locale.ROOT, "重合%.0f%% 黏连%d/%d %s%n",
+                    hit.overlap() * 100, hit.sticky, hit.pairs, hit.rule.text()));
+        }
+        if (band.isEmpty()) {
+            sb.append("没有规则在30期里直选到4。最高 ");
+            if (bestAny != null) {
+                sb.append(String.format(Locale.ROOT, "重合%.0f%% %s%n", bestAny.overlap() * 100, bestAny.rule.text()));
+            } else {
+                sb.append("无\n");
+            }
+            sb.append("---- 直选3且重合<75% 按组选 ----\n");
+            for (Hit30 hit : rich) {
+                sb.append(String.format(Locale.ROOT, "重合%.0f%% 黏连%d/%d %s%n",
+                        hit.overlap() * 100, hit.sticky, hit.pairs, hit.rule.text()));
+            }
+            return;
+        }
+        int check = Math.min(8, band.size());
+        Hit30 raw = band.get(0);
+        Hit30 stable = null;
+        for (int i = 0; i < check; i++) {
+            Hit30 hit = band.get(i);
+            if (priorFrom < from) {
+                int[] pg = countLook(digits, priorFrom, from, pl3, hit.rule);
+                hit.priorZ = pg[0];
+                hit.priorG = pg[1];
+            }
+            sb.append(String.format(Locale.ROOT, "前30 %d直%d组 %s%n", hit.priorZ, hit.priorG, hit.rule.text()));
+            if (stable == null && (hit.priorZ >= 2 || hit.priorG >= 5)) {
+                stable = hit;
+            }
+        }
+        Hit30 lock = raw;
+        if (stable != null && raw.grp - stable.grp <= 2) {
+            lock = stable;
+        }
+        sb.append("留下 ").append(lock.rule.text());
+        sb.append(String.format(Locale.ROOT, " 重合%.0f%%%n", lock.overlap() * 100));
+        sb.append("留下逐期").append(marks(digits, from, n, pl3, lock.rule)).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "LOCK kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d zx=%d grp=%d%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut,
+                lock.zx, lock.grp));
+        for (int w : new int[]{20, 40}) {
+            TenRule alt = new TenRule(lock.rule.kind, w, lock.rule.a, lock.rule.b, lock.rule.c, lock.rule.pos, lock.rule.delta);
+            alt.decay = lock.rule.decay;
+            alt.fresh = lock.rule.fresh;
+            alt.cut = lock.rule.cut;
+            Hit30 other = scoreLook(digits, from, n, pl3, alt);
+            sb.append(String.format(Locale.ROOT, "同一规则窗%d 重合%.0f%% %s%n",
+                    w, other.overlap() * 100, other.rule.text()));
+        }
+    }
+
+    private static final class Hit30 {
+        TenRule rule;
+        int zx;
+        int grp;
+        int share;
+        int pairs;
+        int sticky;
+        int priorZ = -1;
+        int priorG = -1;
+        /** 2 直选，1 只组选，0 未中。只看窗口最后一期。 */
+        int last;
+
+        double overlap() {
+            return pairs == 0 ? 1 : share / (20.0 * pairs);
+        }
+    }
+
+    private static boolean hitBetter(Hit30 a, Hit30 b) {
+        if (a.zx != b.zx) {
+            return a.zx > b.zx;
+        }
+        if (a.grp != b.grp) {
+            return a.grp > b.grp;
+        }
+        return a.overlap() < b.overlap();
+    }
+
+    private static int hitOrder(Hit30 a, Hit30 b) {
+        if (a.grp != b.grp) {
+            return Integer.compare(b.grp, a.grp);
+        }
+        if (a.zx != b.zx) {
+            return Integer.compare(b.zx, a.zx);
+        }
+        int c = Double.compare(a.overlap(), b.overlap());
+        if (c != 0) {
+            return c;
+        }
+        if (a.rule.fresh != b.rule.fresh) {
+            return Integer.compare(a.rule.fresh, b.rule.fresh);
+        }
+        c = Double.compare(b.rule.decay, a.rule.decay);
+        if (c != 0) {
+            return c;
+        }
+        return Integer.compare(a.rule.pos, b.rule.pos);
+    }
+
+    private static List<Hit30> overlapBand(List<Hit30> hits, double maxOverlap) {
+        List<Hit30> out = new ArrayList<>();
+        for (Hit30 hit : hits) {
+            if (hit.overlap() < maxOverlap) {
+                out.add(hit);
+            }
+        }
+        return out;
+    }
+
+    private static List<TenRule> w30Bases() {
+        List<TenRule> out = new ArrayList<>();
+        out.add(new TenRule(0, 30, 0, 0, 0));
+        out.add(new TenRule(1, 30, 0, 0, 0));
+        double[] decays = {1, 0.92};
+        for (double decay : decays) {
+            TenRule six = new TenRule(5, 30, 0, 0, 0);
+            six.decay = decay;
+            out.add(six);
+        }
+        int[][] wide = {{10, 2, 1}, {10, 1, 2}, {2, 10, 1}, {1, 10, 2}, {2, 1, 10}, {1, 2, 10},
+                {10, 2, 2}, {2, 10, 2}, {2, 2, 10}, {5, 5, 5}};
+        for (int a = 1; a <= 8; a++) {
+            for (int b = 1; b <= 8; b++) {
+                for (int c = 1; c <= 8; c++) {
+                    int prod = a * b * c;
+                    if (prod < 16 || prod > 48) {
+                        continue;
+                    }
+                    addBox(out, a, b, c, decays);
+                }
+            }
+        }
+        for (int[] sh : wide) {
+            addBox(out, sh[0], sh[1], sh[2], decays);
+        }
+        return out;
+    }
+
+    private static void addBox(List<TenRule> out, int a, int b, int c, double[] decays) {
+        int prod = a * b * c;
+        int[] cuts = prod <= 20 ? new int[]{0} : prod <= 48 ? new int[]{0, 1, 2, 4} : new int[]{1, 2};
+            for (int cut : cuts) {
+                TenRule cold = new TenRule(3, 30, a, b, c);
+                cold.cut = cut;
+                out.add(cold);
+                if (cut == 1 || cut == 2) {
+                    for (double decay : decays) {
+                        TenRule mix = new TenRule(9, 30, a, b, c);
+                        mix.decay = decay;
+                        mix.cut = cut;
+                        out.add(mix);
+                    }
+                }
+            for (double decay : decays) {
+                for (int kind : new int[]{2, 4}) {
+                    TenRule rule = new TenRule(kind, 30, a, b, c);
+                    rule.decay = decay;
+                    rule.cut = cut;
+                    out.add(rule);
+                }
+            }
+        }
+    }
+
+    private static void keepBest(List<Hit30> top, Hit30 hit, int limit) {
+        top.add(hit);
+        top.sort(Flow1000Ranker::hitOrder);
+        while (top.size() > limit) {
+            top.remove(top.size() - 1);
+        }
+    }
+
+    private static TenRule copyRule(TenRule src, int pos, int delta, int fresh) {
+        TenRule rule = new TenRule(src.kind, src.window, src.a, src.b, src.c, pos, delta);
+        rule.decay = src.decay;
+        rule.fresh = fresh;
+        rule.cut = src.cut;
+        rule.keep = src.keep;
+        return rule;
+    }
+
+    private static Hit30 scoreCache(int[][] digits, int[] times, int[][] cache, TenRule rule) {
+        Hit30 hit = new Hit30();
+        hit.rule = rule;
+        int[] prev = null;
+        for (int i = 0; i < times.length; i++) {
+            int[] bets = compose(digits, times[i], cache[i], rule);
+            int id = code(digits[times[i]]);
+            if (has(bets, id)) {
+                hit.zx++;
+                if (i == times.length - 1) {
+                    hit.last = 2;
+                }
+            } else if (i == times.length - 1 && groupHit(bets, id)) {
+                hit.last = 1;
+            }
+            if (groupHit(bets, id)) {
+                hit.grp++;
+            }
+            if (prev != null) {
+                int share = intersect(prev, bets);
+                hit.share += share;
+                hit.pairs++;
+                if (share >= 16) {
+                    hit.sticky++;
+                }
+            }
+            prev = bets;
+        }
+        rule.zx = hit.zx;
+        rule.grp = hit.grp;
+        return hit;
+    }
+
+    private static int[] compose(int[][] digits, int end, int[] base, TenRule rule) {
+        int[] bets = base == null ? new int[0] : base;
+        if (rule.pos >= 0) {
+            int[] off = {0, 0, 0};
+            off[rule.pos] = rule.delta;
+            bets = applyShift(bets, off[0], off[1], off[2], true, false);
+        }
+        if (rule.fresh > 0 && end > 0) {
+            bets = takeFill(bets, lastNeigh(code(digits[end - 1])), Math.max(0, 20 - rule.fresh));
+        }
+        return bets;
+    }
+
+    private static Hit30 scoreLook(int[][] digits, int from, int end, boolean pl3, TenRule rule) {
+        int[] times = new int[Math.max(0, end - from)];
+        int[][] cache = new int[times.length][];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+            cache[i] = tenBase(digits, times[i], pl3, rule);
+        }
+        return scoreCache(digits, times, cache, rule);
+    }
+
+    private static int[] countLook(int[][] digits, int from, int end, boolean pl3, TenRule rule) {
+        int z = 0;
+        int g = 0;
+        for (int t = from; t < end; t++) {
+            int[] bets = tenTickets(digits, t, pl3, rule);
+            int id = code(digits[t]);
+            if (has(bets, id)) {
+                z++;
+            }
+            if (groupHit(bets, id)) {
+                g++;
+            }
+        }
+        return new int[]{z, g};
+    }
+
+    private static String marks(int[][] digits, int from, int end, boolean pl3, TenRule rule) {
+        StringBuilder sb = new StringBuilder();
+        for (int t = from; t < end; t++) {
+            int[] bets = tenTickets(digits, t, pl3, rule);
+            int id = code(digits[t]);
+            if (has(bets, id)) {
+                sb.append(String.format(Locale.ROOT, " 直%03d", id));
+            } else if (groupHit(bets, id)) {
+                sb.append(String.format(Locale.ROOT, " 组%03d", id));
+            } else {
+                sb.append(String.format(Locale.ROOT, " 失%03d", id));
+            }
+        }
+        return sb.toString();
+    }
+
+    private static int intersect(int[] a, int[] b) {
+        int n = 0;
+        if (a == null || b == null) {
+            return 0;
+        }
+        for (int x : a) {
+            for (int y : b) {
+                if (x == y) {
+                    n++;
+                    break;
+                }
+            }
+        }
+        return n;
     }
 
     /** 最近 10 期走期回测，并给出下一期 20 注。 */
