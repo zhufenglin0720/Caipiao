@@ -213,10 +213,11 @@ public final class Flow1000Ranker {
     /** 近 30 期留下的规则。直选至少 4，组选取更高的一条，并躲开每期几乎同一批号。 */
     private static TenRule highRule(boolean pl3) {
         if (pl3) {
-            TenRule rule = new TenRule(2, 30, 6, 2, 4, 0, 1);
-            rule.decay = 0.92;
-            rule.fresh = 6;
-            rule.cut = 2;
+            // 十位原格子只留 2 个，近 12 期有 9 期十位落在格外，近 8 期直选是 0。
+            // 热号仍留 12 注，冷号按遗漏再留一个顺序，个位减 1。近 30 期 3直提到 4直，近 8 期补上 3 直，前 30 期仍有 1 直。
+            TenRule rule = new TenRule(9, 30, 6, 4, 2, 2, -1);
+            rule.cut = 12;
+            rule.keep = 12;
             return rule;
         }
         TenRule rule = new TenRule(9, 30, 7, 3, 2, 1, -1);
@@ -4440,6 +4441,18 @@ public final class Flow1000Ranker {
             System.out.println(sb);
             return;
         }
+        if (args != null && args.length > 0 && "late".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("最近几期三码直选没中。近30期直选至少4，前30期直选至少2，重合低于75%，相邻两期不能有16注相同。\n");
+            sb.append("在这些条件里，优先补上最近8期的直选。组选次数含直选。\n");
+            lateScan(sb, "福彩3D", sd, false);
+            lateScan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_late.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "today".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             sb.append("最新开奖组选直选都未中。热号继续贴上期，冷号改为按遗漏分取，再和现行比最近30期。\n");
@@ -5400,6 +5413,101 @@ public final class Flow1000Ranker {
         sb.append("现行下一期 ").append(csv(tenTickets(digits, n, pl3, highRule(pl3)))).append('\n');
     }
 
+    /**
+     * 最近 8 期直选连着没中时，换一条仍能守住近 30 期的规则。
+     * 前 30 期直选不到 2 的不留，避免只贴住眼前这几期。
+     */
+    private static void lateScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int priorFrom = Math.max(40, from - 30);
+        sb.append("===== ").append(name).append(" =====\n");
+        Hit30 current = scoreLook(digits, from, n, pl3, highRule(pl3));
+        int[] priorNow = countLook(digits, priorFrom, from, pl3, current.rule);
+        sb.append(String.format(Locale.ROOT, "现行 近30 %d直%d组 近8直%d 前30 %d直%d组 重合%.0f%% %s%n",
+                current.zx, current.grp, current.tail, priorNow[0], priorNow[1],
+                current.overlap() * 100, current.rule.text()));
+        sb.append("近12").append(marks(digits, Math.max(from, n - 12), n, pl3, current.rule)).append('\n');
+        List<TenRule> bases = todayBases();
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<Hit30> kept = new ArrayList<>();
+        for (TenRule baseRule : bases) {
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            int[] freshSet = (baseRule.cut == 8 || baseRule.cut == 12) ? new int[]{0} : new int[]{0, 6};
+            for (int fresh : freshSet) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCache(digits, times, cache, rule);
+                        if (hit.zx < 4 || hit.overlap() >= 0.75 || hit.sticky > 0) {
+                            continue;
+                        }
+                        if (hit.tail <= current.tail && hit.zx <= current.zx && hit.grp <= current.grp) {
+                            continue;
+                        }
+                        kept.add(hit);
+                    }
+                }
+            }
+        }
+        kept.sort(Flow1000Ranker::lateOrder);
+        sb.append("候选 ").append(kept.size()).append('\n');
+        Hit30 lock = null;
+        int shown = 0;
+        int checked = 0;
+        for (Hit30 hit : kept) {
+            if (checked >= 40 && lock != null) {
+                break;
+            }
+            int[] prior = countLook(digits, priorFrom, from, pl3, hit.rule);
+            hit.priorZ = prior[0];
+            hit.priorG = prior[1];
+            checked++;
+            if (shown < 8) {
+                sb.append(String.format(Locale.ROOT, "近8直%d 近30 %d直%d组 前30 %d直%d组 重合%.0f%% %s%n",
+                        hit.tail, hit.zx, hit.grp, hit.priorZ, hit.priorG, hit.overlap() * 100, hit.rule.text()));
+                shown++;
+            }
+            boolean tailUp = hit.tail > current.tail && hit.zx >= current.zx;
+            boolean windowUp = hit.zx > current.zx || (hit.zx == current.zx && hit.grp > current.grp);
+            if (lock == null && hit.priorZ >= 1 && (tailUp || windowUp)) {
+                lock = hit;
+            }
+        }
+        if (lock == null) {
+            sb.append("没有规则能在补上近8期的同时守住前30期。现行保持不变。\n");
+            return;
+        }
+        sb.append("留下 ").append(lock.rule.text()).append('\n');
+        sb.append("留下近12").append(marks(digits, Math.max(from, n - 12), n, pl3, lock.rule)).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "LOCK kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d tail=%d zx=%d grp=%d priorZ=%d%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut, lock.rule.keep,
+                lock.tail, lock.zx, lock.grp, lock.priorZ));
+    }
+
+
+    private static int lateOrder(Hit30 a, Hit30 b) {
+        if (a.tail != b.tail) {
+            return Integer.compare(b.tail, a.tail);
+        }
+        if (a.zx != b.zx) {
+            return Integer.compare(b.zx, a.zx);
+        }
+        if (a.grp != b.grp) {
+            return Integer.compare(b.grp, a.grp);
+        }
+        return Double.compare(a.overlap(), b.overlap());
+    }
+
     /** 最新开奖离上一期多远，以及它在不在热位、冷位格子里。 */
     private static void explainMiss(StringBuilder sb, int[][] digits, int end, boolean pl3, TenRule rule, int draw) {
         int prev = end > 0 ? code(digits[end - 1]) : draw;
@@ -5732,6 +5840,8 @@ public final class Flow1000Ranker {
         int priorG = -1;
         /** 2 直选，1 只组选，0 未中。只看窗口最后一期。 */
         int last;
+        /** 窗口末尾 8 期的直选次数，用来看最近是不是连着没中。 */
+        int tail;
 
         double overlap() {
             return pairs == 0 ? 1 : share / (20.0 * pairs);
@@ -5860,6 +5970,9 @@ public final class Flow1000Ranker {
             int id = code(digits[times[i]]);
             if (has(bets, id)) {
                 hit.zx++;
+                if (i >= times.length - 8) {
+                    hit.tail++;
+                }
                 if (i == times.length - 1) {
                     hit.last = 2;
                 }

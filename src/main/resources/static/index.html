@@ -701,6 +701,23 @@
             background: rgba(52, 211, 153, 0.2);
         }
 
+        .dingwei-label.miss { color: var(--fail); }
+
+        .hit-extra-chip.miss {
+            background: rgba(248, 113, 113, 0.12);
+            color: var(--fail);
+        }
+
+        .hit-extra-chip.miss.top {
+            background: rgba(248, 113, 113, 0.28);
+            border: 1px solid rgba(248, 113, 113, 0.55);
+        }
+
+        .hit-extra-line.qima-miss-line {
+            max-height: none;
+            overflow: visible;
+        }
+
         .table-container.qima-mode tbody tr {
             height: auto;
         }
@@ -2846,18 +2863,65 @@
         return idx >= 0 ? idx + 1 : -1;
     }
 
+    function getDingWeiPosHits(aiDingWeiHm, realHm) {
+        const code = pad3Code(realHm);
+        if (!aiDingWeiHm || code.length !== 3) return null;
+        const pos = parseDingWeiNumbers(aiDingWeiHm);
+        if (!pos.bai.length || !pos.shi.length || !pos.ge.length) return null;
+        return [
+            pos.bai.includes(code[0]),
+            pos.shi.includes(code[1]),
+            pos.ge.includes(code[2])
+        ];
+    }
+
+    /** 没进七码的位置，顺序固定为百、十、个 */
+    function qimaMissPositions(hits) {
+        if (!hits) return [];
+        return ['百', '十', '个'].filter((_, i) => !hits[i]);
+    }
+
+    function qimaMissComboLabel(missed) {
+        const labels = {
+            '百': '只百位',
+            '十': '只十位',
+            '个': '只个位',
+            '百十': '只百十位',
+            '百个': '只百个位',
+            '十个': '只个十位',
+            '百十个': '百十个位'
+        };
+        const key = missed.join('');
+        return labels[key] || missed.join('、');
+    }
+
+    function renderQimaMissSummary(compareData) {
+        const counts = new Map();
+        compareData.forEach(item => {
+            const posHits = getDingWeiPosHits(item.aiDingWeiHm, item.realHm);
+            if (!posHits || (posHits[0] && posHits[1] && posHits[2])) return;
+            const label = qimaMissComboLabel(qimaMissPositions(posHits));
+            counts.set(label, (counts.get(label) || 0) + 1);
+        });
+        if (counts.size === 0) return '';
+        const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'));
+        const top = ranked[0][1];
+        const chips = ranked.map(([label, n]) => {
+            const cls = n === top ? 'hit-extra-chip miss top' : 'hit-extra-chip miss';
+            return `<span class="${cls}">${label} ${n}次</span>`;
+        }).join('');
+        return `<div class="hit-extra-line qima-miss-line"><span class="pos-label">未中位置</span>${chips}</div>`;
+    }
+
     function getQimaMatchPositions(aiDingWeiHm, realHm) {
         if (!checkDingWeiMatch(aiDingWeiHm, realHm)) return null;
         const pos = parseDingWeiNumbers(aiDingWeiHm);
+        const code = pad3Code(realHm);
         return {
-            bai: getDigitPosition(pos.bai, realHm[0]),
-            shi: getDigitPosition(pos.shi, realHm[1]),
-            ge: getDigitPosition(pos.ge, realHm[2])
+            bai: getDigitPosition(pos.bai, code[0]),
+            shi: getDigitPosition(pos.shi, code[1]),
+            ge: getDigitPosition(pos.ge, code[2])
         };
-    }
-
-    function sortPosSet(set) {
-        return [...set].filter(n => n > 0).sort((a, b) => a - b).join(',') || '—';
     }
 
     function getCompareQh(type, item) {
@@ -3366,7 +3430,7 @@
         const thead = document.getElementById(domPrefix(type) + '-table-head');
         if (!thead) return;
         if (compareType === 'qima') {
-            thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>命中</th></tr>';
+            thead.innerHTML = '<tr><th>序号</th><th>七码预测</th><th>实际开奖</th><th>结果</th></tr>';
             return;
         }
         const poolCfg = poolTabConfig(compareType);
@@ -3427,16 +3491,6 @@
         `);
     }
 
-    function showQimaHitsPopup(hits) {
-        if (!hits.length) return;
-        const listHtml = hits.map(({ seq, positions }) => `
-            <div class="qima-popup-list-item">
-                <span class="seq-cell">${seq}</span>
-                <span class="qima-idx-text">${formatQimaIndexText(positions)}</span>
-            </div>`).join('');
-        openQimaPopup('命中索引明细', `<div class="qima-popup-list">${listHtml}</div>`);
-    }
-
     function renderQimaPosStats(type, compareData) {
         const panel = document.getElementById(domPrefix(type) + '-qima-pos');
         const summaryEl = document.getElementById(domPrefix(type) + '-qima-pos-summary');
@@ -3470,45 +3524,9 @@
             return;
         }
 
-        const hits = [];
-        compareData.forEach((item, idx) => {
-            if (!checkDingWeiMatch(item.aiDingWeiHm, item.realHm)) return;
-            hits.push({
-                seq: idx + 1,
-                positions: getQimaMatchPositions(item.aiDingWeiHm, item.realHm)
-            });
-        });
-
-        const baiSet = new Set(), shiSet = new Set(), geSet = new Set();
-        hits.forEach(({ positions }) => {
-            baiSet.add(positions.bai);
-            shiSet.add(positions.shi);
-            geSet.add(positions.ge);
-        });
-
-        if (hits.length === 0) {
-            summaryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:13px">当前范围内无七码命中记录</span>';
-            return;
-        }
-
-        const latest = hits.slice(0, 5);
-        const comboHtml = latest.map(({ positions }) =>
-            `<div class="qima-seq-line">百位 第${positions.bai}位 十位 第${positions.shi}位 个位 第${positions.ge}位</div>`
-        ).join('');
-
-        summaryEl.innerHTML = `
-            <div class="qima-pos-summary">
-            <div class="qima-pos-summary-item"><span class="pos-label">百位索引</span><span class="pos-vals">${sortPosSet(baiSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">十位索引</span><span class="pos-vals">${sortPosSet(shiSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">个位索引</span><span class="pos-vals">${sortPosSet(geSet)}</span></div>
-            <div class="qima-pos-summary-item"><span class="pos-label">命中</span><span class="pos-vals">${hits.length} 期</span></div>
-            <div class="qima-pos-summary-actions">
-                <button type="button" class="qima-detail-btn" id="${domPrefix(type)}-qima-detail-btn">查看命中明细</button>
-            </div>
-            </div>
-            <div class="qima-seq-list"><div class="pos-label" style="margin-bottom:2px">开过序列</div>${comboHtml}</div>`;
-
-        document.getElementById(domPrefix(type) + '-qima-detail-btn').onclick = () => showQimaHitsPopup(hits);
+        const missHtml = renderQimaMissSummary(compareData);
+        summaryEl.innerHTML = missHtml
+            || '<span style="color:var(--text-secondary);font-size:13px">当前范围内无未中</span>';
     }
 
     function topSanmaBets(itemOrHm, n = 10) {
@@ -3645,14 +3663,8 @@
     }
 
     function checkDingWeiMatch(aiDingWeiHm, realHm) {
-        if (!aiDingWeiHm || !realHm || realHm.length !== 3) return false;
-        const baiweiMatch = aiDingWeiHm.match(/百位[:：]([0-9,]+)/);
-        const shiweiMatch = aiDingWeiHm.match(/十位[:：]([0-9,]+)/);
-        const geweiMatch = aiDingWeiHm.match(/个位[:：]([0-9,]+)/);
-        if (!baiweiMatch || !shiweiMatch || !geweiMatch) return false;
-        return baiweiMatch[1].split(',').includes(realHm[0])
-            && shiweiMatch[1].split(',').includes(realHm[1])
-            && geweiMatch[1].split(',').includes(realHm[2]);
+        const hits = getDingWeiPosHits(aiDingWeiHm, realHm);
+        return !!(hits && hits[0] && hits[1] && hits[2]);
     }
 
     function formatBalls(numbers, highlight) {
@@ -3666,20 +3678,23 @@
 
     function formatDingWei(text, realHm) {
         if (!text) return '-';
-        const positions = realHm && checkDingWeiMatch(text, realHm)
-            ? getQimaMatchPositions(text, realHm) : null;
+        const hits = getDingWeiPosHits(text, realHm);
+        const code = pad3Code(realHm);
         const rows = [
-            ['百位', /百位[:：]([0-9,]+)/, positions?.bai],
-            ['十位', /十位[:：]([0-9,]+)/, positions?.shi],
-            ['个位', /个位[:：]([0-9,]+)/, positions?.ge]
+            ['百位', /百位[:：]([0-9,]+)/, 0],
+            ['十位', /十位[:：]([0-9,]+)/, 1],
+            ['个位', /个位[:：]([0-9,]+)/, 2]
         ];
         let html = '<div class="dingwei-text">';
-        rows.forEach(([label, regex, hitIdx]) => {
+        rows.forEach(([label, regex, pos]) => {
             const m = text.match(regex);
             if (m) {
-                html += `<div class="dingwei-row"><span class="dingwei-label">${label}:</span><div class="dingwei-numbers">`;
-                m[1].split(',').forEach((num, i) => {
-                    const trimmed = num.trim();
+                const missed = !!(hits && !hits[pos]);
+                const hitDigit = hits && hits[pos] && code.length === 3 ? code[pos] : null;
+                const nums = m[1].split(',').map(s => s.trim());
+                const hitIdx = hitDigit ? nums.indexOf(hitDigit) + 1 : 0;
+                html += `<div class="dingwei-row"><span class="dingwei-label${missed ? ' miss' : ''}">${label}:</span><div class="dingwei-numbers">`;
+                nums.forEach((trimmed, i) => {
                     const idx = i + 1;
                     const isHit = hitIdx === idx;
                     const cls = isHit ? 'dingwei-ball highlight' : 'dingwei-ball';
@@ -3910,7 +3925,10 @@
                 } else if (!item.realHm) {
                     matchCell = '<span style="color:var(--text-secondary)">待开奖</span>';
                 } else {
-                    matchCell = '<span class="fail">✗ 未命中</span>';
+                    const missed = qimaMissPositions(getDingWeiPosHits(item.aiDingWeiHm, item.realHm));
+                    matchCell = missed.length
+                        ? `<span class="fail">未中：${missed.join('、')}</span>`
+                        : '<span class="fail">✗ 未命中</span>';
                 }
                 row.innerHTML = `
                     <td class="seq-cell">${seq}</td>
