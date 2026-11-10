@@ -349,7 +349,7 @@ public class DataController {
                }
 
                sb.append(t);
-               if (++n >= 10) {
+               if (++n >= 15) {
                   break;
                }
             }

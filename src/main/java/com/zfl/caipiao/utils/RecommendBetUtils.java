@@ -16,7 +16,7 @@ import java.util.Set;
 public final class RecommendBetUtils {
    public static final int HIT_LOOKBACK = 100;
    public static final int MIN_PICK = 10;
-   public static final int MAX_PICK = 10;
+   public static final int MAX_PICK = 15;
    private static final int MAX_RANK = 500;
    private static final int COND_LOOKBACK = 40;
    private static final double RECENCY_DECAY = 0.96;
@@ -76,7 +76,7 @@ public final class RecommendBetUtils {
          return "";
       }
 
-      // 近50期对照最优：大底前 200 名「历史命中名次密度带」取 10 注（同组去重）。
+      // 近50期对照最优：大底前 200 名「历史命中名次密度带」取 15 注（同组去重）。
       // 大底命中虽多在 200+，但尾部名次不稳定；前 200 密度带合计直选优于专家/过拟合截取。
       int n = Math.min(all.size(), 200);
       double[] scores = scoreRanksForStratified(n, history);
@@ -84,7 +84,7 @@ public final class RecommendBetUtils {
       int[] band = discoverDenseBand(scores, n, bandW);
       String banned = lastRealHm(history);
 
-      List<String> picked = new ArrayList<>(10);
+      List<String> picked = new ArrayList<>(MAX_PICK);
       Set<String> usedKeys = new LinkedHashSet<>();
       List<Integer> bandRanks = new ArrayList<>();
       for (int r = Math.max(1, band[0]); r <= Math.min(n, band[1]); r++) {

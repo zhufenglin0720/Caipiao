@@ -23,7 +23,7 @@ import java.util.zip.ZipFile;
  * <p>
  * 乐彩网、500 彩票网、购彩大神共用的定位框架：同位冷热、遗漏回补、邻期转移、
  * 重号、邻号（不绕 0/9）、跨位重号。每位先按近窗命中选出冷热窗口，再对 000–999
- * 打分。三码 10 注按最近 30 期走期：直选尽量多，组选其次。
+ * 打分。三码 15 注按最近 20 期走期：近几期直选、组选优先，再看这 20 期。
  * 每期按离上一期最近的号码截取，避免 10 期窗口里 20 注基本不变。3D 和排列三各自现算。
  */
 public final class Flow1000Ranker {
@@ -53,7 +53,7 @@ public final class Flow1000Ranker {
     static SanmaPick plPick = SanmaPick.B30;
     static boolean plBurstPool = false;
 
-    /** 旧平移扫描还在用。线上三码不再读这些窗口，只按最近 30 期现算。 */
+    /** 旧平移扫描还在用。线上三码不再读这些窗口，只按最近 20 期现算。 */
     private static String sdCoverNote = "";
     private static String plCoverNote = "";
 
@@ -99,9 +99,9 @@ public final class Flow1000Ranker {
         String note = pl3 ? plCoverNote : sdCoverNote;
         String game = pl3 ? "排列三" : "福彩3D";
         if (note == null || note.isEmpty()) {
-            return game + ":三码10注近30 " + highRule(pl3).text();
+            return game + ":三码" + SANMA_OUT + "注近" + SANMA_LOOK + " " + highRule(pl3).text();
         }
-        return game + ":三码10注近30 " + note;
+        return game + ":三码" + SANMA_OUT + "注近" + SANMA_LOOK + " " + note;
     }
 
     public static String csv(int[] ids) {
@@ -154,7 +154,7 @@ public final class Flow1000Ranker {
     }
 
     /**
-     * 高胜率规则出本期 10 注。上期整组跟偏差会掉直选，不再搬到本期票上。
+     * 高胜率规则出本期 15 注。上期整组跟偏差会掉直选，不再搬到本期票上。
      */
     private static int[] nearSanma(int[][] digits, int end, boolean pl3) {
         if (end < 40) {
@@ -162,7 +162,7 @@ public final class Flow1000Ranker {
         }
         TenRule rule = highRule(pl3);
         int[] now = clipSanma(tenTickets(digits, end, pl3, rule));
-        int from = Math.max(40, end - 30);
+        int from = Math.max(40, end - SANMA_LOOK);
         scoreKept(digits, from, end, pl3, rule, SANMA_OUT);
         String note = rule.text();
         if (pl3) {
@@ -210,19 +210,20 @@ public final class Flow1000Ranker {
         return Arrays.copyOf(out, f);
     }
 
-    /** 近 30 期留下的 10 注规则。先比直选，再比组选。 */
+    /** 近 20 期留下的 15 注规则。先比最新一期直选、组选，再比近 5 期，再比这 20 期。 */
     private static TenRule highRule(boolean pl3) {
         if (pl3) {
-            // 10 注里近 30 期最高 3 直 3 组。前 30 期直选是 0，组选也是 0，写在对照里。
-            TenRule rule = new TenRule(9, 30, 3, 2, 6, 2, -1);
+            // 15 注把 398 收进直选。近 5 期还有 320 组选，597 在外面。近 20 期 1 直 5 组。前 20 期直选是 0。
+            TenRule rule = new TenRule(2, 20, 7, 7, 1, 2, 1);
             rule.decay = 0.92;
-            rule.cut = 12;
-            rule.keep = 8;
+            rule.fresh = 6;
+            rule.cut = 2;
             return rule;
         }
-        // 10 注里近 30 期最高 3 直 5 组。前 30 期直选是 0、组选 2。最近两期仍在这 10 注外面。
-        TenRule rule = new TenRule(3, 30, 6, 4, 2, 1, -1);
-        rule.cut = 2;
+        // 15 注把 190 收进直选。近 5 期还有 123 直选，085 和 382 在外面。近 20 期 2 直 4 组。前 20 期直选是 0。
+        TenRule rule = new TenRule(9, 20, 1, 7, 6, 1, 1);
+        rule.cut = 8;
+        rule.keep = 8;
         return rule;
     }
 
@@ -296,7 +297,7 @@ public final class Flow1000Ranker {
             if (fresh > 0) {
                 body += " 尾" + fresh + "上期邻域";
             }
-            return "近30走期 " + zx + "直" + grp + "组 " + body;
+            return "近" + SANMA_LOOK + "走期 " + zx + "直" + grp + "组 " + body;
         }
     }
 
@@ -4460,6 +4461,25 @@ public final class Flow1000Ranker {
             System.out.println(sb);
             return;
         }
+        if (args != null && args.length > 0 && "now".equals(args[0])) {
+            System.out.println(csv(sanma(sd, false)));
+            System.out.println(describe(false));
+            System.out.println(csv(sanma(pl, true)));
+            System.out.println(describe(true));
+            return;
+        }
+        if (args != null && args.length > 0 && "c15".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("三码15注。近20期窗口里，最新一期直选、组选优先，再看近5期，然后这20期。前20期只作对照。\n");
+            sb.append("组选次数含直选。相邻两期重合达到75%，或15注里有12注及以上相同，就不留。\n");
+            cut15Scan(sb, "福彩3D", sd, false);
+            cut15Scan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_c15.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "c10".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             sb.append("三码收到10注。按最近30期的直选、再按组选留下。前30期只作对照。\n");
@@ -5526,13 +5546,177 @@ public final class Flow1000Ranker {
     }
 
 
-    private static final int SANMA_OUT = 10;
+    private static final int SANMA_OUT = 15;
+    private static final int SANMA_LOOK = 20;
+    /** 近20期里，这几期的直选、组选排在整窗前面。 */
+    private static final int SANMA_RECENT = 5;
 
     private static int[] clipSanma(int[] bets) {
         if (bets == null || bets.length <= SANMA_OUT) {
             return bets == null ? new int[0] : bets;
         }
         return Arrays.copyOf(bets, SANMA_OUT);
+    }
+
+    /**
+     * 15 注、近 20 期。近 5 期直选、组选排在最前，其次才是这 20 期的直选、组选。
+     * 前 20 期只在同一档里拆平。
+     */
+    private static void cut15Scan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - SANMA_LOOK);
+        int priorFrom = Math.max(40, from - SANMA_LOOK);
+        sb.append("===== ").append(name).append(" =====\n");
+        sb.append("最近开奖");
+        for (int t = Math.max(0, n - SANMA_RECENT); t < n; t++) {
+            sb.append(String.format(Locale.ROOT, " %03d", code(digits[t])));
+        }
+        sb.append('\n');
+        TenRule currentRule = highRule(pl3);
+        Hit30 head = scoreLookN(digits, from, n, pl3, currentRule, SANMA_OUT);
+        int[] priorNow = countLookN(digits, priorFrom, from, pl3, currentRule, SANMA_OUT);
+        sb.append(String.format(Locale.ROOT,
+                "现行15注 近%d %d直%d组 末两期%d 近20 %d直%d组 前20 %d直%d组 重合%.0f%% %s%n",
+                SANMA_RECENT, head.lateZx, head.lateGrp, head.late2, head.zx, head.grp,
+                priorNow[0], priorNow[1], head.overlap() * 100, currentRule.text()));
+        sb.append("现行近8").append(marksN(digits, Math.max(from, n - 8), n, pl3, currentRule, SANMA_OUT)).append('\n');
+        List<TenRule> bases = scanBases();
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<Hit30> top = new ArrayList<>();
+        List<Hit30> band = new ArrayList<>();
+        int seen = 0;
+        int passed = 0;
+        int caught = 0;
+        int bi = 0;
+        for (TenRule baseRule : bases) {
+            if ((bi++ % 400) == 0) {
+                System.out.println(name + " 基 " + bi + "/" + bases.size());
+            }
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            int[] freshSet = (baseRule.cut == 8 || baseRule.cut == 12) ? new int[]{0} : new int[]{0, 6};
+            for (int fresh : freshSet) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        seen++;
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCacheN(digits, times, cache, rule, SANMA_OUT);
+                        if (hit.sticky > 0 || hit.overlap() >= 0.75 || (hit.zx < 1 && hit.last == 0)) {
+                            continue;
+                        }
+                        passed++;
+                        if (hit.last > 0) {
+                            caught++;
+                        }
+                        keepC15(top, hit, 12);
+                        if (band.isEmpty() || c15Primary(hit, band.get(0)) < 0) {
+                            band.clear();
+                            band.add(hit);
+                        } else if (c15Primary(hit, band.get(0)) == 0) {
+                            band.add(hit);
+                        }
+                    }
+                }
+            }
+        }
+        sb.append("基规则 ").append(bases.size()).append(" 打分 ").append(seen)
+                .append(" 通过 ").append(passed).append(" 最新一期有中 ").append(caught).append('\n');
+        if (band.isEmpty()) {
+            sb.append("15注没有可用规则。\n");
+            return;
+        }
+        band.sort(Flow1000Ranker::c15Order);
+        if (band.size() > 40) {
+            band.subList(40, band.size()).clear();
+        }
+        fillPrior(digits, priorFrom, from, pl3, band, SANMA_OUT);
+        fillPrior(digits, priorFrom, from, pl3, top, SANMA_OUT);
+        sb.append("---- 最新一期直组优先 ----\n");
+        printC15(sb, top, 8);
+        Hit30 lock = band.get(0);
+        for (Hit30 hit : band) {
+            int prior = Integer.compare(hit.priorZ, lock.priorZ);
+            if (prior == 0) {
+                prior = Integer.compare(hit.priorG, lock.priorG);
+            }
+            if (prior == 0) {
+                prior = Double.compare(lock.overlap(), hit.overlap());
+            }
+            if (prior > 0) {
+                lock = hit;
+            }
+        }
+        sb.append("同档 ").append(band.size()).append(" 条，前20期只用来拆平。\n");
+        sb.append("留下 ").append(lock.rule.text()).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "近5 %d直%d组 末两期%d 近20 %d直%d组 前20 %d直%d组 重合%.0f%%%n",
+                lock.lateZx, lock.lateGrp, lock.late2, lock.zx, lock.grp,
+                lock.priorZ, lock.priorG, lock.overlap() * 100));
+        sb.append("留下近8").append(marksN(digits, Math.max(from, n - 8), n, pl3, lock.rule, SANMA_OUT)).append('\n');
+        sb.append("下一期15注 ").append(csv(clipSanma(tenTickets(digits, n, pl3, lock.rule)))).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "LOCK15 kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d lateZ=%d lateG=%d zx=%d grp=%d late2=%d priorZ=%d%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut, lock.rule.keep,
+                lock.lateZx, lock.lateGrp, lock.zx, lock.grp, lock.late2, lock.priorZ));
+    }
+
+    private static int c15Primary(Hit30 a, Hit30 b) {
+        if (a.last != b.last) {
+            return Integer.compare(b.last, a.last);
+        }
+        if (a.lateZx != b.lateZx) {
+            return Integer.compare(b.lateZx, a.lateZx);
+        }
+        if (a.lateGrp != b.lateGrp) {
+            return Integer.compare(b.lateGrp, a.lateGrp);
+        }
+        if (a.late2 != b.late2) {
+            return Integer.compare(b.late2, a.late2);
+        }
+        if (a.zx != b.zx) {
+            return Integer.compare(b.zx, a.zx);
+        }
+        if (a.grp != b.grp) {
+            return Integer.compare(b.grp, a.grp);
+        }
+        return 0;
+    }
+
+    private static int c15Order(Hit30 a, Hit30 b) {
+        int c = c15Primary(a, b);
+        if (c != 0) {
+            return c;
+        }
+        return Double.compare(a.overlap(), b.overlap());
+    }
+
+    private static void keepC15(List<Hit30> top, Hit30 hit, int limit) {
+        top.add(hit);
+        top.sort(Flow1000Ranker::c15Order);
+        while (top.size() > limit) {
+            top.remove(top.size() - 1);
+        }
+    }
+
+    private static void printC15(StringBuilder sb, List<Hit30> top, int limit) {
+        int shown = 0;
+        for (Hit30 hit : top) {
+            if (shown >= limit) {
+                break;
+            }
+            sb.append(String.format(Locale.ROOT,
+                    "最新%s 近5 %d直%d组 末两期%d 近20 %d直%d组 前20 %d直%d组 重合%.0f%% %s%n",
+                    lastWord(hit.last), hit.lateZx, hit.lateGrp, hit.late2, hit.zx, hit.grp,
+                    hit.priorZ, hit.priorG, hit.overlap() * 100, hit.rule.text()));
+            shown++;
+        }
     }
 
     /** 最近 30 期、只计前 10 注。最后两期至少组选命中的规则优先。 */
@@ -5548,12 +5732,12 @@ public final class Flow1000Ranker {
         sb.append('\n');
         TenRule currentRule = highRule(pl3);
         Hit30 full = scoreLook(digits, from, n, pl3, currentRule);
-        Hit30 head = scoreLookN(digits, from, n, pl3, currentRule, SANMA_OUT);
+        Hit30 head = scoreLookN(digits, from, n, pl3, currentRule, 10);
         sb.append(String.format(Locale.ROOT, "现行20注 近30 %d直%d组 末两期中%d %s%n",
                 full.zx, full.grp, full.late2, currentRule.text()));
         sb.append(String.format(Locale.ROOT, "现行前10 近30 %d直%d组 末两期中%d 重合%.0f%%%n",
                 head.zx, head.grp, head.late2, head.overlap() * 100));
-        sb.append("前10近12").append(marksN(digits, Math.max(from, n - 12), n, pl3, currentRule, SANMA_OUT)).append('\n');
+        sb.append("前10近12").append(marksN(digits, Math.max(from, n - 12), n, pl3, currentRule, 10)).append('\n');
         List<TenRule> bases = todayBases();
         int[] times = new int[n - from];
         for (int i = 0; i < times.length; i++) {
@@ -5572,7 +5756,7 @@ public final class Flow1000Ranker {
                     int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
                     for (int delta : deltas) {
                         TenRule rule = copyRule(baseRule, pos, delta, fresh);
-                        Hit30 hit = scoreCacheN(digits, times, cache, rule, SANMA_OUT);
+                        Hit30 hit = scoreCacheN(digits, times, cache, rule, 10);
                         if (hit.sticky > 0 || hit.overlap() >= 0.75 || hit.zx < 1) {
                             continue;
                         }
@@ -5584,8 +5768,8 @@ public final class Flow1000Ranker {
                 }
             }
         }
-        fillPrior(digits, priorFrom, from, pl3, byWindow);
-        fillPrior(digits, priorFrom, from, pl3, byTail);
+        fillPrior(digits, priorFrom, from, pl3, byWindow, 10);
+        fillPrior(digits, priorFrom, from, pl3, byTail, 10);
         sb.append("---- 近30期直选更高 ----\n");
         printCut(sb, byWindow, 8);
         sb.append("---- 末两期有中，且近30期至少1个直选 ----\n");
@@ -5612,8 +5796,8 @@ public final class Flow1000Ranker {
             sb.append("前30期没有直选，对照写在上面。\n");
         }
         sb.append("留下 ").append(lock.rule.text()).append('\n');
-        sb.append("留下近12").append(marksN(digits, Math.max(from, n - 12), n, pl3, lock.rule, SANMA_OUT)).append('\n');
-        sb.append("下一期10注 ").append(csv(clipSanma(tenTickets(digits, n, pl3, lock.rule)))).append('\n');
+        sb.append("留下近12").append(marksN(digits, Math.max(from, n - 12), n, pl3, lock.rule, 10)).append('\n');
+        sb.append("下一期10注 ").append(csv(clipTo(tenTickets(digits, n, pl3, lock.rule), 10))).append('\n');
         sb.append(String.format(Locale.ROOT,
                 "LOCK10 kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d zx=%d grp=%d late2=%d priorZ=%d%n",
                 lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
@@ -5629,9 +5813,9 @@ public final class Flow1000Ranker {
         }
     }
 
-    private static void fillPrior(int[][] digits, int from, int end, boolean pl3, List<Hit30> top) {
+    private static void fillPrior(int[][] digits, int from, int end, boolean pl3, List<Hit30> top, int keep) {
         for (Hit30 hit : top) {
-            int[] prior = countLookN(digits, from, end, pl3, hit.rule, SANMA_OUT);
+            int[] prior = countLookN(digits, from, end, pl3, hit.rule, keep);
             hit.priorZ = prior[0];
             hit.priorG = prior[1];
         }
@@ -5702,6 +5886,14 @@ public final class Flow1000Ranker {
             }
             if (group) {
                 hit.grp++;
+            }
+            if (i >= times.length - SANMA_RECENT) {
+                if (direct) {
+                    hit.lateZx++;
+                }
+                if (group) {
+                    hit.lateGrp++;
+                }
             }
             if (i >= times.length - 2 && (direct || group)) {
                 hit.late2++;
@@ -5798,26 +5990,66 @@ public final class Flow1000Ranker {
     }
 
     private static List<TenRule> todayBases() {
+        return shapeBases(30, 16, 48, false);
+    }
+
+    /** 15 注扫描用。格子放到 64 注再截前 15，跳号排序两种衰减都留。 */
+    private static List<TenRule> scanBases() {
+        List<TenRule> out = shapeBases(SANMA_LOOK, 12, 64, true);
+        int[][] wide = {
+                {10, 3, 2}, {10, 2, 3}, {3, 10, 2}, {2, 10, 3}, {3, 2, 10}, {2, 3, 10},
+                {8, 3, 2}, {3, 8, 2}, {2, 3, 8}, {6, 4, 2}, {4, 6, 2}, {2, 4, 6}
+        };
+        double[] decays = {1, 0.92};
+        for (int[] sh : wide) {
+            for (double decay : decays) {
+                for (int kind : new int[]{2, 3, 9}) {
+                    for (int cut : new int[]{1, 2, 6}) {
+                        TenRule rule = new TenRule(kind, SANMA_LOOK, sh[0], sh[1], sh[2]);
+                        rule.decay = decay;
+                        rule.cut = cut;
+                        out.add(rule);
+                    }
+                }
+            }
+        }
+        for (double decay : decays) {
+            TenRule six = new TenRule(5, SANMA_LOOK, 0, 0, 0);
+            six.decay = decay;
+            out.add(six);
+        }
+        return out;
+    }
+
+    /** 热冷格子。window 是每位冷热用的期数，minProd 是格子注数下限。 */
+    private static List<TenRule> shapeBases(int window, int minProd) {
+        return shapeBases(window, minProd, 48, false);
+    }
+
+    private static List<TenRule> shapeBases(int window, int minProd, int maxProd, boolean farAlways) {
         List<TenRule> out = new ArrayList<>();
         double[] decays = {1, 0.92};
-        int[] keeps = {8, 10, 12};
+        int[] keeps = {8, 10, 12, 15};
         for (int a = 1; a <= 8; a++) {
             for (int b = 1; b <= 8; b++) {
                 for (int c = 1; c <= 8; c++) {
                     int prod = a * b * c;
-                    if (prod < 16 || prod > 48) {
+                    if (prod < minProd || prod > maxProd) {
                         continue;
                     }
                     for (double decay : decays) {
                         for (int cut : new int[]{1, 2}) {
-                            TenRule mix = new TenRule(9, 30, a, b, c);
+                            TenRule mix = new TenRule(9, window, a, b, c);
                             mix.decay = decay;
                             mix.cut = cut;
                             out.add(mix);
                         }
                         for (int cut : new int[]{8, 12}) {
                             for (int keep : keeps) {
-                                TenRule mix = new TenRule(9, 30, a, b, c);
+                                if (keep > 12 && window > SANMA_LOOK) {
+                                    continue;
+                                }
+                                TenRule mix = new TenRule(9, window, a, b, c);
                                 mix.decay = decay;
                                 mix.cut = cut;
                                 mix.keep = keep;
@@ -5825,12 +6057,13 @@ public final class Flow1000Ranker {
                             }
                         }
                         for (int kind : new int[]{2, 3}) {
-                            TenRule near = new TenRule(kind, 30, a, b, c);
+                            TenRule near = new TenRule(kind, window, a, b, c);
                             near.decay = decay;
                             near.cut = 2;
                             out.add(near);
-                            if (decay > 0.99) {
-                                TenRule far = new TenRule(kind, 30, a, b, c);
+                            if (farAlways || decay > 0.99) {
+                                TenRule far = new TenRule(kind, window, a, b, c);
+                                far.decay = decay;
                                 far.cut = 6;
                                 out.add(far);
                             }
@@ -6098,6 +6331,9 @@ public final class Flow1000Ranker {
         int slots = 20;
         /** 窗口最后两期里，直选或组选命中的期数。 */
         int late2;
+        /** 窗口末尾近几期的直选、组选。组选含直选。 */
+        int lateZx;
+        int lateGrp;
 
         double overlap() {
             int n = slots <= 0 ? 20 : slots;
@@ -7152,6 +7388,18 @@ public final class Flow1000Ranker {
             }
         } catch (Exception e) {
             System.out.println("在线失败 " + url + ": " + e.getMessage());
+        }
+        Path asc = Path.of(is3d ? "reports/3d_asc.txt" : "reports/pl3_asc.txt");
+        if (Files.exists(asc)) {
+            try {
+                int[][] file = parseAsc(Files.readString(asc));
+                if (file.length > 500) {
+                    System.out.println("文本 " + asc + " 期数=" + file.length);
+                    return file;
+                }
+            } catch (Exception e) {
+                System.out.println("文本失败 " + asc + ": " + e.getMessage());
+            }
         }
         String xlsx = is3d ? "D:/彩票/3D.xlsx" : "D:/彩票/排列三.xlsx";
         int[][] local = parseXlsx(Path.of(xlsx));

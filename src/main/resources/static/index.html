@@ -3529,8 +3529,8 @@
             || '<span style="color:var(--text-secondary);font-size:13px">当前范围内无未中</span>';
     }
 
-    function topSanmaBets(itemOrHm, n = 10) {
-        // 优先用后端选出的推荐注（10注，已禁同号不同序）
+    function topSanmaBets(itemOrHm, n = 15) {
+        // 优先用后端选出的推荐注（15注，已禁同号不同序）
         if (itemOrHm && typeof itemOrHm === 'object') {
             if (itemOrHm.aiRecommendHm) {
                 return String(itemOrHm.aiRecommendHm).split(',')
@@ -3544,7 +3544,7 @@
     }
 
     /** 从完整列表取前若干注，跳过三码相同仅顺序不同的重复 */
-    function uniqueDigitSetBets(aiHm, maxN = 10) {
+    function uniqueDigitSetBets(aiHm, maxN = 15) {
         if (!aiHm) return '';
         const out = [];
         const seen = new Set();
