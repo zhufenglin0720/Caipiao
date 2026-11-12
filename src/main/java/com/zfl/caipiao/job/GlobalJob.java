@@ -10,6 +10,7 @@ import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.utils.DateUtils;
+import com.zfl.caipiao.utils.Flow1000Ranker;
 import com.zfl.caipiao.utils.Overfit20PredictUtils;
 import com.zfl.caipiao.utils.RecommendBetUtils;
 import com.zfl.caipiao.utils.RuleBasedDanMaUtils;
@@ -46,6 +47,10 @@ public class GlobalJob {
    private String fileLocationCompare3d;
    @Value("${file.location.comparePl3}")
    private String fileLocationComparePl3;
+   @Value("${file.location.trend3d}")
+   private String fileLocationTrend3d;
+   @Value("${file.location.trendPl3}")
+   private String fileLocationTrendPl3;
 
    @Scheduled(
       cron = "0 0 15 * * ?"
@@ -61,6 +66,7 @@ public class GlobalJob {
       this.saveStraightDadi(true, raw200, raw1000Sd);
       String zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String sdRecommend = RecommendBetUtils.pickRecommendBets(HmCache.getSdCache(), false);
+      this.refreshTrend(true);
       String sdFeedback = sdRecommend;
       String sdDanMa = RuleBasedDanMaUtils.get3dDanMa();
       String sdShuangDan = RuleBasedShuangDanUtils.get3dShuangDan();
@@ -87,6 +93,7 @@ public class GlobalJob {
       this.saveStraightDadi(false, raw200, raw1000Pl3);
       zuSan = RecommendBetUtils.extractZuSanGroups(raw200);
       String pl3Recommend = RecommendBetUtils.pickRecommendBets(HmCache.getPl3Cache(), true);
+      this.refreshTrend(false);
       String pl3Feedback = pl3Recommend;
       String pl3DanMa = RuleBasedDanMaUtils.getPl3DanMa();
       String pl3ShuangDan = RuleBasedShuangDanUtils.getPl3ShuangDan();
@@ -202,6 +209,37 @@ public class GlobalJob {
       }
    }
 
+   private void writeTrendDraw(boolean is3D, Hm kaiJiangHm) {
+      try {
+         List<Hm> list = is3D ? HmCache.getSdCache() : HmCache.getPl3Cache();
+         int[][] digits = Flow1000Ranker.digitsOf(list);
+         boolean pl3 = !is3D;
+         int end = Math.max(0, digits.length - 1);
+         String bets = Flow1000Ranker.trendCsv(digits, end, pl3);
+         Flow1000Ranker.writeTrendDraw(
+            is3D ? this.fileLocationTrend3d : this.fileLocationTrendPl3,
+            pl3, kaiJiangHm.getQh(), kaiJiangHm.toString(), bets);
+      } catch (Exception ex) {
+         System.out.println("大趋势三码[" + (is3D ? "3D" : "排列三") + "] 开奖号写入失败: " + ex.getMessage());
+         ex.printStackTrace();
+      }
+   }
+
+   private void refreshTrend(boolean is3d) {
+      try {
+         List<Hm> list = is3d ? HmCache.getSdCache() : HmCache.getPl3Cache();
+         boolean pl3 = !is3d;
+         int[][] digits = Flow1000Ranker.digitsOf(list);
+         Flow1000Ranker.computeTrend(digits, pl3);
+         String path = is3d ? this.fileLocationTrend3d : this.fileLocationTrendPl3;
+         Flow1000Ranker.saveTrend(path, pl3);
+         Flow1000Ranker.saveTrendIssue(path, pl3, nextIssue(is3d), Flow1000Ranker.trendCsv(digits, digits.length, pl3));
+      } catch (Exception ex) {
+         System.out.println("大趋势三码[" + (is3d ? "3D" : "排列三") + "] 计算失败: " + ex.getMessage());
+         ex.printStackTrace();
+      }
+   }
+
    private void saveStraightDadi(boolean is3D, String pool) {
       this.saveStraightDadi(is3D, pool, null);
    }
@@ -303,6 +341,7 @@ public class GlobalJob {
          List<Hm> list = is3D ? HmCache.getSdCache() : HmCache.getPl3Cache();
          EasyExcel.write(filePath, Hm.class).sheet(sheetName).doWrite(list);
          this.dadiService.updateRealHm(is3D, kaiJiangHm.toString());
+         this.writeTrendDraw(is3D, kaiJiangHm);
       }
 
       if (is3D) {

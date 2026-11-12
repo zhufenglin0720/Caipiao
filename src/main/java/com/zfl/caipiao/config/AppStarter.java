@@ -7,6 +7,7 @@ import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
 import com.zfl.caipiao.service.PnlService;
+import com.zfl.caipiao.utils.Flow1000Ranker;
 import com.zfl.caipiao.utils.ShuangDanBackfill;
 import jakarta.annotation.Resource;
 import java.util.List;
@@ -29,6 +30,10 @@ public class AppStarter implements ApplicationRunner {
    private String fileLocationCompare3dDadi;
    @Value("${file.location.comparePl3Dadi}")
    private String fileLocationComparePl3Dadi;
+   @Value("${file.location.trend3d}")
+   private String fileLocationTrend3d;
+   @Value("${file.location.trendPl3}")
+   private String fileLocationTrendPl3;
    @Resource
    private DadiService dadiService;
    @Resource
@@ -90,5 +95,7 @@ public class AppStarter implements ApplicationRunner {
       System.out.println("pl3DadiCompareCache:" + HmCache.getPl3DadiCompareCache().size());
       this.pnlService.loadFromExcel();
       System.out.println("pnlCache:" + HmCache.getPnlCache().size());
+      Flow1000Ranker.loadTrend(this.fileLocationTrend3d, false);
+      Flow1000Ranker.loadTrend(this.fileLocationTrendPl3, true);
    }
 }

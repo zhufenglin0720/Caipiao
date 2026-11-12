@@ -1,5 +1,8 @@
 package com.zfl.caipiao.utils;
 
+import com.alibaba.excel.EasyExcel;
+import com.zfl.caipiao.export.CompareVO;
+import com.zfl.caipiao.export.Hm;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -9,11 +12,14 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipFile;
@@ -24,6 +30,7 @@ import java.util.zip.ZipFile;
  * 乐彩网、500 彩票网、购彩大神共用的定位框架：同位冷热、遗漏回补、邻期转移、
  * 重号、邻号（不绕 0/9）、跨位重号。每位先按近窗命中选出冷热窗口，再对 000–999
  * 打分。三码 15 注按最近 20 期走期：近几期直选、组选优先，再看这 20 期。
+ * 大趋势三码同样 15 注，窗口改为最近 200 期：先比直选，再比直选加组选。规则和三码一起在定时任务里算，页面只读已保存的结果。
  * 每期按离上一期最近的号码截取，避免 10 期窗口里 20 注基本不变。3D 和排列三各自现算。
  */
 public final class Flow1000Ranker {
@@ -56,6 +63,10 @@ public final class Flow1000Ranker {
     /** 旧平移扫描还在用。线上三码不再读这些窗口，只按最近 20 期现算。 */
     private static String sdCoverNote = "";
     private static String plCoverNote = "";
+    private static volatile TrendCache sdTrendCache;
+    private static volatile TrendCache plTrendCache;
+    private static final Object SD_TREND_LOCK = new Object();
+    private static final Object PL_TREND_LOCK = new Object();
 
     /** 三码平移窗口。衰减小于 1 时，窗口里越近的期越决定百十个差。 */
     static int sdWindow = 16;
@@ -140,6 +151,328 @@ public final class Flow1000Ranker {
         return nearSanma(prefix, prefix.length, pl3);
     }
 
+    /** 大趋势三码：15 注，规则在最近 200 期上按直选、再按组选留下。 */
+    public static final int TREND_LOOK = 200;
+    public static final int TREND_OUT = 15;
+
+    public static int[][] digitsOf(List<Hm> list) {
+        int n = list == null ? 0 : list.size();
+        int[][] m = new int[n][3];
+        for (int i = 0; i < n; i++) {
+            Hm hm = list.get(i);
+            if (hm == null) {
+                continue;
+            }
+            m[i][0] = oneDigit(hm.getQ1());
+            m[i][1] = oneDigit(hm.getQ2());
+            m[i][2] = oneDigit(hm.getQ3());
+        }
+        return m;
+    }
+
+    public static boolean trendReady(int[][] digits, boolean pl3) {
+        if (digits == null || digits.length < 40) {
+            return true;
+        }
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        return cache != null && cache.rule != null;
+    }
+
+    public static String trendNote(boolean pl3) {
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        return cache == null || cache.note == null ? "" : cache.note;
+    }
+
+    /** 定时任务和三码一起调用。页面请求不会走到这里。 */
+    public static void computeTrend(int[][] digits, boolean pl3) {
+        if (digits == null || digits.length < 40) {
+            return;
+        }
+        Object lock = pl3 ? PL_TREND_LOCK : SD_TREND_LOCK;
+        synchronized (lock) {
+            TenRule rule;
+            String note;
+            try {
+                TrendCache picked = pickTrend(digits, pl3);
+                rule = picked.rule;
+                note = picked.note;
+            } catch (RuntimeException ex) {
+                ex.printStackTrace();
+                rule = retarget(highRule(pl3), TREND_LOOK);
+                note = "近" + TREND_LOOK + " 回退现行规则";
+            }
+            TrendCache prev = pl3 ? plTrendCache : sdTrendCache;
+            TrendCache next = new TrendCache();
+            next.n = digits.length;
+            next.tail = code(digits[digits.length - 1]);
+            next.rule = rule;
+            next.note = note;
+            if (prev != null && prev.draws != null) {
+                next.draws = prev.draws;
+            }
+            if (pl3) {
+                plTrendCache = next;
+            } else {
+                sdTrendCache = next;
+            }
+            String nextBets = csv(clipTo(tenTickets(digits, digits.length, pl3, rule), TREND_OUT));
+            System.out.println((pl3 ? "排列三" : "福彩3D") + " 大趋势三码 " + note + " 下期 " + nextBets);
+        }
+    }
+
+    public static void saveTrend(String path, boolean pl3) {
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null) {
+            return;
+        }
+        StringBuilder text = new StringBuilder();
+        if (cache.rule != null) {
+            TenRule rule = cache.rule;
+            text.append(rule.kind).append(' ').append(rule.window).append(' ')
+                    .append(rule.a).append(' ').append(rule.b).append(' ').append(rule.c).append(' ')
+                    .append(rule.pos).append(' ').append(rule.delta).append(' ')
+                    .append(String.format(Locale.ROOT, "%.4f", rule.decay)).append(' ')
+                    .append(rule.fresh).append(' ').append(rule.cut).append(' ').append(rule.keep).append('\n');
+            text.append(cache.note == null ? "" : cache.note).append('\n');
+        }
+        text.append("#issues\n");
+        if (cache.draws != null) {
+            for (TrendDraw draw : cache.draws) {
+                text.append(draw.qh == null ? "" : draw.qh).append('\t')
+                        .append(draw.bets == null ? "" : draw.bets).append('\t')
+                        .append(draw.realHm == null ? "" : draw.realHm).append('\n');
+            }
+        }
+        try {
+            Path file = Path.of(path);
+            if (file.getParent() != null) {
+                Files.createDirectories(file.getParent());
+            }
+            Files.writeString(file, text.toString(), StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    /** 15 点任务留下的下一期 15 注。已有未开奖记录则覆盖，不另起一行。 */
+    public static void saveTrendIssue(String path, boolean pl3, String qh, String bets) {
+        if (path == null || path.isBlank() || bets == null || bets.isBlank()) {
+            return;
+        }
+        Object lock = pl3 ? PL_TREND_LOCK : SD_TREND_LOCK;
+        synchronized (lock) {
+            TrendCache cache = ensureTrendCache(pl3);
+            String issue = qh == null ? "" : qh.trim();
+            TrendDraw hit = null;
+            for (int i = cache.draws.size() - 1; i >= 0; i--) {
+                TrendDraw draw = cache.draws.get(i);
+                if (!issue.isEmpty() && issue.equals(trimToEmpty(draw.qh))) {
+                    hit = draw;
+                    break;
+                }
+                if (trimToEmpty(draw.realHm).isEmpty()
+                        && (trimToEmpty(draw.qh).isEmpty() || issue.isEmpty() || issue.equals(trimToEmpty(draw.qh)))) {
+                    hit = draw;
+                    break;
+                }
+            }
+            if (hit == null) {
+                hit = new TrendDraw();
+                cache.draws.add(hit);
+            }
+            if (!issue.isEmpty()) {
+                hit.qh = issue;
+            }
+            hit.bets = bets;
+            trimTrendDraws(cache);
+            saveTrend(path, pl3);
+            System.out.println((pl3 ? "排列三" : "福彩3D") + " 大趋势三码 待开奖 " + trimToEmpty(hit.qh) + " " + bets);
+        }
+    }
+
+    /** 22 点任务把当期开奖号写到已保存的趋势三码上。 */
+    public static void writeTrendDraw(String path, boolean pl3, String qh, String realHm, String betsIfMissing) {
+        if (path == null || path.isBlank() || realHm == null || realHm.isBlank()) {
+            return;
+        }
+        Object lock = pl3 ? PL_TREND_LOCK : SD_TREND_LOCK;
+        synchronized (lock) {
+            TrendCache cache = ensureTrendCache(pl3);
+            String issue = qh == null ? "" : qh.trim();
+            String drawn = realHm.trim();
+            TrendDraw exact = null;
+            TrendDraw pending = null;
+            for (TrendDraw draw : cache.draws) {
+                if (!issue.isEmpty() && issue.equals(trimToEmpty(draw.qh))) {
+                    exact = draw;
+                }
+                if (trimToEmpty(draw.realHm).isEmpty()) {
+                    pending = draw;
+                }
+            }
+            TrendDraw hit = exact;
+            if (hit == null && pending != null
+                    && (trimToEmpty(pending.qh).isEmpty() || issue.equals(trimToEmpty(pending.qh)))) {
+                hit = pending;
+            }
+            if (hit == null) {
+                hit = new TrendDraw();
+                cache.draws.add(hit);
+            }
+            if (!issue.isEmpty()) {
+                hit.qh = issue;
+            }
+            if (trimToEmpty(hit.bets).isEmpty() && betsIfMissing != null && !betsIfMissing.isBlank()) {
+                hit.bets = betsIfMissing;
+            }
+            hit.realHm = drawn;
+            trimTrendDraws(cache);
+            saveTrend(path, pl3);
+            System.out.println((pl3 ? "排列三" : "福彩3D") + " 大趋势三码 开奖号 " + trimToEmpty(hit.qh) + " " + drawn);
+        }
+    }
+
+    public static String trendIssuedBets(boolean pl3, String qh) {
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null || cache.draws == null || qh == null || qh.isBlank()) {
+            return null;
+        }
+        String issue = qh.trim();
+        for (int i = cache.draws.size() - 1; i >= 0; i--) {
+            TrendDraw draw = cache.draws.get(i);
+            if (issue.equals(trimToEmpty(draw.qh)) && !trimToEmpty(draw.bets).isEmpty()) {
+                return draw.bets;
+            }
+        }
+        return null;
+    }
+
+    /** 尚未写入开奖号的一期。返回 [期号, 15注]，没有则 null。 */
+    public static String[] trendOpenIssue(boolean pl3) {
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null || cache.draws == null) {
+            return null;
+        }
+        for (int i = cache.draws.size() - 1; i >= 0; i--) {
+            TrendDraw draw = cache.draws.get(i);
+            if (trimToEmpty(draw.realHm).isEmpty() && !trimToEmpty(draw.bets).isEmpty()) {
+                return new String[]{trimToEmpty(draw.qh), draw.bets};
+            }
+        }
+        return null;
+    }
+
+    private static TrendCache ensureTrendCache(boolean pl3) {
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null) {
+            cache = new TrendCache();
+            if (pl3) {
+                plTrendCache = cache;
+            } else {
+                sdTrendCache = cache;
+            }
+        }
+        if (cache.draws == null) {
+            cache.draws = new ArrayList<>();
+        }
+        return cache;
+    }
+
+    private static void trimTrendDraws(TrendCache cache) {
+        while (cache.draws.size() > 400) {
+            cache.draws.remove(0);
+        }
+    }
+
+    private static String trimToEmpty(String s) {
+        return s == null ? "" : s.trim();
+    }
+
+    public static void loadTrend(String path, boolean pl3) {
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        Path file = Path.of(path);
+        if (!Files.exists(file)) {
+            return;
+        }
+        try {
+            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            if (lines.isEmpty()) {
+                return;
+            }
+            TrendCache cache = new TrendCache();
+            int start = 0;
+            String[] parts = lines.get(0).trim().split("\\s+");
+            if (parts.length >= 11 && !"#issues".equals(lines.get(0).trim())) {
+                TenRule rule = new TenRule(
+                        Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                        Integer.parseInt(parts[2]), Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+                        Integer.parseInt(parts[5]), Integer.parseInt(parts[6]));
+                rule.decay = Double.parseDouble(parts[7]);
+                rule.fresh = Integer.parseInt(parts[8]);
+                rule.cut = Integer.parseInt(parts[9]);
+                rule.keep = Integer.parseInt(parts[10]);
+                cache.rule = rule;
+                if (lines.size() > 1 && !"#issues".equals(lines.get(1).trim())) {
+                    cache.note = lines.get(1);
+                }
+                start = 1;
+            }
+            boolean issues = false;
+            for (int i = start; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                if ("#issues".equals(line.trim())) {
+                    issues = true;
+                    continue;
+                }
+                if (!issues) {
+                    continue;
+                }
+                String[] cols = line.split("\t", -1);
+                TrendDraw draw = new TrendDraw();
+                draw.qh = cols.length > 0 ? cols[0].trim() : "";
+                draw.bets = cols.length > 1 ? cols[1].trim() : "";
+                draw.realHm = cols.length > 2 ? cols[2].trim() : "";
+                cache.draws.add(draw);
+            }
+            if (cache.rule == null && cache.draws.isEmpty()) {
+                return;
+            }
+            if (pl3) {
+                plTrendCache = cache;
+            } else {
+                sdTrendCache = cache;
+            }
+            System.out.println((pl3 ? "排列三" : "福彩3D") + " 大趋势三码 已载入 "
+                    + (cache.note == null ? "" : cache.note) + " 记录" + cache.draws.size());
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    /** end 不含当期。end 等于开奖长度时，出的是下一期 15 注。没有已保存规则时返回空。 */
+    public static String trendCsv(int[][] digits, int end, boolean pl3) {
+        if (digits == null || end < 40) {
+            return "";
+        }
+        TenRule rule = trendRule(pl3);
+        if (rule == null) {
+            return "";
+        }
+        int at = Math.min(end, digits.length);
+        if (at < 40) {
+            return "";
+        }
+        return csv(clipTo(tenTickets(digits, at, pl3, rule), TREND_OUT));
+    }
+
     private static int[] shiftSanma(int[][] digits, int end, boolean pl3) {
         return nearSanma(digits, end, pl3);
     }
@@ -210,18 +543,18 @@ public final class Flow1000Ranker {
         return Arrays.copyOf(out, f);
     }
 
-    /** 近 20 期留下的 15 注规则。先比最新一期直选、组选，再比近 5 期，再比这 20 期。 */
+    /** 15 注，数据窗口 30 期。近 30 期直选多的留下，直选相同再留直选+组选。再往前 100 期至少 1 个直选。 */
     private static TenRule highRule(boolean pl3) {
         if (pl3) {
-            // 15 注把 398 收进直选。近 5 期还有 320 组选，597 在外面。近 20 期 1 直 5 组。前 20 期直选是 0。
-            TenRule rule = new TenRule(2, 20, 7, 7, 1, 2, 1);
+            // 热冷各半 30 期 3x2x6，衰减 0.92，热近冷二序 8，个位 -1。近 30 期 5 直 5 组，再往前 100 期 1 直 8 组。
+            TenRule rule = new TenRule(9, 30, 3, 2, 6, 2, -1);
             rule.decay = 0.92;
-            rule.fresh = 6;
-            rule.cut = 2;
+            rule.cut = 12;
+            rule.keep = 8;
             return rule;
         }
-        // 15 注把 190 收进直选。近 5 期还有 123 直选，085 和 382 在外面。近 20 期 2 直 4 组。前 20 期直选是 0。
-        TenRule rule = new TenRule(9, 20, 1, 7, 6, 1, 1);
+        // 热冷各半 30 期 4x5x2，热近冷分 8，十位 -1。近 30 期 4 直 7 组，再往前 100 期 1 直 7 组。
+        TenRule rule = new TenRule(9, 30, 4, 5, 2, 1, -1);
         rule.cut = 8;
         rule.keep = 8;
         return rule;
@@ -4421,8 +4754,16 @@ public final class Flow1000Ranker {
     }
 
     public static void main(String[] args) throws Exception {
-        int[][] sd = loadGame(true);
-        int[][] pl = loadGame(false);
+        boolean localOnly = false;
+        if (args != null) {
+            for (String arg : args) {
+                if ("local".equals(arg)) {
+                    localOnly = true;
+                }
+            }
+        }
+        int[][] sd = loadGame(true, localOnly);
+        int[][] pl = loadGame(false, localOnly);
         if (args != null && args.length > 0 && "lift10".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             sb.append("近10期走期。先出本期票，再试上期偏差和上期开奖邻域。直选更高才留下。\n");
@@ -4466,6 +4807,79 @@ public final class Flow1000Ranker {
             System.out.println(describe(false));
             System.out.println(csv(sanma(pl, true)));
             System.out.println(describe(true));
+            return;
+        }
+        if (args != null && args.length > 0 && "trend200".equals(args[0])) {
+            computeTrend(sd, false);
+            computeTrend(pl, true);
+            StringBuilder sb = new StringBuilder();
+            sb.append("大趋势三码 15 注。窗口 200 期，直选多的留下，直选相同再留直选+组选。\n");
+            sb.append("福彩3D ").append(trendNote(false)).append('\n');
+            sb.append("下期 ").append(trendCsv(sd, sd.length, false)).append('\n');
+            sb.append(marksN(sd, Math.max(40, sd.length - 30), sd.length, false, trendRule(false), TREND_OUT)).append('\n');
+            sb.append("排列三 ").append(trendNote(true)).append('\n');
+            sb.append("下期 ").append(trendCsv(pl, pl.length, true)).append('\n');
+            sb.append(marksN(pl, Math.max(40, pl.length - 30), pl.length, true, trendRule(true), TREND_OUT)).append('\n');
+            Path out = Path.of("reports/sanma_trend200.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "widen".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("15注。窗口改成10、30、40、60、100，仍按近100期直选、再按直选+组选留下。前100期核对。\n");
+            spanScan(sb, "福彩3D", sd, false);
+            spanScan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_widen.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "peek".equals(args[0])) {
+            peekRules(sd, false);
+            peekRules(pl, true);
+            return;
+        }
+        if (args != null && args.length > 0 && "mix30".equals(args[0])) {
+            mix30(sd, false);
+            mix30(pl, true);
+            return;
+        }
+        if (args != null && args.length > 0 && "w30".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("15注，数据窗口固定30期。近30期直选多的留下，直选相同再留直选+组选。再往前100期核对。\n");
+            w30Scan(sb, "福彩3D", sd, false);
+            w30Scan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_w30.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
+            return;
+        }
+        if (args != null && args.length > 0 && "replay3".equals(args[0])) {
+            replaySanma();
+            return;
+        }
+        if (args != null && args.length > 0 && "replaytrend".equals(args[0])) {
+            replayTrend();
+            return;
+        }
+        if (args != null && args.length > 0 && "replay".equals(args[0])) {
+            replayStored();
+            return;
+        }
+        if (args != null && args.length > 0 && "hits".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("15注。直选多的留下，直选相同再留直选+组选。近100期选规则，再往前100期核对。\n");
+            sb.append("组选次数含直选。相邻两期重合达到75%，或15注里有12注及以上相同，就不留。\n");
+            hitScan(sb, "福彩3D", sd, false);
+            hitScan(sb, "排列三", pl, true);
+            Path out = Path.of("reports/sanma_hits.txt");
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+            System.out.println(sb);
             return;
         }
         if (args != null && args.length > 0 && "c15".equals(args[0])) {
@@ -5551,11 +5965,1456 @@ public final class Flow1000Ranker {
     /** 近20期里，这几期的直选、组选排在整窗前面。 */
     private static final int SANMA_RECENT = 5;
 
+    private static final class TrendCache {
+        int n;
+        int tail;
+        TenRule rule;
+        String note;
+        List<TrendDraw> draws = new ArrayList<>();
+    }
+
+    private static final class TrendDraw {
+        String qh = "";
+        String bets = "";
+        String realHm = "";
+    }
+
+    private static final class TrendBoard {
+        int len;
+        int[] draw;
+        int[] prev;
+        double[][][] hot1;
+        double[][][] hotD;
+        double[][][] cold;
+        int[][][] ordH1;
+        int[][][] ordHD;
+        int[][][] ordC;
+        final int[] ids = new int[20];
+        final double[] scores = new double[20];
+        final int[] idsB = new int[20];
+        final double[] scoresB = new double[20];
+        final int[] merged = new int[15];
+        final boolean[] used = new boolean[1000];
+        final int[] touched = new int[48];
+        int touchedN;
+    }
+
+    private static int oneDigit(String s) {
+        if (s == null || s.isEmpty()) {
+            return 0;
+        }
+        char ch = s.trim().charAt(0);
+        return ch >= '0' && ch <= '9' ? ch - '0' : 0;
+    }
+
+    private static TenRule trendRule(boolean pl3) {
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        return cache == null ? null : cache.rule;
+    }
+
+    /**
+     * 15 注、近 200 期。先把格子快扫进短名单，再用和线上同一套出票把短名单的平移、尾部邻号重打分。
+     * 直选多的留下；直选相同再留直选+组选。组选含直选。
+     */
+    private static TrendCache pickTrend(int[][] digits, boolean pl3) {
+        long t0 = System.currentTimeMillis();
+        String name = pl3 ? "排列三" : "福彩3D";
+        int n = digits.length;
+        int from = Math.max(40, n - TREND_LOOK);
+        TrendBoard board = buildTrendBoard(digits, from, n);
+        List<TenRule> bases = trendBases();
+        System.out.println(name + " 大趋势基规则 " + bases.size() + " 窗口 " + board.len);
+        List<Hit30> top = new ArrayList<>();
+        List<Hit30> coldTop = new ArrayList<>();
+        List<Hit30> mixTop = new ArrayList<>();
+        int bi = 0;
+        for (TenRule base : bases) {
+            if ((bi++ % 800) == 0) {
+                System.out.println(name + " 快扫 " + bi + "/" + bases.size());
+            }
+            int[] zg = scoreTrendFast(board, base);
+            Hit30 worst = top.size() < 45 ? null : top.get(top.size() - 1);
+            if (hitRateBetter(zg[0], zg[1], worst)) {
+                keepTrend(top, trendHit(base, zg[0], zg[1]), 45);
+            }
+            if (base.kind == 3) {
+                Hit30 coldWorst = coldTop.size() < 8 ? null : coldTop.get(coldTop.size() - 1);
+                if (hitRateBetter(zg[0], zg[1], coldWorst)) {
+                    keepTrend(coldTop, trendHit(base, zg[0], zg[1]), 8);
+                }
+            } else if (base.kind == 9) {
+                Hit30 mixWorst = mixTop.size() < 10 ? null : mixTop.get(mixTop.size() - 1);
+                if (hitRateBetter(zg[0], zg[1], mixWorst)) {
+                    keepTrend(mixTop, trendHit(base, zg[0], zg[1]), 10);
+                }
+            }
+        }
+        System.out.println(name + " 快扫完成 " + (System.currentTimeMillis() - t0) + "ms，开始精确打分");
+        List<TenRule> seeds = new ArrayList<>();
+        addTrendSeeds(seeds, top);
+        addTrendSeeds(seeds, coldTop);
+        addTrendSeeds(seeds, mixTop);
+        seeds.add(retarget(highRule(pl3), TREND_LOOK));
+        addTrendChamps(seeds, pl3);
+        Hit30 best = null;
+        int exact = 0;
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (TenRule seed : seeds) {
+            List<TenRule> family = new ArrayList<>();
+            family.add(seed);
+            if (seed.kind == 2 || seed.kind == 9) {
+                TenRule second = new TenRule(9, TREND_LOOK, seed.a, seed.b, seed.c);
+                second.decay = seed.decay;
+                second.cut = 12;
+                second.keep = seed.keep > 0 ? seed.keep : 10;
+                family.add(second);
+            }
+            for (TenRule baseRule : family) {
+                int[] freshSet = (baseRule.cut == 8 || baseRule.cut == 12) ? new int[]{0} : new int[]{0, 6};
+                for (int fresh : freshSet) {
+                    for (int pos = -1; pos <= 2; pos++) {
+                        int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                        for (int delta : deltas) {
+                            TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                            String key = trendKey(rule);
+                            if (!seen.add(key)) {
+                                continue;
+                            }
+                            exact++;
+                            Hit30 hit = scoreTrendExact(digits, from, board, rule);
+                            if (best == null || trendBetter(hit, best)) {
+                                best = hit;
+                            }
+                        }
+                    }
+                }
+            }
+            if (exact > 0 && exact % 80 == 0) {
+                System.out.println(name + " 精确 " + exact + " 当前 " + best.zx + "直" + best.grp + "组");
+            }
+        }
+        if (best == null) {
+            TenRule rule = retarget(highRule(pl3), TREND_LOOK);
+            best = scoreTrendExact(digits, from, board, rule);
+        }
+        int checkAt = n - 1;
+        int[] viaTen = clipTo(tenTickets(digits, checkAt, pl3, best.rule), TREND_OUT);
+        int[] viaCache = clipTo(compose(digits, checkAt, trendBase(
+                best.rule.kind == 3 || best.rule.decay >= 0.999
+                        ? trendHot(digits, checkAt, 1) : trendHot(digits, checkAt, best.rule.decay),
+                trendCold(digits, checkAt), best.rule, code(digits[checkAt - 1])), best.rule), TREND_OUT);
+        if (!Arrays.equals(viaTen, viaCache)) {
+            System.out.println(name + " 大趋势出票不一致 " + csv(viaTen) + " / " + csv(viaCache));
+        }
+        TrendCache picked = new TrendCache();
+        picked.rule = best.rule;
+        picked.note = "近" + board.len + "期 " + best.zx + "个直选，" + best.grp + "个直选+组选 " + trendBody(best.rule);
+        System.out.println(name + " 大趋势留下 " + picked.note
+                + " 精确" + exact + " 耗时" + (System.currentTimeMillis() - t0) + "ms");
+        return picked;
+    }
+
+    /** 已经在 200 期上验过的规则。新搜索命中不超过它们时，仍留原来的。 */
+    private static void addTrendChamps(List<TenRule> seeds, boolean pl3) {
+        if (pl3) {
+            TenRule wide = new TenRule(9, TREND_LOOK, 3, 3, 2, 2, -1);
+            wide.decay = 0.92;
+            wide.cut = 12;
+            wide.keep = 8;
+            seeds.add(wide);
+            TenRule moved = new TenRule(9, TREND_LOOK, 3, 5, 4, 1, 1);
+            moved.cut = 2;
+            moved.fresh = 6;
+            seeds.add(moved);
+            TenRule hit = new TenRule(9, TREND_LOOK, 6, 5, 2, 2, 1);
+            hit.decay = 0.92;
+            hit.cut = 8;
+            hit.keep = 8;
+            seeds.add(hit);
+            return;
+        }
+        TenRule hot = new TenRule(2, TREND_LOOK, 8, 2, 4, 2, 1);
+        hot.cut = 2;
+        seeds.add(hot);
+        TenRule wide = new TenRule(2, TREND_LOOK, 4, 2, 4, 2, 1);
+        wide.cut = 2;
+        wide.fresh = 6;
+        seeds.add(wide);
+    }
+
+    private static void addTrendSeeds(List<TenRule> seeds, List<Hit30> top) {
+        for (Hit30 hit : top) {
+            seeds.add(hit.rule);
+        }
+    }
+
+    private static Hit30 trendHit(TenRule rule, int zx, int grp) {
+        Hit30 hit = new Hit30();
+        hit.rule = rule;
+        hit.zx = zx;
+        hit.grp = grp;
+        hit.slots = TREND_OUT;
+        return hit;
+    }
+
+    /** 直选多的更好；直选相同再比直选+组选。组选含直选。 */
+    private static boolean hitRateBetter(int zx, int grp, Hit30 other) {
+        if (other == null) {
+            return true;
+        }
+        if (zx != other.zx) {
+            return zx > other.zx;
+        }
+        return grp > other.grp;
+    }
+
+    private static boolean trendBetter(Hit30 a, Hit30 b) {
+        if (a.zx != b.zx) {
+            return a.zx > b.zx;
+        }
+        if (a.grp != b.grp) {
+            return a.grp > b.grp;
+        }
+        return a.overlap() < b.overlap();
+    }
+
+    private static void keepTrend(List<Hit30> top, Hit30 hit, int limit) {
+        int i = 0;
+        while (i < top.size() && trendBetter(top.get(i), hit)) {
+            i++;
+        }
+        top.add(i, hit);
+        if (top.size() > limit) {
+            top.remove(top.size() - 1);
+        }
+    }
+
+    private static String trendKey(TenRule rule) {
+        return rule.kind + ":" + rule.window + ":" + rule.a + ":" + rule.b + ":" + rule.c
+                + ":" + rule.decay + ":" + rule.cut + ":" + rule.keep
+                + ":" + rule.pos + ":" + rule.delta + ":" + rule.fresh;
+    }
+
+    private static TenRule retarget(TenRule src, int window) {
+        TenRule rule = new TenRule(src.kind, window, src.a, src.b, src.c, src.pos, src.delta);
+        rule.decay = src.decay;
+        rule.fresh = src.fresh;
+        rule.cut = src.cut;
+        rule.keep = src.keep;
+        return rule;
+    }
+
+    private static String trendBody(TenRule rule) {
+        String body = switch (rule.kind) {
+            case 2 -> "热位" + rule.window + " " + rule.a + "x" + rule.b + "x" + rule.c;
+            case 3 -> "冷位" + rule.window + " " + rule.a + "x" + rule.b + "x" + rule.c;
+            case 9 -> "热冷各半" + rule.window + " " + rule.a + "x" + rule.b + "x" + rule.c;
+            default -> "规则" + rule.kind;
+        };
+        if (rule.decay < 0.999) {
+            body += String.format(Locale.ROOT, " 衰减%.2f", rule.decay);
+        }
+        if (rule.cut == 1) {
+            body += " 高分";
+        } else if (rule.cut == 2) {
+            body += " 近上期";
+        } else if (rule.cut == 6) {
+            body += " 跳号优先";
+        } else if (rule.cut == 8) {
+            body += " 热近冷分" + (rule.keep > 0 ? rule.keep : 10);
+        } else if (rule.cut == 12) {
+            body += " 热近冷二序" + (rule.keep > 0 ? rule.keep : 10);
+        }
+        if (rule.pos >= 0) {
+            body += (rule.pos == 0 ? " 百" : rule.pos == 1 ? " 十" : " 个") + (rule.delta > 0 ? "+1" : "-1");
+        }
+        if (rule.fresh > 0) {
+            body += " 尾" + rule.fresh + "上期邻域";
+        }
+        return body;
+    }
+
+    private static TrendBoard buildTrendBoard(int[][] digits, int from, int end) {
+        int len = Math.max(0, end - from);
+        TrendBoard board = new TrendBoard();
+        board.len = len;
+        board.draw = new int[len];
+        board.prev = new int[len];
+        board.hot1 = new double[len][][];
+        board.hotD = new double[len][][];
+        board.cold = new double[len][][];
+        board.ordH1 = new int[len][3][10];
+        board.ordHD = new int[len][3][10];
+        board.ordC = new int[len][3][10];
+        for (int i = 0; i < len; i++) {
+            int t = from + i;
+            board.draw[i] = code(digits[t]);
+            board.prev[i] = t > 0 ? code(digits[t - 1]) : 0;
+            board.hot1[i] = trendHot(digits, t, 1);
+            board.hotD[i] = trendHot(digits, t, 0.92);
+            board.cold[i] = trendCold(digits, t);
+            for (int p = 0; p < 3; p++) {
+                orderDigits(board.hot1[i][p], board.ordH1[i][p]);
+                orderDigits(board.hotD[i][p], board.ordHD[i][p]);
+                orderDigits(board.cold[i][p], board.ordC[i][p]);
+            }
+        }
+        return board;
+    }
+
+    private static double[][] trendHot(int[][] digits, int end, double decay) {
+        double[][] pos = new double[3][10];
+        int from = Math.max(0, end - TREND_LOOK);
+        int len = end - from;
+        for (int i = 0; i < len; i++) {
+            double wgt = decay >= 0.999 ? 1.0 : Math.pow(decay, len - 1 - i);
+            int t = from + i;
+            for (int p = 0; p < 3; p++) {
+                pos[p][digits[t][p]] += wgt;
+            }
+        }
+        return pos;
+    }
+
+    private static double[][] trendCold(int[][] digits, int end) {
+        double[][] pos = new double[3][10];
+        for (int p = 0; p < 3; p++) {
+            int[] om = omission(digits, end, p);
+            for (int x = 0; x < 10; x++) {
+                pos[p][x] = om[x];
+            }
+        }
+        return pos;
+    }
+
+    private static void orderDigits(double[] s, int[] order) {
+        for (int i = 0; i < 10; i++) {
+            order[i] = i;
+        }
+        for (int i = 1; i < 10; i++) {
+            int v = order[i];
+            double sv = s[v];
+            int j = i;
+            while (j > 0) {
+                int u = order[j - 1];
+                double su = s[u];
+                if (su > sv || (su == sv && u < v)) {
+                    break;
+                }
+                order[j] = u;
+                j--;
+            }
+            order[j] = v;
+        }
+    }
+
+    /** 和 tenTickets 同一套出票，位置分用已经算好的 200 期窗口。 */
+    private static Hit30 scoreTrendExact(int[][] digits, int from, TrendBoard board, TenRule rule) {
+        Hit30 hit = new Hit30();
+        hit.rule = rule;
+        hit.slots = TREND_OUT;
+        int[] prevBets = null;
+        int stickyAt = Math.max(8, (TREND_OUT * 4) / 5);
+        double[][][] hotAll = rule.kind == 3 ? board.cold : (rule.decay < 0.999 ? board.hotD : board.hot1);
+        for (int i = 0; i < board.len; i++) {
+            int[] base = trendBase(hotAll[i], board.cold[i], rule, board.prev[i]);
+            int[] bets = clipTo(compose(digits, from + i, base, rule), TREND_OUT);
+            int id = board.draw[i];
+            boolean direct = has(bets, id);
+            if (direct) {
+                hit.zx++;
+            }
+            if (groupHit(bets, id)) {
+                hit.grp++;
+            }
+            if (prevBets != null) {
+                int share = intersect(prevBets, bets);
+                hit.share += share;
+                hit.pairs++;
+                if (share >= stickyAt) {
+                    hit.sticky++;
+                }
+            }
+            prevBets = bets;
+        }
+        rule.zx = hit.zx;
+        rule.grp = hit.grp;
+        return hit;
+    }
+
+    private static int[] trendBase(double[][] hot, double[][] cold, TenRule rule, int last) {
+        int[] take = {Math.min(10, rule.a), Math.min(10, rule.b), Math.min(10, rule.c)};
+        if (rule.kind == 9) {
+            int keepHot = rule.keep > 0 ? rule.keep : 10;
+            int hotCut = (rule.cut == 8 || rule.cut == 12) ? 2 : rule.cut;
+            int coldCut = (rule.cut == 8 || rule.cut == 12) ? 1 : rule.cut;
+            int[] hotBets = pickCut(hot, take, last, hotCut);
+            int[] coldBets = rule.cut == 12 ? scoreAndSecond(cold, take) : pickCut(cold, take, last, coldCut);
+            return takeFill(hotBets, coldBets, keepHot);
+        }
+        double[][] pos = rule.kind == 3 ? cold : hot;
+        return pickCut(pos, take, last, rule.cut);
+    }
+
+    private static int[] pickCut(double[][] pos, int[] take, int last, int cut) {
+        if (cut == 6) {
+            return farFirst(pos, take, last);
+        }
+        if (cut <= 0) {
+            return boxCross(pos, take);
+        }
+        return boxPick(pos, take, last, cut);
+    }
+
+    private static int[] scoreTrendFast(TrendBoard board, TenRule rule) {
+        boolean coldRule = rule.kind == 3;
+        int[][][] ord = coldRule ? board.ordC : (rule.decay < 0.999 ? board.ordHD : board.ordH1);
+        double[][][] pos = coldRule ? board.cold : (rule.decay < 0.999 ? board.hotD : board.hot1);
+        int[][][] ordCold = board.ordC;
+        double[][][] posCold = board.cold;
+        int aN = Math.min(10, Math.max(1, rule.a));
+        int bN = Math.min(10, Math.max(1, rule.b));
+        int cN = Math.min(10, Math.max(1, rule.c));
+        int zx = 0;
+        int grp = 0;
+        int[][] kept = new int[board.len][];
+        for (int i = 0; i < board.len; i++) {
+            int n;
+            if (rule.kind == 9) {
+                int hotCut = (rule.cut == 8 || rule.cut == 12) ? 2 : rule.cut;
+                int coldCut = (rule.cut == 8 || rule.cut == 12) ? 1 : rule.cut;
+                int keep = rule.keep > 0 ? rule.keep : 10;
+                int hotN = fillBox(ord[i], pos[i], aN, bN, cN, board.prev[i], hotCut, board.ids, board.scores);
+                int coldN = fillBox(ordCold[i], posCold[i], aN, bN, cN, board.prev[i], coldCut, board.idsB, board.scoresB);
+                n = merge15(board, board.ids, hotN, board.idsB, coldN, keep);
+            } else {
+                int got = fillBox(ord[i], pos[i], aN, bN, cN, board.prev[i], rule.cut, board.ids, board.scores);
+                n = Math.min(TREND_OUT, got);
+                System.arraycopy(board.ids, 0, board.merged, 0, n);
+            }
+            kept[i] = Arrays.copyOf(board.merged, n);
+            int id = board.draw[i];
+            int g = groupKey(id);
+            boolean direct = false;
+            boolean group = false;
+            for (int k = 0; k < n; k++) {
+                if (board.merged[k] == id) {
+                    direct = true;
+                }
+                if (groupKey(board.merged[k]) == g) {
+                    group = true;
+                }
+            }
+            if (direct) {
+                zx++;
+            }
+            if (group) {
+                grp++;
+            }
+        }
+        int bestZ = zx;
+        int bestG = grp;
+        for (int slot = 0; slot < 3; slot++) {
+            for (int delta = -1; delta <= 1; delta += 2) {
+                int dh = slot == 0 ? delta : 0;
+                int dt = slot == 1 ? delta : 0;
+                int du = slot == 2 ? delta : 0;
+                int sz = 0;
+                int sg = 0;
+                for (int i = 0; i < board.len; i++) {
+                    int id = board.draw[i];
+                    int g = groupKey(id);
+                    boolean direct = false;
+                    boolean group = false;
+                    int[] row = kept[i];
+                    for (int k = 0; k < row.length; k++) {
+                        int sid = shiftId(row[k], dh, dt, du, true);
+                        if (sid == id) {
+                            direct = true;
+                        }
+                        if (groupKey(sid) == g) {
+                            group = true;
+                        }
+                    }
+                    if (direct) {
+                        sz++;
+                    }
+                    if (group) {
+                        sg++;
+                    }
+                }
+                if (sz > bestZ || (sz == bestZ && sg > bestG)) {
+                    bestZ = sz;
+                    bestG = sg;
+                }
+            }
+        }
+        return new int[]{bestZ, bestG};
+    }
+
+    private static int fillBox(int[][] ord, double[][] pos, int aN, int bN, int cN, int last, int cut,
+                               int[] ids, double[] scores) {
+        int n = 0;
+        int lh = last / 100;
+        int lt = (last / 10) % 10;
+        int lu = last % 10;
+        for (int i = 0; i < aN; i++) {
+            int x = ord[0][i];
+            for (int j = 0; j < bN; j++) {
+                int y = ord[1][j];
+                for (int k = 0; k < cN; k++) {
+                    int z = ord[2][k];
+                    int id = x * 100 + y * 10 + z;
+                    double score;
+                    if (cut == 2) {
+                        score = -(Math.abs(x - lh) + Math.abs(y - lt) + Math.abs(z - lu));
+                    } else if (cut == 6) {
+                        int ham = (x != lh ? 1 : 0) + (y != lt ? 1 : 0) + (z != lu ? 1 : 0);
+                        score = (ham >= 2 ? 1000 : 0) + pos[0][x] + pos[1][y] + pos[2][z];
+                    } else {
+                        score = pos[0][x] + pos[1][y] + pos[2][z];
+                    }
+                    n = consider(ids, scores, n, 20, id, score);
+                }
+            }
+        }
+        return n;
+    }
+
+    private static int consider(int[] ids, double[] scores, int n, int limit, int id, double score) {
+        int pos = 0;
+        while (pos < n) {
+            double s = scores[pos];
+            if (score < s || (score == s && id >= ids[pos])) {
+                pos++;
+                continue;
+            }
+            break;
+        }
+        if (pos >= limit) {
+            return n;
+        }
+        int end = n < limit ? n : limit - 1;
+        for (int i = end; i > pos; i--) {
+            ids[i] = ids[i - 1];
+            scores[i] = scores[i - 1];
+        }
+        ids[pos] = id;
+        scores[pos] = score;
+        return n < limit ? n + 1 : n;
+    }
+
+    private static int merge15(TrendBoard board, int[] hot, int hotN, int[] cold, int coldN, int keep) {
+        clearUsed(board);
+        int f = 0;
+        int n1 = Math.min(Math.max(keep, 0), hotN);
+        for (int i = 0; i < n1 && f < TREND_OUT; i++) {
+            f = pushBet(board, hot[i], f);
+        }
+        for (int i = 0; i < coldN && f < TREND_OUT; i++) {
+            f = pushBet(board, cold[i], f);
+        }
+        for (int i = n1; i < hotN && f < TREND_OUT; i++) {
+            f = pushBet(board, hot[i], f);
+        }
+        clearUsed(board);
+        return f;
+    }
+
+    private static int pushBet(TrendBoard board, int id, int f) {
+        if (id < 0 || board.used[id] || f >= TREND_OUT) {
+            return f;
+        }
+        board.used[id] = true;
+        if (board.touchedN < board.touched.length) {
+            board.touched[board.touchedN++] = id;
+        }
+        board.merged[f] = id;
+        return f + 1;
+    }
+
+    private static void clearUsed(TrendBoard board) {
+        for (int i = 0; i < board.touchedN; i++) {
+            board.used[board.touched[i]] = false;
+        }
+        board.touchedN = 0;
+    }
+
+    private static List<TenRule> trendBases() {
+        List<TenRule> out = new ArrayList<>();
+        int w = TREND_LOOK;
+        double[] decays = {1, 0.92};
+        int[] cuts = {1, 2, 6};
+        // 每位至少 2 个数字。只留 1 个时，15 注的这一位会完全一样。
+        for (int a = 2; a <= 8; a++) {
+            for (int b = 2; b <= 8; b++) {
+                for (int c = 2; c <= 8; c++) {
+                    int prod = a * b * c;
+                    if (prod < 15 || prod > 64) {
+                        continue;
+                    }
+                    addTrendShape(out, w, a, b, c, decays, cuts);
+                }
+            }
+        }
+        int[][] wide = {{10, 3, 2}, {10, 2, 3}, {3, 10, 2}, {2, 10, 3}, {3, 2, 10}, {2, 3, 10}};
+        for (int[] sh : wide) {
+            addTrendShape(out, w, sh[0], sh[1], sh[2], decays, cuts);
+        }
+        return out;
+    }
+
+    private static void addTrendShape(List<TenRule> out, int w, int a, int b, int c, double[] decays, int[] cuts) {
+        for (double decay : decays) {
+            for (int cut : cuts) {
+                TenRule hot = new TenRule(2, w, a, b, c);
+                hot.decay = decay;
+                hot.cut = cut;
+                out.add(hot);
+            }
+        }
+        for (int cut : cuts) {
+            TenRule cold = new TenRule(3, w, a, b, c);
+            cold.cut = cut;
+            out.add(cold);
+        }
+        int[] keeps = {8, 10, 12};
+        for (double decay : decays) {
+            for (int cut : cuts) {
+                TenRule mix = new TenRule(9, w, a, b, c);
+                mix.decay = decay;
+                mix.cut = cut;
+                out.add(mix);
+            }
+            for (int keep : keeps) {
+                TenRule mix = new TenRule(9, w, a, b, c);
+                mix.decay = decay;
+                mix.cut = 8;
+                mix.keep = keep;
+                out.add(mix);
+            }
+        }
+    }
+
     private static int[] clipSanma(int[] bets) {
         if (bets == null || bets.length <= SANMA_OUT) {
             return bets == null ? new int[0] : bets;
         }
         return Arrays.copyOf(bets, SANMA_OUT);
+    }
+
+    /**
+     * 用当前三码规则和大趋势规则，按开奖前的历史重算已保存的预测。
+     * 三码写回对比表的推荐号码。大趋势写下最近 200 期，每期带上已开号码。
+     */
+    private static void replayStored() throws Exception {
+        replayGame("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "D:/彩票/3D大趋势.txt", "3D比对结果", true);
+        replayGame("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "D:/彩票/排列三大趋势.txt", "排列三比对结果", true);
+    }
+
+    /** 只重写大趋势最近 200 期，不动三码对比表。 */
+    private static void replayTrend() {
+        writeTrendHistory("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
+        writeTrendHistory("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三大趋势.txt");
+    }
+
+    private static void writeTrendHistory(String name, boolean pl3, String histFile, String trendFile) {
+        List<Hm> history = readHistory(histFile);
+        int[][] digits = digitsOf(history);
+        computeTrend(digits, pl3);
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null || cache.rule == null) {
+            System.out.println(name + " 大趋势没有规则");
+            return;
+        }
+        cache.draws = new ArrayList<>();
+        int from = Math.max(40, digits.length - TREND_LOOK);
+        int trendZx = 0;
+        int trendGrp = 0;
+        for (int i = from; i < digits.length; i++) {
+            TrendDraw draw = new TrendDraw();
+            Hm hm = history.get(i);
+            draw.qh = hm.getQh() == null ? "" : hm.getQh().trim();
+            draw.bets = trendCsv(digits, i, pl3);
+            draw.realHm = String.format(Locale.ROOT, "%03d", code(digits[i]));
+            cache.draws.add(draw);
+            int[] ids = parseIds(draw.bets);
+            int id = code(digits[i]);
+            if (hasId(ids, id)) {
+                trendZx++;
+            }
+            if (groupHit(ids, id)) {
+                trendGrp++;
+            }
+        }
+        saveTrend(trendFile, pl3);
+        System.out.println(name + " 大趋势写下 " + cache.draws.size() + " 期。"
+                + trendNote(pl3) + "。这 " + cache.draws.size() + " 期里 "
+                + trendZx + " 个直选，" + trendGrp + " 个直选+组选");
+        System.out.println(name + " 近12" + marksN(digits, Math.max(from, digits.length - 12), digits.length, pl3, cache.rule, TREND_OUT));
+    }
+
+    /** 只重写三码推荐号码，不动大趋势文件。 */
+    private static void replaySanma() throws Exception {
+        replayGame("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "D:/彩票/3D大趋势.txt", "3D比对结果", false);
+        replayGame("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "D:/彩票/排列三大趋势.txt", "排列三比对结果", false);
+    }
+
+    private static void replayGame(String name, boolean pl3, String histFile, String compareFile,
+                                   String trendFile, String sheet, boolean writeTrend) throws Exception {
+        List<Hm> history = readHistory(histFile);
+        int[][] digits = digitsOf(history);
+        System.out.println(name + " 开奖 " + digits.length + " 期，规则 " + highRule(pl3).text());
+        List<CompareVO> rows = EasyExcel.read(compareFile).head(CompareVO.class).sheet().doReadSync();
+        Map<String, Integer> qhIndex = new HashMap<>();
+        Map<String, Integer> realIndex = new HashMap<>();
+        for (int i = 0; i < history.size(); i++) {
+            Hm hm = history.get(i);
+            if (hm.getQh() != null && !hm.getQh().isBlank()) {
+                qhIndex.put(hm.getQh().trim(), i);
+            }
+            realIndex.put(padCode(hm.toString()), i);
+        }
+        int changed = 0;
+        int scored = 0;
+        int zx = 0;
+        int grp = 0;
+        int missed = 0;
+        for (CompareVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            int idx = histIndex(row.getQh(), row.getRealHm(), qhIndex, realIndex, digits.length);
+            if (idx < 40) {
+                missed++;
+                continue;
+            }
+            String bets = csv(clipSanma(tenTickets(digits, idx, pl3, highRule(pl3))));
+            if (!bets.equals(row.getAiRecommendHm() == null ? "" : row.getAiRecommendHm().trim())) {
+                changed++;
+            }
+            row.setAiRecommendHm(bets);
+            int id = codeOf(row.getRealHm());
+            if (id < 0) {
+                continue;
+            }
+            scored++;
+            int[] ids = parseIds(bets);
+            if (hasId(ids, id)) {
+                zx++;
+            }
+            if (groupHit(ids, id)) {
+                grp++;
+            }
+        }
+        Path target = Path.of(compareFile);
+        Path tmp = Path.of(compareFile + ".writing.xlsx");
+        EasyExcel.write(tmp.toString(), CompareVO.class).sheet(sheet).doWrite(rows);
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        System.out.println(name + " 三码写回 " + rows.size() + " 行，改了 " + changed + " 行，对不上期号 " + missed
+                + "。已开 " + scored + " 期里 " + zx + " 个直选，" + grp + " 个直选+组选");
+        System.out.println(name + " 近8" + marksN(digits, Math.max(40, digits.length - 8), digits.length, pl3, highRule(pl3), SANMA_OUT));
+        if (!writeTrend) {
+            return;
+        }
+
+        computeTrend(digits, pl3);
+        TrendCache cache = pl3 ? plTrendCache : sdTrendCache;
+        if (cache == null) {
+            System.out.println(name + " 大趋势没有规则");
+            return;
+        }
+        cache.draws = new ArrayList<>();
+        int from = Math.max(40, digits.length - TREND_LOOK);
+        int trendZx = 0;
+        int trendGrp = 0;
+        int trendN = 0;
+        for (int i = from; i < digits.length; i++) {
+            TrendDraw draw = new TrendDraw();
+            Hm hm = history.get(i);
+            draw.qh = hm.getQh() == null ? "" : hm.getQh().trim();
+            draw.bets = trendCsv(digits, i, pl3);
+            draw.realHm = String.format(Locale.ROOT, "%03d", code(digits[i]));
+            cache.draws.add(draw);
+            int[] ids = parseIds(draw.bets);
+            int id = code(digits[i]);
+            trendN++;
+            if (hasId(ids, id)) {
+                trendZx++;
+            }
+            if (groupHit(ids, id)) {
+                trendGrp++;
+            }
+        }
+        saveTrend(trendFile, pl3);
+        System.out.println(name + " 大趋势写下 " + cache.draws.size() + " 期。"
+                + trendNote(pl3) + "。这 " + trendN + " 期里 " + trendZx + " 个直选，" + trendGrp + " 个直选+组选");
+    }
+
+    private static List<Hm> readHistory(String file) {
+        List<Hm> raw = EasyExcel.read(file).head(Hm.class).sheet().doReadSync();
+        List<Hm> out = new ArrayList<>();
+        for (Hm hm : raw) {
+            if (hm == null) {
+                continue;
+            }
+            String a = oneCharDigit(hm.getQ1());
+            String b = oneCharDigit(hm.getQ2());
+            String c = oneCharDigit(hm.getQ3());
+            if (a == null || b == null || c == null) {
+                continue;
+            }
+            out.add(Hm.builder().qh(hm.getQh()).q1(a).q2(b).q3(c).build());
+        }
+        return out;
+    }
+
+    private static String oneCharDigit(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        char ch = s.trim().charAt(s.trim().length() - 1);
+        return ch >= '0' && ch <= '9' ? String.valueOf(ch) : null;
+    }
+
+    private static int histIndex(String qh, String real, Map<String, Integer> qhIndex,
+                                 Map<String, Integer> realIndex, int n) {
+        if (qh != null && !qh.isBlank()) {
+            Integer ix = qhIndex.get(qh.trim());
+            if (ix != null) {
+                return ix;
+            }
+        }
+        if (real != null && !real.isBlank()) {
+            Integer ix = realIndex.get(padCode(real));
+            if (ix != null) {
+                return ix;
+            }
+            return -1;
+        }
+        return n;
+    }
+
+    private static String padCode(String s) {
+        if (s == null) {
+            return "000";
+        }
+        String t = s.trim();
+        if (t.length() >= 3) {
+            return t.substring(t.length() - 3);
+        }
+        return "0".repeat(3 - t.length()) + t;
+    }
+
+    private static int codeOf(String real) {
+        if (real == null || real.isBlank()) {
+            return -1;
+        }
+        String t = padCode(real);
+        if (t.length() != 3 || !Character.isDigit(t.charAt(0))
+                || !Character.isDigit(t.charAt(1)) || !Character.isDigit(t.charAt(2))) {
+            return -1;
+        }
+        return Integer.parseInt(t);
+    }
+
+    private static int[] parseIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return new int[0];
+        }
+        String[] parts = csv.split(",");
+        int[] ids = new int[parts.length];
+        int n = 0;
+        for (String part : parts) {
+            String t = part.trim();
+            if (t.length() != 3) {
+                continue;
+            }
+            ids[n++] = Integer.parseInt(t);
+        }
+        return n == ids.length ? ids : Arrays.copyOf(ids, n);
+    }
+
+    private static boolean hasId(int[] ids, int id) {
+        for (int p : ids) {
+            if (p == id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 近 100 期按直选、再按直选+组选留下。前 100 期用来丢掉只贴着近窗的规则。 */
+    private static void hitScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 100);
+        int priorFrom = Math.max(40, from - 100);
+        sb.append("===== ").append(name).append(" =====\n");
+        TenRule current = highRule(pl3);
+        Hit30 now = scoreLookN(digits, from, n, pl3, current, SANMA_OUT);
+        int[] priorNow = countLookN(digits, priorFrom, from, pl3, current, SANMA_OUT);
+        sb.append(String.format(Locale.ROOT, "现行 近100 %d直%d组 前100 %d直%d组 %s%n",
+                now.zx, now.grp, priorNow[0], priorNow[1], current.text()));
+        List<TenRule> bases = scanBases();
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<Hit30> top = new ArrayList<>();
+        int bi = 0;
+        for (TenRule baseRule : bases) {
+            if ((bi++ % 400) == 0) {
+                System.out.println(name + " 命中 " + bi + "/" + bases.size());
+            }
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            int[] freshSet = (baseRule.cut == 8 || baseRule.cut == 12) ? new int[]{0} : new int[]{0, 6};
+            for (int fresh : freshSet) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCacheN(digits, times, cache, rule, SANMA_OUT);
+                        if (hit.sticky > 0 || hit.overlap() >= 0.75 || hit.zx < 1) {
+                            continue;
+                        }
+                        keepCount(top, hit, 12);
+                    }
+                }
+            }
+        }
+        fillPrior(digits, priorFrom, from, pl3, top, SANMA_OUT);
+        top.sort(Flow1000Ranker::countOrder);
+        sb.append("---- 直选优先 ----\n");
+        int shown = 0;
+        for (Hit30 hit : top) {
+            if (shown >= 8) {
+                break;
+            }
+            sb.append(String.format(Locale.ROOT, "近100 %d直%d组 前100 %d直%d组 重合%.0f%% %s%n",
+                    hit.zx, hit.grp, hit.priorZ, hit.priorG, hit.overlap() * 100, hit.rule.text()));
+            shown++;
+        }
+        Hit30 lock = null;
+        for (Hit30 hit : top) {
+            if (hit.priorZ < 1) {
+                continue;
+            }
+            if (lock == null || countOrder(hit, lock) < 0) {
+                lock = hit;
+            }
+        }
+        if (lock == null && !top.isEmpty()) {
+            lock = top.get(0);
+        }
+        if (lock == null) {
+            sb.append("没有可用规则。\n");
+            return;
+        }
+        sb.append("留下 ").append(lock.rule.text()).append('\n');
+        sb.append(String.format(Locale.ROOT, "近100 %d直%d组 前100 %d直%d组 重合%.0f%%%n",
+                lock.zx, lock.grp, lock.priorZ, lock.priorG, lock.overlap() * 100));
+        sb.append("下一期15注 ").append(csv(clipSanma(tenTickets(digits, n, pl3, lock.rule)))).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "LOCKHIT kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d zx=%d grp=%d priorZ=%d priorG=%d%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut, lock.rule.keep,
+                lock.zx, lock.grp, lock.priorZ, lock.priorG));
+    }
+
+    private static int countOrder(Hit30 a, Hit30 b) {
+        if (a.zx != b.zx) {
+            return Integer.compare(b.zx, a.zx);
+        }
+        if (a.grp != b.grp) {
+            return Integer.compare(b.grp, a.grp);
+        }
+        if (a.priorZ != b.priorZ) {
+            return Integer.compare(b.priorZ, a.priorZ);
+        }
+        if (a.priorG != b.priorG) {
+            return Integer.compare(b.priorG, a.priorG);
+        }
+        return Double.compare(a.overlap(), b.overlap());
+    }
+
+    private static void keepCount(List<Hit30> top, Hit30 hit, int limit) {
+        top.add(hit);
+        top.sort(Flow1000Ranker::countOrder);
+        while (top.size() > limit) {
+            top.remove(top.size() - 1);
+        }
+    }
+
+    /** 对照几条直选相同的规则，看最近几期谁还能中，并试按开奖前 30 期换规则。 */
+    private static void peekRules(int[][] digits, boolean pl3) {
+        List<TenRule> rules = pl3 ? plPeek() : sdPeek();
+        int n = digits.length;
+        int from = Math.max(40, n - 115);
+        System.out.println("===== " + (pl3 ? "排列三" : "福彩3D") + " =====");
+        for (TenRule rule : rules) {
+            int[] hit = countLookN(digits, from, n, pl3, rule, SANMA_OUT);
+            System.out.println(hit[0] + "直" + hit[1] + "组 近12"
+                    + marksN(digits, Math.max(from, n - 12), n, pl3, rule, SANMA_OUT)
+                    + " " + rule.text());
+        }
+        int zx = 0;
+        int grp = 0;
+        int nper = 0;
+        for (int t = from; t < n; t++) {
+            TenRule picked = rules.get(0);
+            int bestZ = -1;
+            int bestG = -1;
+            int selFrom = Math.max(40, t - 30);
+            for (TenRule rule : rules) {
+                int[] hit = countLookN(digits, selFrom, t, pl3, rule, SANMA_OUT);
+                if (hit[0] > bestZ || (hit[0] == bestZ && hit[1] > bestG)) {
+                    bestZ = hit[0];
+                    bestG = hit[1];
+                    picked = rule;
+                }
+            }
+            int[] bets = clipSanma(tenTickets(digits, t, pl3, picked));
+            int id = code(digits[t]);
+            nper++;
+            if (has(bets, id)) {
+                zx++;
+            }
+            if (groupHit(bets, id)) {
+                grp++;
+            }
+        }
+        System.out.println("开奖前30期换规则 " + nper + " 期 " + zx + "直" + grp + "组");
+    }
+
+    private static List<TenRule> sdPeek() {
+        List<TenRule> rules = new ArrayList<>();
+        TenRule a = new TenRule(9, 30, 7, 2, 2, 1, -1);
+        a.decay = 0.92;
+        a.cut = 2;
+        rules.add(a);
+        TenRule b = new TenRule(9, 10, 2, 3, 5, 0, 1);
+        b.cut = 2;
+        rules.add(b);
+        TenRule c = new TenRule(9, 30, 7, 2, 2, 1, -1);
+        c.decay = 0.92;
+        c.cut = 2;
+        c.fresh = 6;
+        rules.add(c);
+        TenRule d = new TenRule(9, 20, 6, 3, 2, 1, -1);
+        d.cut = 8;
+        d.keep = 8;
+        rules.add(d);
+        TenRule e = new TenRule(9, 20, 3, 4, 5, 1, 1);
+        e.decay = 0.92;
+        e.cut = 2;
+        e.fresh = 6;
+        rules.add(e);
+        return rules;
+    }
+
+    private static List<TenRule> plPeek() {
+        List<TenRule> rules = new ArrayList<>();
+        TenRule a = new TenRule(9, 100, 3, 3, 3, 0, -1);
+        a.cut = 2;
+        rules.add(a);
+        TenRule b = new TenRule(9, 60, 3, 5, 4, 1, 1);
+        b.cut = 2;
+        b.fresh = 6;
+        rules.add(b);
+        TenRule c = new TenRule(9, 60, 3, 5, 4, 1, 1);
+        c.cut = 2;
+        rules.add(c);
+        TenRule d = new TenRule(9, 20, 3, 4, 5, 1, 1);
+        d.decay = 0.92;
+        d.cut = 2;
+        d.fresh = 6;
+        rules.add(d);
+        TenRule e = new TenRule(9, 30, 3, 5, 4, 1, 1);
+        e.decay = 0.92;
+        e.cut = 2;
+        e.fresh = 6;
+        rules.add(e);
+        return rules;
+    }
+
+    /** 30 期窗口里，每期用再往前 20 期直选最多的规则出票，并试两条规则拼 15 注。 */
+    private static void mix30(int[][] digits, boolean pl3) {
+        List<TenRule> rules = direct30(pl3);
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int priorFrom = Math.max(40, from - 30);
+        System.out.println("===== " + (pl3 ? "排列三" : "福彩3D") + " =====");
+        for (TenRule rule : rules) {
+            int[] hit = countLookN(digits, from, n, pl3, rule, SANMA_OUT);
+            System.out.println("固定 " + hit[0] + "直" + hit[1] + "组 " + rule.text());
+        }
+        int[] one = switch30(digits, from, n, pl3, rules, false);
+        int[] blend = switch30(digits, from, n, pl3, rules, true);
+        int[] onePrior = switch30(digits, priorFrom, from, pl3, rules, false);
+        int[] blendPrior = switch30(digits, priorFrom, from, pl3, rules, true);
+        System.out.println("换规则 近30 " + one[0] + "直" + one[1] + "组 前30 " + onePrior[0] + "直" + onePrior[1] + "组");
+        System.out.println("两条拼 近30 " + blend[0] + "直" + blend[1] + "组 前30 " + blendPrior[0] + "直" + blendPrior[1] + "组");
+    }
+
+    private static int[] switch30(int[][] digits, int from, int end, boolean pl3, List<TenRule> rules, boolean blend) {
+        int zx = 0;
+        int grp = 0;
+        for (int t = from; t < end; t++) {
+            int selFrom = Math.max(40, t - 20);
+            TenRule first = rules.get(0);
+            TenRule second = rules.size() > 1 ? rules.get(1) : first;
+            int bestZ = -1;
+            int bestG = -1;
+            int secondZ = -1;
+            int secondG = -1;
+            for (TenRule rule : rules) {
+                int[] hit = countLookN(digits, selFrom, t, pl3, rule, SANMA_OUT);
+                if (hit[0] > bestZ || (hit[0] == bestZ && hit[1] > bestG)) {
+                    second = first;
+                    secondZ = bestZ;
+                    secondG = bestG;
+                    bestZ = hit[0];
+                    bestG = hit[1];
+                    first = rule;
+                } else if (hit[0] > secondZ || (hit[0] == secondZ && hit[1] > secondG)) {
+                    secondZ = hit[0];
+                    secondG = hit[1];
+                    second = rule;
+                }
+            }
+            int[] bets;
+            if (!blend) {
+                bets = clipSanma(tenTickets(digits, t, pl3, first));
+            } else {
+                bets = blendTickets(digits, t, pl3, first, second);
+            }
+            int id = code(digits[t]);
+            if (has(bets, id)) {
+                zx++;
+            }
+            if (groupHit(bets, id)) {
+                grp++;
+            }
+        }
+        return new int[]{zx, grp};
+    }
+
+    private static int[] blendTickets(int[][] digits, int end, boolean pl3, TenRule first, TenRule second) {
+        int[] a = tenTickets(digits, end, pl3, first);
+        int[] b = tenTickets(digits, end, pl3, second);
+        int[] out = new int[SANMA_OUT];
+        boolean[] used = new boolean[1000];
+        int n = 0;
+        n = takeSome(out, used, n, a, 8);
+        n = takeSome(out, used, n, b, SANMA_OUT);
+        if (n < SANMA_OUT) {
+            n = takeSome(out, used, n, a, SANMA_OUT);
+        }
+        return Arrays.copyOf(out, n);
+    }
+
+    private static int takeSome(int[] out, boolean[] used, int n, int[] src, int limit) {
+        if (src == null) {
+            return n;
+        }
+        for (int id : src) {
+            if (n >= limit || id < 0 || id > 999 || used[id]) {
+                continue;
+            }
+            used[id] = true;
+            out[n++] = id;
+        }
+        return n;
+    }
+
+    private static List<TenRule> direct30(boolean pl3) {
+        List<TenRule> rules = new ArrayList<>();
+        if (pl3) {
+            TenRule a = new TenRule(9, 30, 3, 2, 6, 2, -1);
+            a.decay = 0.92;
+            a.cut = 12;
+            a.keep = 8;
+            rules.add(a);
+            TenRule b = new TenRule(9, 30, 3, 2, 5, 2, -1);
+            b.decay = 0.92;
+            b.cut = 12;
+            b.keep = 8;
+            rules.add(b);
+            TenRule c = new TenRule(9, 30, 2, 3, 8, 2, -1);
+            c.cut = 12;
+            c.keep = 8;
+            rules.add(c);
+            TenRule d = new TenRule(9, 30, 4, 4, 3, 2, -1);
+            d.decay = 0.92;
+            d.cut = 12;
+            d.keep = 8;
+            rules.add(d);
+            return rules;
+        }
+        TenRule a = new TenRule(9, 30, 4, 5, 2, 1, -1);
+        a.cut = 8;
+        a.keep = 8;
+        rules.add(a);
+        TenRule b = new TenRule(3, 30, 8, 4, 2, 1, -1);
+        b.cut = 2;
+        b.fresh = 6;
+        rules.add(b);
+        TenRule c = new TenRule(9, 30, 2, 3, 5, 0, 1);
+        c.cut = 2;
+        rules.add(c);
+        TenRule d = new TenRule(4, 30, 5, 3, 2);
+        d.cut = 2;
+        rules.add(d);
+        return rules;
+    }
+
+    /** 数据窗口固定 30 期。近 30 期按直选、再按直选+组选留下。 */
+    private static void w30Scan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 30);
+        int priorFrom = Math.max(40, from - 100);
+        int longFrom = Math.max(40, n - 100);
+        sb.append("===== ").append(name).append(" =====\n");
+        TenRule current = highRule(pl3);
+        int[] now30 = countLookN(digits, from, n, pl3, current, SANMA_OUT);
+        int[] nowPrior = countLookN(digits, priorFrom, from, pl3, current, SANMA_OUT);
+        sb.append(String.format(Locale.ROOT, "现行 近30 %d直%d组 再前100 %d直%d组 %s%n",
+                now30[0], now30[1], nowPrior[0], nowPrior[1], current.text()));
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<TenRule> bases = span30Bases();
+        List<Hit30> top = new ArrayList<>();
+        Hit30 raw = null;
+        int bi = 0;
+        for (TenRule baseRule : bases) {
+            if ((bi++ % 800) == 0) {
+                System.out.println(name + " 30期 " + bi + "/" + bases.size());
+            }
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            int[] freshSet = (baseRule.cut == 8 || baseRule.cut == 12) ? new int[]{0} : new int[]{0, 3, 6};
+            for (int fresh : freshSet) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCacheN(digits, times, cache, rule, SANMA_OUT);
+                        if (hit.zx >= 1 && (raw == null || countOrder(hit, raw) < 0)) {
+                            raw = hit;
+                        }
+                        if (hit.sticky > 0 || hit.overlap() >= 0.75 || hit.zx < 1) {
+                            continue;
+                        }
+                        keepCount(top, hit, 12);
+                    }
+                }
+            }
+        }
+        if (raw != null) {
+            sb.append(String.format(Locale.ROOT, "不看黏连 近30 %d直%d组 重合%.0f%% %s%n",
+                    raw.zx, raw.grp, raw.overlap() * 100, raw.rule.text()));
+        }
+        fillPrior(digits, priorFrom, from, pl3, top, SANMA_OUT);
+        top.sort(Flow1000Ranker::countOrder);
+        int shown = 0;
+        for (Hit30 hit : top) {
+            if (shown >= 8) {
+                break;
+            }
+            int[] longer = countLookN(digits, longFrom, n, pl3, hit.rule, SANMA_OUT);
+            sb.append(String.format(Locale.ROOT, "近30 %d直%d组 近100 %d直%d组 再前100 %d直%d组 重合%.0f%% %s%n",
+                    hit.zx, hit.grp, longer[0], longer[1], hit.priorZ, hit.priorG, hit.overlap() * 100, hit.rule.text()));
+            shown++;
+        }
+        Hit30 lock = null;
+        for (Hit30 hit : top) {
+            if (hit.priorZ < 1) {
+                continue;
+            }
+            if (lock == null || countOrder(hit, lock) < 0) {
+                lock = hit;
+            }
+        }
+        if (lock == null && !top.isEmpty()) {
+            lock = top.get(0);
+        }
+        if (lock == null) {
+            sb.append("没有可用规则。\n");
+            return;
+        }
+        int[] longer = countLookN(digits, longFrom, n, pl3, lock.rule, SANMA_OUT);
+        sb.append("近12").append(marksN(digits, Math.max(40, n - 12), n, pl3, lock.rule, SANMA_OUT)).append('\n');
+        sb.append(String.format(Locale.ROOT,
+                "LOCK30 kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d zx=%d grp=%d longZ=%d longG=%d priorZ=%d priorG=%d%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut, lock.rule.keep,
+                lock.zx, lock.grp, longer[0], longer[1], lock.priorZ, lock.priorG));
+    }
+
+    private static List<TenRule> span30Bases() {
+        List<TenRule> out = new ArrayList<>();
+        int w = 30;
+        double[] decays = {1, 0.92};
+        int[] keeps = {8, 10, 12};
+        for (int a = 2; a <= 8; a++) {
+            for (int b = 2; b <= 8; b++) {
+                for (int c = 2; c <= 8; c++) {
+                    int prod = a * b * c;
+                    if (prod < 12 || prod > 64) {
+                        continue;
+                    }
+                    addW30(out, w, a, b, c, decays, keeps);
+                }
+            }
+        }
+        int[][] wide = {
+                {10, 3, 2}, {10, 2, 3}, {3, 10, 2}, {2, 10, 3}, {3, 2, 10}, {2, 3, 10},
+                {9, 2, 2}, {2, 9, 2}, {2, 2, 9}, {8, 3, 2}, {3, 8, 2}, {2, 3, 8},
+                {6, 4, 2}, {4, 6, 2}, {2, 4, 6}
+        };
+        for (int[] sh : wide) {
+            addW30(out, w, sh[0], sh[1], sh[2], decays, keeps);
+        }
+        return out;
+    }
+
+    private static void addW30(List<TenRule> out, int w, int a, int b, int c, double[] decays, int[] keeps) {
+        for (double decay : decays) {
+            for (int kind : new int[]{2, 3, 4, 9}) {
+                TenRule near = new TenRule(kind, w, a, b, c);
+                near.decay = decay;
+                near.cut = 2;
+                out.add(near);
+                if (kind != 9) {
+                    TenRule far = new TenRule(kind, w, a, b, c);
+                    far.decay = decay;
+                    far.cut = 6;
+                    out.add(far);
+                    TenRule scored = new TenRule(kind, w, a, b, c);
+                    scored.decay = decay;
+                    scored.cut = 1;
+                    out.add(scored);
+                }
+            }
+            TenRule jump = new TenRule(4, w, a, b, c);
+            jump.decay = decay;
+            jump.cut = 5;
+            jump.keep = 8;
+            out.add(jump);
+            for (int cut : new int[]{8, 12}) {
+                for (int keep : keeps) {
+                    TenRule mix = new TenRule(9, w, a, b, c);
+                    mix.decay = decay;
+                    mix.cut = cut;
+                    mix.keep = keep;
+                    out.add(mix);
+                }
+            }
+        }
+    }
+
+    /** 同一套格子换更长或更短的窗口，看近 100 期还能不能多中直选。 */
+    private static void spanScan(StringBuilder sb, String name, int[][] digits, boolean pl3) {
+        int n = digits.length;
+        int from = Math.max(40, n - 100);
+        int priorFrom = Math.max(40, from - 100);
+        sb.append("===== ").append(name).append(" =====\n");
+        int[] times = new int[n - from];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = from + i;
+        }
+        List<TenRule> bases = new ArrayList<>();
+        int[] windows = {10, 30, 40, 60, 100};
+        double[] decays = {1, 0.92};
+        for (int w : windows) {
+            for (int a = 2; a <= 8; a++) {
+                for (int b = 2; b <= 8; b++) {
+                    for (int c = 2; c <= 8; c++) {
+                        int prod = a * b * c;
+                        if (prod < 12 || prod > 64) {
+                            continue;
+                        }
+                        for (double decay : decays) {
+                            for (int kind : new int[]{2, 3, 9}) {
+                                TenRule rule = new TenRule(kind, w, a, b, c);
+                                rule.decay = decay;
+                                rule.cut = 2;
+                                bases.add(rule);
+                            }
+                            TenRule mix = new TenRule(9, w, a, b, c);
+                            mix.decay = decay;
+                            mix.cut = 8;
+                            mix.keep = 10;
+                            bases.add(mix);
+                        }
+                    }
+                }
+            }
+        }
+        List<Hit30> top = new ArrayList<>();
+        int bi = 0;
+        for (TenRule baseRule : bases) {
+            if ((bi++ % 800) == 0) {
+                System.out.println(name + " 窗口 " + bi + "/" + bases.size());
+            }
+            int[][] cache = new int[times.length][];
+            for (int i = 0; i < times.length; i++) {
+                cache[i] = tenBase(digits, times[i], pl3, baseRule);
+            }
+            int[] freshSet = baseRule.cut == 8 ? new int[]{0} : new int[]{0, 6};
+            for (int fresh : freshSet) {
+                for (int pos = -1; pos <= 2; pos++) {
+                    int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+                    for (int delta : deltas) {
+                        TenRule rule = copyRule(baseRule, pos, delta, fresh);
+                        Hit30 hit = scoreCacheN(digits, times, cache, rule, SANMA_OUT);
+                        if (hit.sticky > 0 || hit.overlap() >= 0.75 || hit.zx < 1) {
+                            continue;
+                        }
+                        keepCount(top, hit, 12);
+                    }
+                }
+            }
+        }
+        fillPrior(digits, priorFrom, from, pl3, top, SANMA_OUT);
+        top.sort(Flow1000Ranker::countOrder);
+        int shown = 0;
+        for (Hit30 hit : top) {
+            if (shown >= 8) {
+                break;
+            }
+            sb.append(String.format(Locale.ROOT, "近100 %d直%d组 前100 %d直%d组 重合%.0f%% %s%n",
+                    hit.zx, hit.grp, hit.priorZ, hit.priorG, hit.overlap() * 100, hit.rule.text()));
+            shown++;
+        }
+        Hit30 lock = null;
+        for (Hit30 hit : top) {
+            if (hit.priorZ < 1) {
+                continue;
+            }
+            if (lock == null || countOrder(hit, lock) < 0) {
+                lock = hit;
+            }
+        }
+        if (lock == null && !top.isEmpty()) {
+            lock = top.get(0);
+        }
+        if (lock == null) {
+            sb.append("没有可用规则。\n");
+            return;
+        }
+        sb.append(String.format(Locale.ROOT,
+                "LOCKWIDE kind=%d w=%d a=%d b=%d c=%d pos=%d d=%d decay=%.2f fresh=%d cut=%d keep=%d zx=%d grp=%d priorZ=%d priorG=%d %s%n",
+                lock.rule.kind, lock.rule.window, lock.rule.a, lock.rule.b, lock.rule.c,
+                lock.rule.pos, lock.rule.delta, lock.rule.decay, lock.rule.fresh, lock.rule.cut, lock.rule.keep,
+                lock.zx, lock.grp, lock.priorZ, lock.priorG, lock.rule.text()));
     }
 
     /**
@@ -6030,9 +7889,9 @@ public final class Flow1000Ranker {
         List<TenRule> out = new ArrayList<>();
         double[] decays = {1, 0.92};
         int[] keeps = {8, 10, 12, 15};
-        for (int a = 1; a <= 8; a++) {
-            for (int b = 1; b <= 8; b++) {
-                for (int c = 1; c <= 8; c++) {
+        for (int a = 2; a <= 8; a++) {
+            for (int b = 2; b <= 8; b++) {
+                for (int c = 2; c <= 8; c++) {
                     int prod = a * b * c;
                     if (prod < minProd || prod > maxProd) {
                         continue;
@@ -7370,6 +9229,16 @@ public final class Flow1000Ranker {
     }
 
     private static int[][] loadGame(boolean is3d) {
+        return loadGame(is3d, false);
+    }
+
+    private static int[][] loadGame(boolean is3d, boolean localOnly) {
+        if (localOnly) {
+            String xlsxOnly = is3d ? "D:/彩票/3D.xlsx" : "D:/彩票/排列三.xlsx";
+            int[][] sheet = parseXlsx(Path.of(xlsxOnly));
+            System.out.println("本地 " + xlsxOnly + " 期数=" + sheet.length);
+            return sheet;
+        }
         String url = is3d ? "http://data.17500.cn/3d_asc.txt" : "http://data.17500.cn/pl3_asc.txt";
         try {
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();

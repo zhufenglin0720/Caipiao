@@ -3,6 +3,7 @@ package com.zfl.caipiao.controller;
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.PnlService;
+import com.zfl.caipiao.utils.Flow1000Ranker;
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,10 +31,22 @@ public class DataController {
       List<Hm> pl3Cache = HmCache.getPl3Cache();
       List<HmCache.CompareDto> sdCompareCache = HmCache.getSdCompareCache();
       List<HmCache.CompareDto> pl3CompareCache = HmCache.getPl3CompareCache();
+      List<Map<String, String>> sdCompare = this.toCompareList(sdCompareCache, HmCache.getSdDadiCompareCache());
+      List<Map<String, String>> pl3Compare = this.toCompareList(pl3CompareCache, HmCache.getPl3DadiCompareCache());
+      int[][] sdDigits = Flow1000Ranker.digitsOf(sdCache);
+      int[][] plDigits = Flow1000Ranker.digitsOf(pl3Cache);
+      boolean sdTrendReady = Flow1000Ranker.trendReady(sdDigits, false);
+      boolean plTrendReady = Flow1000Ranker.trendReady(plDigits, true);
       result.put("sd", sdCache);
       result.put("pl3", pl3Cache);
-      result.put("sdCompare", this.toCompareList(sdCompareCache, HmCache.getSdDadiCompareCache()));
-      result.put("pl3Compare", this.toCompareList(pl3CompareCache, HmCache.getPl3DadiCompareCache()));
+      result.put("sdCompare", sdCompare);
+      result.put("pl3Compare", pl3Compare);
+      result.put("sdTrend", sdTrendReady ? trendRows(sdCache, sdDigits, false) : List.of());
+      result.put("pl3Trend", plTrendReady ? trendRows(pl3Cache, plDigits, true) : List.of());
+      result.put("sdTrendReady", sdTrendReady);
+      result.put("plTrendReady", plTrendReady);
+      result.put("sdTrendNote", Flow1000Ranker.trendNote(false));
+      result.put("plTrendNote", Flow1000Ranker.trendNote(true));
       result.put("sdDadi", toDadiList(HmCache.getSdDadiCompareCache(), sdCompareCache));
       result.put("pl3Dadi", toDadiList(HmCache.getPl3DadiCompareCache(), pl3CompareCache));
       return result;
@@ -326,6 +339,47 @@ public class DataController {
          }
       }
       return "";
+   }
+
+   /** 最近 200 期回放，已落盘的 15 注优先。下一期只展示 15 点任务留下、尚未写开奖号的一行，页面不现算。 */
+   private static List<Map<String, String>> trendRows(List<Hm> history, int[][] digits, boolean pl3) {
+      List<Map<String, String>> rows = new ArrayList<>();
+      if (digits == null || history == null) {
+         return rows;
+      }
+      int n = Math.min(digits.length, history.size());
+      int from = Math.max(40, n - Flow1000Ranker.TREND_LOOK);
+      for (int i = from; i < n; i++) {
+         Hm hm = history.get(i);
+         String qh = hm == null || hm.getQh() == null ? "" : hm.getQh();
+         Map<String, String> map = new HashMap<>();
+         map.put("qh", qh);
+         map.put("realHm", hm == null ? "" : hm.toString());
+         String issued = Flow1000Ranker.trendIssuedBets(pl3, qh);
+         map.put("aiTrendHm", issued != null ? issued : Flow1000Ranker.trendCsv(digits, i, pl3));
+         rows.add(map);
+      }
+      String[] open = Flow1000Ranker.trendOpenIssue(pl3);
+      if (open == null) {
+         return rows;
+      }
+      boolean openShown = false;
+      if (!open[0].isBlank()) {
+         for (Map<String, String> row : rows) {
+            if (open[0].equals(row.get("qh"))) {
+               openShown = true;
+               break;
+            }
+         }
+      }
+      if (!openShown) {
+         Map<String, String> next = new HashMap<>();
+         next.put("qh", open[0].isBlank() ? "下一期" : open[0]);
+         next.put("realHm", "");
+         next.put("aiTrendHm", open[1]);
+         rows.add(next);
+      }
+      return rows;
    }
 
    private static String pad3(String s) {

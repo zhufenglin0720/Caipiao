@@ -1814,6 +1814,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('3d', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('3d', 'trend', this)">大趋势三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi', this)">大底直选</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('3d', 'danma', this)">胆码</button>
@@ -1944,6 +1945,7 @@
                 <div class="toolbar-divider"></div>
                 <div class="compare-tabs">
                     <button class="compare-tab active" onclick="switchCompareTab('pl3', 'sanma', this)">三码</button>
+                    <button class="compare-tab" onclick="switchCompareTab('pl3', 'trend', this)">大趋势三码</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi', this)">大底直选</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'dadi1000', this)">大底1000</button>
                     <button class="compare-tab" onclick="switchCompareTab('pl3', 'danma', this)">胆码</button>
@@ -3419,6 +3421,10 @@
     }
 
     function getCompareData(type, compareType) {
+        if (compareType === 'trend') {
+            const list = type === '3d' ? currentData.sdTrend : currentData.pl3Trend;
+            return Array.isArray(list) ? list : [];
+        }
         if (compareType === 'dadi' || compareType === 'dadi1000') {
             const list = type === '3d' ? currentData.sdDadi : currentData.pl3Dadi;
             return Array.isArray(list) ? list : [];
@@ -3444,6 +3450,10 @@
         }
         if (compareType === 'shuangdan') {
             thead.innerHTML = '<tr><th>序号</th><th>双胆预测(三组)</th><th>实际开奖</th><th>命中</th></tr>';
+            return;
+        }
+        if (compareType === 'trend') {
+            thead.innerHTML = '<tr><th>大趋势三码</th><th>实际开奖</th><th>匹配结果</th></tr>';
             return;
         }
         if (type === '3d') {
@@ -3602,12 +3612,15 @@
         return bets.split(',').includes(realHm);
     }
 
+    function trendBets(item) {
+        if (!item || !item.aiTrendHm) return '';
+        return String(item.aiTrendHm).split(',').map(s => s.trim()).filter(Boolean).join(',');
+    }
+
     /** 三码命中：直选=顺序一致；组选=三位数字相同、顺序不同。 */
-    function sanmaHit(item, realHm) {
-        if (!realHm) return { kind: 'none', bet: null };
-        const bets = topSanmaBets(item);
-        if (!bets) return { kind: 'none', bet: null };
-        const list = bets.split(',').map(s => s.trim()).filter(Boolean);
+    function betsHit(bets, realHm) {
+        if (!realHm || !bets) return { kind: 'none', bet: null };
+        const list = String(bets).split(',').map(s => s.trim()).filter(Boolean);
         if (list.includes(realHm)) return { kind: 'zx', bet: realHm };
         const target = realHm.length === 3 ? realHm : String(realHm).padStart(3, '0').slice(-3);
         if (target.length !== 3) return { kind: 'none', bet: null };
@@ -3618,6 +3631,10 @@
         });
         if (groupBet) return { kind: 'group', bet: groupBet };
         return { kind: 'none', bet: null };
+    }
+
+    function sanmaHit(item, realHm) {
+        return betsHit(topSanmaBets(item), realHm);
     }
 
     function checkOverfitZx(overfitHm, realHm) {
@@ -3864,6 +3881,30 @@
             return;
         }
 
+        if (tab === 'trend') {
+            let zx = 0, group = 0;
+            const judged = compareData.filter(i => i.aiTrendHm && i.realHm);
+            judged.forEach(item => {
+                const hit = betsHit(item.aiTrendHm, item.realHm);
+                if (hit.kind === 'zx') zx++;
+                else if (hit.kind === 'group') group++;
+            });
+            const total = judged.length;
+            const both = zx + group;
+            const zxRate = total > 0 ? ((zx / total) * 100).toFixed(1) : 0;
+            const groupRate = total > 0 ? ((group / total) * 100).toFixed(1) : 0;
+            const bothRate = total > 0 ? ((both / total) * 100).toFixed(1) : 0;
+            el.innerHTML = `
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">已开奖期数</div></div>
+                <div class="stat-card"><div class="stat-value">${zx}/${total}</div><div class="stat-label">直选命中</div></div>
+                <div class="stat-card"><div class="stat-value">${zxRate}%</div><div class="stat-label">直选命中率</div></div>
+                <div class="stat-card"><div class="stat-value">${group}/${total}</div><div class="stat-label">组选命中</div></div>
+                <div class="stat-card"><div class="stat-value">${groupRate}%</div><div class="stat-label">组选命中率</div></div>
+                <div class="stat-card"><div class="stat-value">${both}/${total}</div><div class="stat-label">直选+组选</div></div>
+                <div class="stat-card"><div class="stat-value">${bothRate}%</div><div class="stat-label">直选+组选命中率</div></div>`;
+            return;
+        }
+
         let sanmaZx = 0, sanmaGroup = 0, qimaSuccess = 0;
         const total = compareData.length;
         const sanmaTotal = compareData.filter(i => i.aiRecommendHm || i.aiHm).length;
@@ -4033,15 +4074,18 @@
                 const shuangdanCopyBtn = row.querySelector('.row-copy-btn');
                 if (shuangdanCopyBtn) shuangdanCopyBtn.onclick = () => copyPredictText(shuangdanCopyBtn, copyText);
             } else {
-                const displayHm = topSanmaBets(item);
+                const displayHm = compareType === 'trend' ? trendBets(item) : topSanmaBets(item);
                 const copyText = displayHm
                     ? String(displayHm).split(',').map(s => s.trim()).filter(Boolean).join(',')
                     : '';
-                const hit = sanmaHit(item, item.realHm);
-                const matchText = hit.kind === 'zx' ? '✓ 直选命中'
+                const hit = compareType === 'trend' ? betsHit(displayHm, item.realHm) : sanmaHit(item, item.realHm);
+                const pending = compareType === 'trend' && !item.realHm;
+                const matchText = pending ? '待开奖'
+                    : hit.kind === 'zx' ? '✓ 直选命中'
                     : hit.kind === 'group' ? '✓ 组选命中'
                     : '✗ 未命中';
-                const matchCls = hit.kind === 'zx' ? 'success' : hit.kind === 'group' ? 'group-hit' : 'fail';
+                const matchCls = pending ? ''
+                    : hit.kind === 'zx' ? 'success' : hit.kind === 'group' ? 'group-hit' : 'fail';
                 row.innerHTML = `
                     <td>
                         <div class="predict-copy-cell">
