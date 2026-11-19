@@ -508,6 +508,39 @@
             box-shadow: 0 0 12px var(--accent-glow);
         }
 
+        .ball-small.same-order {
+            background: linear-gradient(145deg, #34d399, #059669);
+            color: #052e1c;
+            box-shadow: 0 0 10px rgba(52, 211, 153, 0.35);
+        }
+
+        .pair-cell { white-space: normal; }
+        .pair-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 36px;
+            height: 28px;
+            padding: 0 8px;
+            margin: 2px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            font-weight: 700;
+            letter-spacing: 0.4px;
+        }
+        .pair-chip.hit {
+            background: linear-gradient(145deg, var(--accent-light), var(--accent));
+            color: #1a1a2e;
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+        .pair-chip .pair-count {
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 4px;
+            opacity: 0.75;
+        }
+
         .dingwei-numbers { flex: 1; display: flex; flex-wrap: wrap; gap: 3px; }
 
         thead { background: rgba(99, 102, 241, 0.15); }
@@ -1827,7 +1860,7 @@
             </div>
             <div class="table-container fill-mode" id="sd-predict-table">
                 <table>
-                    <thead id="sd-table-head"><tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr></thead>
+                    <thead id="sd-table-head"><tr><th>AI 预测</th><th>两位组合</th><th>实际开奖</th><th>匹配结果</th></tr></thead>
                     <tbody id="sd-table-body"></tbody>
                 </table>
             </div>
@@ -1959,7 +1992,7 @@
             <div class="table-container fill-mode" id="pl3-predict-table">
                 <table>
                     <thead id="pl3-table-head">
-                    <tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>
+                    <tr><th>三码预测</th><th>两位组合</th><th>实际开奖</th><th>匹配结果</th></tr>
                     </thead>
                     <tbody id="pl3-table-body"></tbody>
                 </table>
@@ -3453,13 +3486,13 @@
             return;
         }
         if (compareType === 'trend') {
-            thead.innerHTML = '<tr><th>大趋势三码</th><th>实际开奖</th><th>匹配结果</th></tr>';
+            thead.innerHTML = '<tr><th>大趋势三码</th><th>两位组合</th><th>实际开奖</th><th>匹配结果</th></tr>';
             return;
         }
         if (type === '3d') {
-            thead.innerHTML = '<tr><th>AI 预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
+            thead.innerHTML = '<tr><th>AI 预测</th><th>两位组合</th><th>实际开奖</th><th>匹配结果</th></tr>';
         } else {
-            thead.innerHTML = '<tr><th>三码预测</th><th>实际开奖</th><th>匹配结果</th></tr>';
+            thead.innerHTML = '<tr><th>三码预测</th><th>两位组合</th><th>实际开奖</th><th>匹配结果</th></tr>';
         }
     }
 
@@ -3467,6 +3500,7 @@
         if (compareType === 'qima') return 4;
         if (isPoolCompareTab(compareType)) return 5;
         if (compareType === 'danma' || compareType === 'shuangdan') return 4;
+        if (compareType === 'sanma' || compareType === 'trend') return 4;
         return 3;
     }
 
@@ -3540,7 +3574,7 @@
     }
 
     function topSanmaBets(itemOrHm, n = 15) {
-        // 优先用后端选出的推荐注（15注，已禁同号不同序）
+        // 优先用后端选出的推荐注（20注，前15注原规则，后5注动态补票）
         if (itemOrHm && typeof itemOrHm === 'object') {
             if (itemOrHm.aiRecommendHm) {
                 return String(itemOrHm.aiRecommendHm).split(',')
@@ -3690,6 +3724,67 @@
             const trimmed = num.trim();
             const cls = highlight && trimmed === highlight ? 'ball-small highlight' : 'ball-small';
             return `<span class="${cls}">${trimmed}</span>`;
+        }).join('');
+    }
+
+    /** 20 注里，三位数字相同、顺序不同的号码标绿。直选命中仍用命中色。 */
+    function formatSanmaBalls(numbers, hit) {
+        if (!numbers) return '-';
+        const list = String(numbers).split(',').map(s => s.trim()).filter(Boolean);
+        const counts = new Map();
+        list.forEach(code => {
+            const key = sortedDigitKey(pad3Code(code));
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        return list.map(code => {
+            const padded = pad3Code(code);
+            const repeated = (counts.get(sortedDigitKey(padded)) || 0) > 1;
+            const matched = !!(hit && hit.bet && code === hit.bet && (hit.kind === 'zx' || hit.kind === 'group'));
+            const green = !matched && repeated;
+            const cls = matched ? 'ball-small highlight' : green ? 'ball-small same-order' : 'ball-small';
+            const title = matched ? (hit.kind === 'zx' ? '直选命中' : '组选命中') : green ? '同号不同序' : '';
+            return `<span class="${cls}"${title ? ` title="${title}"` : ''}>${code}</span>`;
+        }).join('');
+    }
+
+    /** 一注三码里的两位组合，顺序无关：32 和 23 都记成 23。每注每个组合只计一次。 */
+    function pairsInCode(code) {
+        const c = pad3Code(code);
+        if (c.length !== 3 || !/^\d{3}$/.test(c)) return [];
+        const seen = new Set();
+        [[0, 1], [0, 2], [1, 2]].forEach(([i, j]) => {
+            const a = c[i];
+            const b = c[j];
+            seen.add(a <= b ? a + b : b + a);
+        });
+        return [...seen];
+    }
+
+    function topDigitPairs(betsText) {
+        const counts = new Map();
+        String(betsText || '').split(',').map(s => s.trim()).filter(Boolean).forEach(code => {
+            pairsInCode(code).forEach(pair => counts.set(pair, (counts.get(pair) || 0) + 1));
+        });
+        let max = 0;
+        counts.forEach(n => { if (n > max) max = n; });
+        if (max === 0) return [];
+        const tops = [];
+        counts.forEach((n, pair) => { if (n === max) tops.push({ pair, count: n }); });
+        tops.sort((a, b) => a.pair < b.pair ? -1 : a.pair > b.pair ? 1 : 0);
+        return tops;
+    }
+
+    function drawHasPair(realHm, pair) {
+        return pairsInCode(realHm).includes(pair);
+    }
+
+    function formatTopPairs(betsText, realHm) {
+        const tops = topDigitPairs(betsText);
+        if (!tops.length) return '-';
+        return tops.map(item => {
+            const hit = !!(realHm && drawHasPair(realHm, item.pair));
+            const title = hit ? `出现${item.count}次，已命中` : `出现${item.count}次`;
+            return `<span class="pair-chip${hit ? ' hit' : ''}" title="${title}">${item.pair}<span class="pair-count">×${item.count}</span></span>`;
         }).join('');
     }
 
@@ -4086,13 +4181,16 @@
                     : '✗ 未命中';
                 const matchCls = pending ? ''
                     : hit.kind === 'zx' ? 'success' : hit.kind === 'group' ? 'group-hit' : 'fail';
+                const ballsHtml = formatSanmaBalls(displayHm, hit);
+                const pairCell = `<td class="pair-cell">${formatTopPairs(displayHm, item.realHm)}</td>`;
                 row.innerHTML = `
                     <td>
                         <div class="predict-copy-cell">
-                            <div class="predict-balls">${formatBalls(displayHm, hit.bet)}</div>
+                            <div class="predict-balls">${ballsHtml}</div>
                             ${copyText ? '<button type="button" class="dadi-copy-btn row-copy-btn">一键复制</button>' : ''}
                         </div>
                     </td>
+                    ${pairCell}
                     <td>${realBalls}</td>
                     <td class="${matchCls}">${matchText}</td>`;
                 const sanmaCopyBtn = row.querySelector('.row-copy-btn');

@@ -341,7 +341,7 @@ public class DataController {
       return "";
    }
 
-   /** 最近 200 期回放，已落盘的 15 注优先。下一期只展示 15 点任务留下、尚未写开奖号的一行，页面不现算。 */
+   /** 最近 200 期回放，已落盘的预测优先。下一期只展示定时任务留下、尚未写开奖号的一行，页面不现算。 */
    private static List<Map<String, String>> trendRows(List<Hm> history, int[][] digits, boolean pl3) {
       List<Map<String, String>> rows = new ArrayList<>();
       if (digits == null || history == null) {
@@ -403,7 +403,7 @@ public class DataController {
                }
 
                sb.append(t);
-               if (++n >= 15) {
+               if (++n >= 20) {
                   break;
                }
             }
