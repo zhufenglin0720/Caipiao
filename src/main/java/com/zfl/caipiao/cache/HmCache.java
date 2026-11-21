@@ -12,7 +12,6 @@ public class HmCache {
    private static final List<HmCache.CompareDto> PL3_COMPARE_CACHE = new ArrayList<>();
    private static final List<HmCache.DadiCompareDto> SD_DADI_COMPARE_CACHE = new ArrayList<>();
    private static final List<HmCache.DadiCompareDto> PL3_DADI_COMPARE_CACHE = new ArrayList<>();
-   private static final List<HmCache.PnlRecordDto> PNL_CACHE = new ArrayList<>();
 
    public static List<Hm> getSdCache() {
       return SD_CACHE;
@@ -36,19 +35,6 @@ public class HmCache {
 
    public static List<HmCache.DadiCompareDto> getPl3DadiCompareCache() {
       return PL3_DADI_COMPARE_CACHE;
-   }
-
-   public static List<HmCache.PnlRecordDto> getPnlCache() {
-      return PNL_CACHE;
-   }
-
-   public static void addPnlCache(HmCache.PnlRecordDto dto) {
-      PNL_CACHE.add(dto);
-   }
-
-   public static void setPnlCache(List<HmCache.PnlRecordDto> dtos) {
-      PNL_CACHE.clear();
-      PNL_CACHE.addAll(dtos);
    }
 
    public static void addSdCompareCache(HmCache.CompareDto compareDto) {
@@ -455,77 +441,6 @@ public class HmCache {
             + ", realHm="
             + this.getRealHm()
             + ")";
-      }
-   }
-
-   public static class PnlRecordDto {
-      private String date;
-      private Double ticketAmount;
-      private Double winAmount;
-      public String getDate() {
-         return this.date;
-      }
-      public Double getTicketAmount() {
-         return this.ticketAmount;
-      }
-      public Double getWinAmount() {
-         return this.winAmount;
-      }
-      public HmCache.PnlRecordDto setDate(final String date) {
-         this.date = date;
-         return this;
-      }
-      public HmCache.PnlRecordDto setTicketAmount(final Double ticketAmount) {
-         this.ticketAmount = ticketAmount;
-         return this;
-      }
-      public HmCache.PnlRecordDto setWinAmount(final Double winAmount) {
-         this.winAmount = winAmount;
-         return this;
-      }
-      @Override
-      public boolean equals(final Object o) {
-         if (o == this) {
-            return true;
-         } else if (!(o instanceof HmCache.PnlRecordDto other)) {
-            return false;
-         } else if (!other.canEqual(this)) {
-            return false;
-         } else {
-            Object this$ticketAmount = this.getTicketAmount();
-            Object other$ticketAmount = other.getTicketAmount();
-            if (this$ticketAmount == null ? other$ticketAmount == null : this$ticketAmount.equals(other$ticketAmount)) {
-               Object this$winAmount = this.getWinAmount();
-               Object other$winAmount = other.getWinAmount();
-               if (this$winAmount == null ? other$winAmount == null : this$winAmount.equals(other$winAmount)) {
-                  Object this$date = this.getDate();
-                  Object other$date = other.getDate();
-                  return this$date == null ? other$date == null : this$date.equals(other$date);
-               } else {
-                  return false;
-               }
-            } else {
-               return false;
-            }
-         }
-      }
-      protected boolean canEqual(final Object other) {
-         return other instanceof HmCache.PnlRecordDto;
-      }
-      @Override
-      public int hashCode() {
-         int PRIME = 59;
-         int result = 1;
-         Object $ticketAmount = this.getTicketAmount();
-         result = result * 59 + ($ticketAmount == null ? 43 : $ticketAmount.hashCode());
-         Object $winAmount = this.getWinAmount();
-         result = result * 59 + ($winAmount == null ? 43 : $winAmount.hashCode());
-         Object $date = this.getDate();
-         return result * 59 + ($date == null ? 43 : $date.hashCode());
-      }
-      @Override
-      public String toString() {
-         return "HmCache.PnlRecordDto(date=" + this.getDate() + ", ticketAmount=" + this.getTicketAmount() + ", winAmount=" + this.getWinAmount() + ")";
       }
    }
 }

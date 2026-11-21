@@ -539,18 +539,37 @@ public final class Flow1000Ranker {
     /**
      * 前 15 注与改法之前相同。后 5 注跟着近期开奖变，不替换已中直选。
      * 排列三近期离热号远，补冷号；福彩3D 三位都偏窄，补外扩。
-     * 大趋势里，3D 补同号的另一序，排列三不再只贴上期，改按定位分补。
+     * 大趋势里，3D 补同号的另一序。排列三这套热冷各半 200 的后 5 注改成近 20 期热号，
+     * 和值贴均值上下 4 点，近期全奇全偶或全大全小不占多数时去掉这类形态。
      */
     private static int[] issuedTickets(int[][] digits, int end, boolean pl3, TenRule rule) {
         int[] core = clipTo(tenTickets(digits, end, pl3, rule), TREND_OUT);
-        return joinBets(core, extraFive(digits, end, pl3, rule, core, supplementMode(pl3, rule)));
+        int[] extra = extraFive(digits, end, pl3, rule, core, supplementMode(pl3, rule));
+        if (pl3TrendExpert(rule)) {
+            extra = reserveExtra(core, expertPool(digits, end, 20, 4, 0, 9, true, false, false), extra, 5);
+        }
+        return joinBets(core, extra);
     }
 
-    /** 新规则的 15 注不动。后 5 注按近 30 期直选切换补法，直选没有更多就留这套新规则原来的补法。 */
+    /** 只作用在已经备份、并且回测超过原直选的排列三大趋势规则上。短周期和其他规则不动。 */
+    private static boolean pl3TrendExpert(TenRule rule) {
+        return rule != null && rule.kind == 9 && rule.window == 200
+                && rule.a == 2 && rule.b == 5 && rule.c == 5
+                && rule.pos == 1 && rule.delta == 1
+                && rule.cut == 2 && rule.fresh == 0
+                && Math.abs(rule.decay - 1) < 0.0001;
+    }
+
+    /** 新规则的 15 注不动。后 5 注按近 30 期直选切换补法，直选没有更多就留这套新规则原来的补法。
+     *  福彩3D 大趋势再把连续两期以上、又被近上期挤出热号格子的组选按定位分留回直选序，不换掉已经多出来的直选。 */
     private static int[] dynamicTickets(int[][] digits, int end, boolean pl3, TenRule rule) {
         int[] core = clipTo(tenTickets(digits, end, pl3, rule), TREND_OUT);
         int mode = dynamicExtraMode(digits, end, pl3, rule);
-        return joinBets(core, extraFive(digits, end, pl3, rule, core, mode));
+        int[] extra = extraFive(digits, end, pl3, rule, core, mode);
+        if (!pl3 && rule != null && rule.kind == 2 && rule.window >= 100) {
+            extra = keepStickyGroups(digits, end, pl3, rule, core, extra, 2);
+        }
+        return joinBets(core, extra);
     }
 
     private static int supplementMode(boolean pl3, TenRule rule) {
@@ -616,15 +635,16 @@ public final class Flow1000Ranker {
     /** 15 注，数据窗口 30 期。近 30 期直选多的留下，直选相同再留直选+组选。再往前 100 期至少 1 个直选。 */
     private static TenRule highRule(boolean pl3) {
         if (pl3) {
-            // 热冷各半 30 期 3x2x6，衰减 0.92，热近冷二序 8，个位 -1。近 30 期 5 直 5 组，再往前 100 期 1 直 8 组。
-            TenRule rule = new TenRule(9, 30, 3, 2, 6, 2, -1);
+            // 热冷各半 30 期 2x2x6，衰减 0.92，热近冷二序 8，个位 -1。近 200 期 9 直，再往前 200 期 3 直，高于 3x2x6 的 8 直和 3 直。
+            TenRule rule = new TenRule(9, 30, 2, 2, 6, 2, -1);
             rule.decay = 0.92;
             rule.cut = 12;
             rule.keep = 8;
             return rule;
         }
-        // 热冷各半 30 期 4x5x2，热近冷分 8，十位 -1。近 30 期 4 直 7 组，再往前 100 期 1 直 7 组。
+        // 热冷各半 30 期 4x5x2，衰减 0.85，热近冷分 8，十位 -1。近 200 期 9 直，再往前 200 期 5 直，高于不衰减的 6 直和 1 直。
         TenRule rule = new TenRule(9, 30, 4, 5, 2, 1, -1);
+        rule.decay = 0.85;
         rule.cut = 8;
         rule.keep = 8;
         return rule;
@@ -1917,6 +1937,27 @@ public final class Flow1000Ranker {
             }
             return out;
         }
+        if (!pl3 && k <= 3) {
+            int end = digits.length;
+            for (int p = 0; p < 3; p++) {
+                int[] top = topK(bellAt(digits, end, p, 12), k);
+                System.arraycopy(top, 0, out[p], 0, k);
+            }
+            return out;
+        }
+        if (pl3 && k >= 7) {
+            int end = digits.length;
+            for (int p = 0; p < 3; p++) {
+                int[] omit = omission(digits, end, p);
+                double[] cold = new double[10];
+                for (int x = 0; x < 10; x++) {
+                    cold[x] = omit[x];
+                }
+                int[] top = topK(cold, k);
+                System.arraycopy(top, 0, out[p], 0, k);
+            }
+            return out;
+        }
         ExpertView ex = expert(digits, pl3);
         for (int p = 0; p < 3; p++) {
             int[] top = topK(ex.pos[p], k);
@@ -1935,9 +1976,8 @@ public final class Flow1000Ranker {
     }
 
     /**
-     * 短周期未命中修正：3D 定位漏在刚出的热号上，改用近 20 期热号。
-     * 排三七码漏在冷号盖不住的中段遗漏，改用遗漏靠近 12 期的回补；胆码仍取最冷 3 个。
-     * 奇偶回补、杀号、跨度在近 20–80 期里方向偏反，不再拿来压排序。
+     * 3D 七码仍用近 20 期热号。3D 胆码改遗漏靠近 12 期。
+     * 排列三七码和胆码都取遗漏最长的号。双胆没有更高命中，保持原配法。
      */
     private static final class ExpertView {
         final double[][] pos;
@@ -4834,9 +4874,16 @@ public final class Flow1000Ranker {
         }
         int[][] sd = loadGame(true, localOnly);
         int[][] pl = loadGame(false, localOnly);
+        if (args != null && args.length > 0 && "coverfile".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            regenCover(sb, "福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "3D比对结果");
+            regenCover(sb, "排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "排列三比对结果");
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "regen".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
-            sb.append("按最终算法重写历史。福彩3D后5注动态调整，排列三用固定补法。组选含直选。\n");
+            sb.append("按最终算法重写历史。福彩3D后5注动态调整，排列三后5注按热号和值。组选含直选。\n");
             regenSanma(sb, "福彩3D 三码", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "3D比对结果");
             regenSanma(sb, "排列三 三码", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "排列三比对结果");
             regenTrend(sb, "福彩3D 大趋势", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
@@ -7099,6 +7146,135 @@ public final class Flow1000Ranker {
                 name, scored, oldZ, oldG, newZ, newG, take ? "直选没有减少，已加入" : "直选减少，未改"));
     }
 
+    /** 用最终胆码、双胆、七码重写对比表里已有的期，三码和大底不动。 */
+    private static void regenCover(StringBuilder sb, String name, boolean pl3, String histFile,
+                                   String compareFile, String sheet) throws Exception {
+        List<Hm> history = readHistory(histFile);
+        int[][] digits = digitsOf(history);
+        List<CompareVO> rows = EasyExcel.read(compareFile).head(CompareVO.class).sheet().doReadSync();
+        Map<String, Integer> qhIndex = new HashMap<>();
+        Map<String, Integer> realIndex = new HashMap<>();
+        for (int i = 0; i < history.size(); i++) {
+            Hm hm = history.get(i);
+            if (hm.getQh() != null && !hm.getQh().isBlank()) {
+                qhIndex.put(hm.getQh().trim(), i);
+            }
+            realIndex.put(padCode(hm.toString()), i);
+        }
+        int changed = 0;
+        int danAny = 0;
+        int danN = 0;
+        int qiFull = 0;
+        int qiN = 0;
+        int shAny = 0;
+        int shN = 0;
+        for (CompareVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            int idx = histIndex(row.getQh(), row.getRealHm(), qhIndex, realIndex, digits.length);
+            if (idx < 40) {
+                continue;
+            }
+            int at = Math.min(idx, digits.length);
+            int[][] prefix = Arrays.copyOf(digits, at);
+            String dan = coverPosLine(digitTop(prefix, pl3, 3));
+            String qi = coverPosLine(digitTop(prefix, pl3, 7));
+            String sh = coverShuangLine(shuangDan(prefix, pl3));
+            if (!dan.equals(trimToEmpty(row.getAiDanMaHm()))
+                    || !qi.equals(trimToEmpty(row.getDingWeiQm()))
+                    || !sh.equals(trimToEmpty(row.getAiShuangDanHm()))) {
+                changed++;
+            }
+            row.setAiDanMaHm(dan);
+            row.setDingWeiQm(qi);
+            row.setAiShuangDanHm(sh);
+            int id = codeOf(row.getRealHm());
+            if (id < 0) {
+                continue;
+            }
+            int[] draw = {id / 100, (id / 10) % 10, id % 10};
+            int[][] top3 = digitTop(prefix, pl3, 3);
+            int[][] top7 = digitTop(prefix, pl3, 7);
+            int danGot = 0;
+            int qiGot = 0;
+            for (int p = 0; p < 3; p++) {
+                if (coverHas(top3[p], draw[p])) {
+                    danGot++;
+                }
+                if (coverHas(top7[p], draw[p])) {
+                    qiGot++;
+                }
+            }
+            danN++;
+            if (danGot > 0) {
+                danAny++;
+            }
+            qiN++;
+            if (qiGot == 3) {
+                qiFull++;
+            }
+            boolean[] set = new boolean[10];
+            for (int p = 0; p < 3; p++) {
+                set[draw[p]] = true;
+            }
+            int[][] pairs = shuangDan(prefix, pl3);
+            shN++;
+            for (int[] pair : pairs) {
+                if (set[pair[0]] && set[pair[1]]) {
+                    shAny++;
+                    break;
+                }
+            }
+        }
+        Path target = Path.of(compareFile);
+        Path tmp = Path.of(compareFile + ".writing.xlsx");
+        EasyExcel.write(tmp.toString(), CompareVO.class).sheet(sheet).doWrite(rows);
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        sb.append(String.format(Locale.ROOT, "%s 重写%d行 | 胆码%d/%d | 七码%d/%d | 双胆%d/%d%n",
+                name, changed, danAny, danN, qiFull, qiN, shAny, shN));
+    }
+
+    private static String coverPosLine(int[][] top) {
+        String[] name = {"百位", "十位", "个位"};
+        StringBuilder sb = new StringBuilder();
+        for (int p = 0; p < 3; p++) {
+            if (p > 0) {
+                sb.append(' ');
+            }
+            sb.append(name[p]).append(':');
+            for (int i = 0; i < top[p].length; i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append(top[p][i]);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String coverShuangLine(int[][] pairs) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pairs.length; i++) {
+            if (i > 0) {
+                sb.append(' ');
+            }
+            int a = Math.min(pairs[i][0], pairs[i][1]);
+            int b = Math.max(pairs[i][0], pairs[i][1]);
+            sb.append("组").append(i + 1).append(':').append(a).append(',').append(b);
+        }
+        return sb.toString();
+    }
+
+    private static boolean coverHas(int[] top, int digit) {
+        for (int x : top) {
+            if (x == digit) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 用最终出号重写对比表里的三码。已开期数计直选和组选。 */
     private static void regenSanma(StringBuilder sb, String name, boolean pl3, String histFile,
                                    String compareFile, String sheet) throws Exception {
@@ -7186,7 +7362,7 @@ public final class Flow1000Ranker {
         }
         cache.draws = draws;
         cache.note = String.format(Locale.ROOT, "近%d期 %s %d直%d组",
-                draws.size(), pl3 ? "固定补法" : "动态调整", zx, grp);
+                draws.size(), pl3 ? "热号和值" : "动态调整", zx, grp);
         saveTrend(trendFile, pl3);
         sb.append(String.format(Locale.ROOT, "%s %s%n", name, cache.note));
     }
@@ -10016,6 +10192,186 @@ public final class Flow1000Ranker {
         return out;
     }
 
+    /**
+     * 参考乐彩、500 公开缩水：和值贴近期均值，跨度留在给定区间，全奇全偶全大全小在近期不占多数时降权，
+     * 012 路贴近每位最近的热路，并给上期重号、邻号、和尾对码加分。不写入具体开奖号。
+     * spec：热窗、和值带宽、跨度下限、跨度上限、杀极端、避开上期原号、是否锁最热的一位。
+     */
+    private static int[] expertPool(int[][] digits, int end, int hotWindow, int sumBand,
+                                    int spanLo, int spanHi, boolean killExtreme, boolean skipRepeat, boolean lockHot) {
+        if (end < 8) {
+            return new int[0];
+        }
+        int from = Math.max(0, end - Math.max(8, hotWindow));
+        double[][] pos = new double[3][10];
+        int[][] road = new int[3][3];
+        int sum = 0;
+        int cnt = 0;
+        int extParity = 0;
+        int extSize = 0;
+        int recent = 0;
+        for (int t = from; t < end; t++) {
+            double w = Math.pow(0.9, end - 1 - t);
+            int a = digits[t][0];
+            int b = digits[t][1];
+            int c = digits[t][2];
+            pos[0][a] += w;
+            pos[1][b] += w;
+            pos[2][c] += w;
+            road[0][a % 3]++;
+            road[1][b % 3]++;
+            road[2][c % 3]++;
+            sum += a + b + c;
+            cnt++;
+            if (t >= end - 10) {
+                recent++;
+                int odd = a % 2 + b % 2 + c % 2;
+                if (odd == 0 || odd == 3) {
+                    extParity++;
+                }
+                int big = (a >= 5 ? 1 : 0) + (b >= 5 ? 1 : 0) + (c >= 5 ? 1 : 0);
+                if (big == 0 || big == 3) {
+                    extSize++;
+                }
+            }
+        }
+        double target = cnt == 0 ? 13.5 : sum / (double) cnt;
+        boolean banParity = killExtreme && recent > 0 && extParity * 2 < recent;
+        boolean banSize = killExtreme && recent > 0 && extSize * 2 < recent;
+        int last = end > 0 ? code(digits[end - 1]) : -1;
+        int pair = -1;
+        boolean[] touch = new boolean[10];
+        if (last >= 0) {
+            int a = last / 100;
+            int b = (last / 10) % 10;
+            int c = last % 10;
+            pair = (a + b + c + 5) % 10;
+            int[] near = {a, b, c, (a + 1) % 10, (a + 9) % 10, (b + 1) % 10, (b + 9) % 10,
+                    (c + 1) % 10, (c + 9) % 10, pair};
+            for (int d : near) {
+                touch[d] = true;
+            }
+        }
+        int[] hotRoad = new int[3];
+        int[] lockDigit = {-1, -1, -1};
+        int lockPos = -1;
+        double lockMargin = 0;
+        for (int p = 0; p < 3; p++) {
+            int roadPick = 0;
+            for (int r = 1; r < 3; r++) {
+                if (road[p][r] > road[p][roadPick]) {
+                    roadPick = r;
+                }
+            }
+            hotRoad[p] = roadPick;
+            int top = 0;
+            for (int d = 1; d < 10; d++) {
+                if (pos[p][d] > pos[p][top]) {
+                    top = d;
+                }
+            }
+            lockDigit[p] = top;
+            int second = top == 0 ? 1 : 0;
+            for (int d = 0; d < 10; d++) {
+                if (d != top && pos[p][d] > pos[p][second]) {
+                    second = d;
+                }
+            }
+            double margin = pos[p][top] - pos[p][second];
+            if (margin > lockMargin) {
+                lockMargin = margin;
+                lockPos = p;
+            }
+        }
+        int[] ids = new int[48];
+        double[] scores = new double[48];
+        int n = 0;
+        for (int id = 0; id < 1000; id++) {
+            if (skipRepeat && id == last) {
+                continue;
+            }
+            int a = id / 100;
+            int b = (id / 10) % 10;
+            int c = id % 10;
+            if (lockHot && lockPos >= 0) {
+                int digit = lockPos == 0 ? a : lockPos == 1 ? b : c;
+                if (digit != lockDigit[lockPos]) {
+                    continue;
+                }
+            }
+            int s = a + b + c;
+            if (Math.abs(s - target) > sumBand) {
+                continue;
+            }
+            int span = Math.max(a, Math.max(b, c)) - Math.min(a, Math.min(b, c));
+            if (span < spanLo || span > spanHi) {
+                continue;
+            }
+            int odd = a % 2 + b % 2 + c % 2;
+            if (banParity && (odd == 0 || odd == 3)) {
+                continue;
+            }
+            int big = (a >= 5 ? 1 : 0) + (b >= 5 ? 1 : 0) + (c >= 5 ? 1 : 0);
+            if (banSize && (big == 0 || big == 3)) {
+                continue;
+            }
+            double sc = pos[0][a] + pos[1][b] + pos[2][c] - Math.abs(s - target) * 0.05;
+            if (a % 3 == hotRoad[0]) {
+                sc += 0.15;
+            }
+            if (b % 3 == hotRoad[1]) {
+                sc += 0.15;
+            }
+            if (c % 3 == hotRoad[2]) {
+                sc += 0.15;
+            }
+            if (touch[a] || touch[b] || touch[c]) {
+                sc += 0.25;
+            }
+            if (pair >= 0 && (a == pair || b == pair || c == pair)) {
+                sc += 0.2;
+            }
+            n = consider(ids, scores, n, ids.length, id, sc);
+        }
+        return Arrays.copyOf(ids, n);
+    }
+
+    /** 补票前 keep 注换成核心里没有的候选，剩下仍用原来的补法。候选不够时用原补法补满。 */
+    private static int[] reserveExtra(int[] core, int[] preferred, int[] extra, int keep) {
+        int[] out = new int[5];
+        boolean[] used = new boolean[1000];
+        if (core != null) {
+            for (int id : core) {
+                if (id >= 0 && id < 1000) {
+                    used[id] = true;
+                }
+            }
+        }
+        int taken = 0;
+        int f = 0;
+        if (preferred != null) {
+            for (int id : preferred) {
+                if (taken >= keep || f >= out.length) {
+                    break;
+                }
+                int before = f;
+                f = addPlain(out, used, f, id);
+                if (f > before) {
+                    taken++;
+                }
+            }
+        }
+        if (extra != null) {
+            for (int id : extra) {
+                if (f >= out.length) {
+                    break;
+                }
+                f = addPlain(out, used, f, id);
+            }
+        }
+        return Arrays.copyOf(out, f);
+    }
+
     /** 15 注之外的补票。0 原池后5，1 第二序，2 去掉定位平移，3 平移反向，4 按分不贴上期，5 冷号跳跃，6 按近8期失手切换。 */
     private static int[] extraFive(int[][] digits, int end, boolean pl3, TenRule rule, int[] core, int kind) {
         int mode = kind;
@@ -10652,6 +11008,135 @@ public final class Flow1000Ranker {
                 "近%d 未中%d 覆盖0/1/2/3位=%d/%d/%d/%d 落空百十个=%d/%d/%d 最近票距离%.1f%n",
                 periods, miss, cover[0], cover[1], cover[2], cover[3],
                 outPos[0], outPos[1], outPos[2], miss == 0 ? 0 : minHamSum / (double) miss));
+    }
+
+    private static boolean[][] hotBox(double[][] pos, TenRule rule) {
+        boolean[][] hot = new boolean[3][10];
+        int[] take = {Math.min(10, rule.a), Math.min(10, rule.b), Math.min(10, rule.c)};
+        for (int p = 0; p < 3; p++) {
+            for (int d : topK(pos[p], Math.max(1, take[p]))) {
+                hot[p][d] = true;
+            }
+        }
+        return hot;
+    }
+
+    /** 补票前两注留给连续落选、仍在热号格子里的直选序，剩下的位置继续用原来的补法。 */
+    private static int[] keepStickyGroups(int[][] digits, int end, boolean pl3, TenRule rule,
+                                          int[] core, int[] extra, int keep) {
+        int[] sticky = stickyGroupExtras(digits, end, pl3, rule, core);
+        int[] out = new int[5];
+        boolean[] used = new boolean[1000];
+        if (core != null) {
+            for (int id : core) {
+                if (id >= 0 && id < 1000) {
+                    used[id] = true;
+                }
+            }
+        }
+        int f = 0;
+        for (int i = 0; i < sticky.length && i < keep && f < out.length; i++) {
+            f = addPlain(out, used, f, sticky[i]);
+        }
+        if (extra != null) {
+            for (int id : extra) {
+                if (f >= out.length) {
+                    break;
+                }
+                f = addPlain(out, used, f, id);
+            }
+        }
+        return Arrays.copyOf(out, f);
+    }
+
+    /** 连续两期以上留在核心、这一期被近上期挤掉、三位仍在热号格子里的组，按定位分留直选序。 */
+    private static int[] stickyGroupExtras(int[][] digits, int end, boolean pl3, TenRule rule, int[] core) {
+        if (end < 42) {
+            return new int[0];
+        }
+        int[] stay = new int[1000];
+        int[] sample = new int[1000];
+        Arrays.fill(sample, -1);
+        for (int back = 1; back <= 3 && end - back >= 40; back++) {
+            int[] prev = clipTo(tenTickets(digits, end - back, pl3, rule), 15);
+            boolean[] seen = new boolean[1000];
+            for (int id : prev) {
+                if (id < 0 || id >= 1000) {
+                    continue;
+                }
+                int g = groupKey(id);
+                if (seen[g]) {
+                    continue;
+                }
+                seen[g] = true;
+                stay[g]++;
+                if (sample[g] < 0) {
+                    sample[g] = id;
+                }
+            }
+        }
+        boolean[] inCore = new boolean[1000];
+        if (core != null) {
+            for (int id : core) {
+                if (id >= 0 && id < 1000) {
+                    inCore[groupKey(id)] = true;
+                }
+            }
+        }
+        double[][] pos = boxPos(digits, end, rule);
+        boolean[][] hot = hotBox(pos, rule);
+        int[] ids = new int[32];
+        int[] weight = new int[32];
+        double[] scores = new double[32];
+        int n = 0;
+        for (int g = 0; g < 1000; g++) {
+            if (stay[g] < 2 || inCore[g] || sample[g] < 0) {
+                continue;
+            }
+            int best = bestHotOrder(sample[g], pos);
+            int h = best / 100;
+            int ten = (best / 10) % 10;
+            int unit = best % 10;
+            if (!hot[0][h] || !hot[1][ten] || !hot[2][unit]) {
+                continue;
+            }
+            if (n >= ids.length) {
+                break;
+            }
+            ids[n] = best;
+            weight[n] = stay[g];
+            scores[n] = seqScore(best, pos);
+            n++;
+        }
+        Integer[] ord = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            ord[i] = i;
+        }
+        Arrays.sort(ord, (i, j) -> {
+            if (weight[i] != weight[j]) {
+                return Integer.compare(weight[j], weight[i]);
+            }
+            int cmp = Double.compare(scores[j], scores[i]);
+            return cmp != 0 ? cmp : Integer.compare(ids[i], ids[j]);
+        });
+        int[] out = new int[n];
+        for (int i = 0; i < n; i++) {
+            out[i] = ids[ord[i]];
+        }
+        return out;
+    }
+
+    private static int bestHotOrder(int id, double[][] pos) {
+        int best = id;
+        double bestS = seqScore(id, pos);
+        for (int perm : allPerms(id)) {
+            double s = seqScore(perm, pos);
+            if (s > bestS || (s == bestS && perm < best)) {
+                bestS = s;
+                best = perm;
+            }
+        }
+        return best;
     }
 
     private static void dumpRecent(StringBuilder sb, int[][] digits, boolean pl3, TenRule rule) {

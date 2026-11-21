@@ -6,7 +6,6 @@ import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.CompareVO;
 import com.zfl.caipiao.export.Hm;
 import com.zfl.caipiao.service.DadiService;
-import com.zfl.caipiao.service.PnlService;
 import com.zfl.caipiao.utils.Flow1000Ranker;
 import com.zfl.caipiao.utils.ShuangDanBackfill;
 import jakarta.annotation.Resource;
@@ -36,8 +35,6 @@ public class AppStarter implements ApplicationRunner {
    private String fileLocationTrendPl3;
    @Resource
    private DadiService dadiService;
-   @Resource
-   private PnlService pnlService;
 
    public void run(ApplicationArguments args) throws Exception {
       List<Hm> sdList = ((ExcelReaderBuilder)EasyExcel.read(this.fileLocation3d).head(Hm.class)).sheet().doReadSync();
@@ -93,8 +90,6 @@ public class AppStarter implements ApplicationRunner {
       System.out.println("3dDadiCompareCache:" + HmCache.getSdDadiCompareCache().size());
       this.dadiService.loadFromExcel(false, this.fileLocationComparePl3Dadi);
       System.out.println("pl3DadiCompareCache:" + HmCache.getPl3DadiCompareCache().size());
-      this.pnlService.loadFromExcel();
-      System.out.println("pnlCache:" + HmCache.getPnlCache().size());
       Flow1000Ranker.loadTrend(this.fileLocationTrend3d, false);
       Flow1000Ranker.loadTrend(this.fileLocationTrendPl3, true);
    }

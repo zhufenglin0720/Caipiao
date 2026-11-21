@@ -2,9 +2,7 @@ package com.zfl.caipiao.controller;
 
 import com.zfl.caipiao.cache.HmCache;
 import com.zfl.caipiao.export.Hm;
-import com.zfl.caipiao.service.PnlService;
 import com.zfl.caipiao.utils.Flow1000Ranker;
-import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,18 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping({"/data"})
 public class DataController {
-   @Resource
-   private PnlService pnlService;
-
    @GetMapping
    public Map<String, Object> getData() {
       Map<String, Object> result = new HashMap<>();
@@ -50,119 +42,6 @@ public class DataController {
       result.put("sdDadi", toDadiList(HmCache.getSdDadiCompareCache(), sdCompareCache));
       result.put("pl3Dadi", toDadiList(HmCache.getPl3DadiCompareCache(), pl3CompareCache));
       return result;
-   }
-
-   @PostMapping({"/pnl/auth"})
-   public Map<String, Object> authPnl(@RequestBody Map<String, String> body) {
-      Map<String, Object> result = new HashMap<>();
-      String password = body.get("password");
-      if (!this.pnlService.verifyPassword(password)) {
-         result.put("success", false);
-         result.put("message", "密码错误");
-         return result;
-      } else {
-         result.put("success", true);
-         result.put("token", this.pnlService.createAuthToken());
-         result.put("message", "验证成功");
-         return result;
-      }
-   }
-
-   @GetMapping({"/pnl"})
-   public Map<String, Object> getPnl(@RequestHeader(value = "X-Pnl-Token",required = false) String token) {
-      Map<String, Object> unauthorized = this.unauthorizedPnl(token);
-      if (unauthorized != null) {
-         return unauthorized;
-      } else {
-         Map<String, Object> result = new HashMap<>();
-         result.put("success", true);
-         result.put("records", this.pnlService.listRecords());
-         result.put("summary", this.pnlService.summary());
-         return result;
-      }
-   }
-
-   @PostMapping({"/pnl"})
-   public Map<String, Object> savePnl(@RequestHeader(value = "X-Pnl-Token",required = false) String token, @RequestBody Map<String, Object> body) {
-      Map<String, Object> unauthorized = this.unauthorizedPnl(token);
-      if (unauthorized != null) {
-         return unauthorized;
-      } else {
-         Map<String, Object> result = new HashMap<>();
-         String date = body.get("date") != null ? body.get("date").toString() : null;
-         Object ticketObj = body.get("ticketAmount");
-         Object winObj = body.get("winAmount");
-         if (date != null && ticketObj != null && winObj != null) {
-            try {
-               double ticketAmount = Double.parseDouble(ticketObj.toString());
-               double winAmount = Double.parseDouble(winObj.toString());
-               this.pnlService.saveRecord(date, ticketAmount, winAmount);
-               result.put("success", true);
-               result.put("message", "保存成功");
-               result.put("records", this.pnlService.listRecords());
-               result.put("summary", this.pnlService.summary());
-            } catch (NumberFormatException var12) {
-               result.put("success", false);
-               result.put("message", "金额格式无效");
-            } catch (IllegalArgumentException var13) {
-               result.put("success", false);
-               result.put("message", var13.getMessage());
-            } catch (Exception var14) {
-               result.put("success", false);
-               result.put("message", "保存失败：" + var14.getMessage());
-            }
-
-            return result;
-         } else {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-         }
-      }
-   }
-
-   @PostMapping({"/pnl/delete"})
-   public Map<String, Object> deletePnl(@RequestHeader(value = "X-Pnl-Token",required = false) String token, @RequestBody Map<String, String> body) {
-      Map<String, Object> unauthorized = this.unauthorizedPnl(token);
-      if (unauthorized != null) {
-         return unauthorized;
-      } else {
-         Map<String, Object> result = new HashMap<>();
-         String date = body.get("date");
-         if (date == null) {
-            result.put("success", false);
-            result.put("message", "参数不完整");
-            return result;
-         } else {
-            try {
-               this.pnlService.deleteRecord(date);
-               result.put("success", true);
-               result.put("message", "删除成功");
-               result.put("records", this.pnlService.listRecords());
-               result.put("summary", this.pnlService.summary());
-            } catch (IllegalArgumentException var7) {
-               result.put("success", false);
-               result.put("message", var7.getMessage());
-            } catch (Exception var8) {
-               result.put("success", false);
-               result.put("message", "删除失败：" + var8.getMessage());
-            }
-
-            return result;
-         }
-      }
-   }
-
-   private Map<String, Object> unauthorizedPnl(String token) {
-      if (this.pnlService.isValidToken(token)) {
-         return null;
-      } else {
-         Map<String, Object> result = new HashMap<>();
-         result.put("success", false);
-         result.put("message", "未授权，请先输入密码");
-         result.put("unauthorized", true);
-         return result;
-      }
    }
 
    private List<Map<String, String>> toCompareList(List<HmCache.CompareDto> list, List<HmCache.DadiCompareDto> dadiList) {
