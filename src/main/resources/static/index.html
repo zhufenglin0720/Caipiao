@@ -2646,6 +2646,16 @@
         return compareType === 'dadi' || compareType === 'dadi1000' || compareType === 'overfit';
     }
 
+    function rowHasPrediction(item, compareType) {
+        if (!item) return false;
+        if (compareType === 'sanma') return !!(item.aiRecommendHm || item.aiHm) || !item.realHm;
+        if (compareType === 'danma') return !!item.aiDanMaHm;
+        if (compareType === 'shuangdan') return !!item.aiShuangDanHm;
+        if (compareType === 'qima') return !!item.aiDingWeiHm;
+        if (compareType === 'overfit') return !!item.aiOverfitHm;
+        return true;
+    }
+
     function getCompareData(type, compareType) {
         if (compareType === 'trend') {
             const list = type === '3d' ? currentData.sdTrend : currentData.pl3Trend;
@@ -2655,7 +2665,8 @@
             const list = type === '3d' ? currentData.sdDadi : currentData.pl3Dadi;
             return Array.isArray(list) ? list : [];
         }
-        return type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
+        const list = type === '3d' ? currentData.sdCompare : currentData.pl3Compare;
+        return (Array.isArray(list) ? list : []).filter(item => rowHasPrediction(item, compareType));
     }
 
     function updatePredictTableHead(type, compareType) {

@@ -220,14 +220,14 @@ public class DataController {
       return "";
    }
 
-   /** 最近 200 期回放，已落盘的预测优先。下一期只展示定时任务留下、尚未写开奖号的一行，页面不现算。 */
+   /** 最近 500 期回放，已落盘的预测优先。下一期只展示定时任务留下、尚未写开奖号的一行，页面不现算。 */
    private static List<Map<String, String>> trendRows(List<Hm> history, int[][] digits, boolean pl3) {
       List<Map<String, String>> rows = new ArrayList<>();
       if (digits == null || history == null) {
          return rows;
       }
       int n = Math.min(digits.length, history.size());
-      int from = Math.max(40, n - Flow1000Ranker.TREND_LOOK);
+      int from = Math.max(40, n - Flow1000Ranker.HISTORY_KEEP);
       for (int i = from; i < n; i++) {
          Hm hm = history.get(i);
          String qh = hm == null || hm.getQh() == null ? "" : hm.getQh();

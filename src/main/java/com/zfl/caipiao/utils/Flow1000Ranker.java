@@ -153,6 +153,8 @@ public final class Flow1000Ranker {
 
     /** 大趋势三码：规则仍按 15 注在最近 200 期上留下，发出去时再动态补到 20 注。 */
     public static final int TREND_LOOK = 200;
+    /** 大趋势和短周期三码在页面和文件里保留的期数。选规则仍用上面的 200 期。 */
+    public static final int HISTORY_KEEP = 500;
     /** 选规则、快扫、重合都按这 15 注，避免补票把已经中过的直选换掉。 */
     public static final int TREND_OUT = 15;
     /** 三码和大趋势实际发出的注数。前 15 注是原规则，后 5 注是动态补票。 */
@@ -386,7 +388,14 @@ public final class Flow1000Ranker {
     }
 
     private static void trimTrendDraws(TrendCache cache) {
-        while (cache.draws.size() > 400) {
+        int pending = 0;
+        for (TrendDraw draw : cache.draws) {
+            if (trimToEmpty(draw.realHm).isEmpty()) {
+                pending++;
+            }
+        }
+        int cap = HISTORY_KEEP + pending;
+        while (cache.draws.size() > cap) {
             cache.draws.remove(0);
         }
     }
@@ -4874,6 +4883,15 @@ public final class Flow1000Ranker {
         }
         int[][] sd = loadGame(true, localOnly);
         int[][] pl = loadGame(false, localOnly);
+        if (args != null && args.length > 0 && "keep500".equals(args[0])) {
+            StringBuilder sb = new StringBuilder();
+            regenTrend(sb, "福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
+            regenTrend(sb, "排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三大趋势.txt");
+            extendSanma(sb, "福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "3D比对结果");
+            extendSanma(sb, "排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "排列三比对结果");
+            System.out.println(sb);
+            return;
+        }
         if (args != null && args.length > 0 && "coverfile".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             regenCover(sb, "福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "3D比对结果");
@@ -6790,14 +6808,14 @@ public final class Flow1000Ranker {
 
     /**
      * 用当前三码规则和大趋势规则，按开奖前的历史重算已保存的预测。
-     * 三码写回对比表的推荐号码。大趋势写下最近 200 期，每期带上已开号码。
+     * 三码写回对比表的推荐号码。大趋势写下最近 500 期，每期带上已开号码。
      */
     private static void replayStored() throws Exception {
         replayGame("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D对比.xlsx", "D:/彩票/3D大趋势.txt", "3D比对结果", true);
         replayGame("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三对比.xlsx", "D:/彩票/排列三大趋势.txt", "排列三比对结果", true);
     }
 
-    /** 只重写大趋势最近 200 期，不动三码对比表。 */
+    /** 只重写大趋势最近 500 期，不动三码对比表。 */
     private static void replayTrend() {
         writeTrendHistory("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
         writeTrendHistory("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三大趋势.txt");
@@ -6813,7 +6831,7 @@ public final class Flow1000Ranker {
             return;
         }
         cache.draws = new ArrayList<>();
-        int from = Math.max(40, digits.length - TREND_LOOK);
+        int from = Math.max(40, digits.length - HISTORY_KEEP);
         int trendZx = 0;
         int trendGrp = 0;
         for (int i = from; i < digits.length; i++) {
@@ -7275,6 +7293,73 @@ public final class Flow1000Ranker {
         return false;
     }
 
+    /** 短周期三码补到最近 500 期。已有行的预测不动，只补缺的期。 */
+    private static void extendSanma(StringBuilder sb, String name, boolean pl3, String histFile,
+                                    String compareFile, String sheet) throws Exception {
+        List<Hm> history = readHistory(histFile);
+        int[][] digits = digitsOf(history);
+        TenRule rule = highRule(pl3);
+        List<CompareVO> rows = EasyExcel.read(compareFile).head(CompareVO.class).sheet().doReadSync();
+        Map<String, CompareVO> byQh = new HashMap<>();
+        List<CompareVO> pending = new ArrayList<>();
+        for (CompareVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            if (trimToEmpty(row.getRealHm()).isEmpty()) {
+                pending.add(row);
+                continue;
+            }
+            if (!trimToEmpty(row.getQh()).isEmpty()) {
+                byQh.put(row.getQh().trim(), row);
+            }
+        }
+        int from = Math.max(40, digits.length - HISTORY_KEEP);
+        List<CompareVO> out = new ArrayList<>();
+        int added = 0;
+        int kept = 0;
+        int zx = 0;
+        int grp = 0;
+        int scored = 0;
+        for (int i = from; i < digits.length; i++) {
+            Hm hm = history.get(i);
+            String qh = hm.getQh() == null ? "" : hm.getQh().trim();
+            CompareVO row = byQh.remove(qh);
+            if (row == null) {
+                row = new CompareVO();
+                row.setQh(qh);
+                row.setRealHm(String.format(Locale.ROOT, "%03d", code(digits[i])));
+                row.setAiRecommendHm(csv(publishTickets(digits, i, pl3, rule)));
+                added++;
+            } else {
+                kept++;
+                if (trimToEmpty(row.getAiRecommendHm()).isEmpty()) {
+                    row.setAiRecommendHm(csv(publishTickets(digits, i, pl3, rule)));
+                }
+            }
+            out.add(row);
+            int id = codeOf(row.getRealHm());
+            if (id < 0) {
+                continue;
+            }
+            scored++;
+            int[] ids = parseIds(row.getAiRecommendHm());
+            if (hasId(ids, id)) {
+                zx++;
+            }
+            if (groupHit(ids, id)) {
+                grp++;
+            }
+        }
+        out.addAll(pending);
+        Path target = Path.of(compareFile);
+        Path tmp = Path.of(compareFile + ".writing.xlsx");
+        EasyExcel.write(tmp.toString(), CompareVO.class).sheet(sheet).doWrite(out);
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        sb.append(String.format(Locale.ROOT, "%s 短周期 保留%d行 补上%d行，已开%d期 %d直%d组%n",
+                name, kept, added, scored, zx, grp));
+    }
+
     /** 用最终出号重写对比表里的三码。已开期数计直选和组选。 */
     private static void regenSanma(StringBuilder sb, String name, boolean pl3, String histFile,
                                    String compareFile, String sheet) throws Exception {
@@ -7329,7 +7414,7 @@ public final class Flow1000Ranker {
         sb.append(String.format(Locale.ROOT, "%s 重写%d行，已开%d期 %d直%d组%n", name, changed, scored, zx, grp));
     }
 
-    /** 用已保存的大趋势规则，按最终出号重写最近 200 期。 */
+    /** 用已保存的大趋势规则，按最终出号重写最近 500 期。未开奖的一行留在末尾。 */
     private static void regenTrend(StringBuilder sb, String name, boolean pl3, String histFile, String trendFile) {
         loadTrend(trendFile, pl3);
         TenRule rule = trendRule(pl3);
@@ -7340,7 +7425,15 @@ public final class Flow1000Ranker {
         }
         List<Hm> history = readHistory(histFile);
         int[][] digits = digitsOf(history);
-        int from = Math.max(40, digits.length - TREND_LOOK);
+        int from = Math.max(40, digits.length - HISTORY_KEEP);
+        List<TrendDraw> pending = new ArrayList<>();
+        if (cache.draws != null) {
+            for (TrendDraw draw : cache.draws) {
+                if (trimToEmpty(draw.realHm).isEmpty()) {
+                    pending.add(draw);
+                }
+            }
+        }
         List<TrendDraw> draws = new ArrayList<>();
         int zx = 0;
         int grp = 0;
@@ -7360,9 +7453,11 @@ public final class Flow1000Ranker {
                 grp++;
             }
         }
+        int opened = draws.size();
+        draws.addAll(pending);
         cache.draws = draws;
         cache.note = String.format(Locale.ROOT, "近%d期 %s %d直%d组",
-                draws.size(), pl3 ? "热号和值" : "动态调整", zx, grp);
+                opened, pl3 ? "热号和值" : "动态调整", zx, grp);
         saveTrend(trendFile, pl3);
         sb.append(String.format(Locale.ROOT, "%s %s%n", name, cache.note));
     }
@@ -7563,7 +7658,7 @@ public final class Flow1000Ranker {
             return;
         }
         cache.draws = new ArrayList<>();
-        int from = Math.max(40, digits.length - TREND_LOOK);
+        int from = Math.max(40, digits.length - HISTORY_KEEP);
         int trendZx = 0;
         int trendGrp = 0;
         int trendN = 0;
