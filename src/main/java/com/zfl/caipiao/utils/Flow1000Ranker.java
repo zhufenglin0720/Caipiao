@@ -67,6 +67,12 @@ public final class Flow1000Ranker {
     private static volatile TrendCache plTrendCache;
     private static final Object SD_TREND_LOCK = new Object();
     private static final Object PL_TREND_LOCK = new Object();
+    private static volatile ShortPick sdShort;
+    private static volatile ShortPick plShort;
+    private static final Object SD_SHORT_LOCK = new Object();
+    private static final Object PL_SHORT_LOCK = new Object();
+    /** 同一次短周期选规则里，同一套规则、同一个出票点只算一次。 */
+    private static final ThreadLocal<Map<String, int[][]>> SHORT_TICKETS = new ThreadLocal<>();
 
     /** 三码平移窗口。衰减小于 1 时，窗口里越近的期越决定百十个差。 */
     static int sdWindow = 16;
@@ -110,9 +116,9 @@ public final class Flow1000Ranker {
         String note = pl3 ? plCoverNote : sdCoverNote;
         String game = pl3 ? "排列三" : "福彩3D";
         if (note == null || note.isEmpty()) {
-            return game + ":三码" + ISSUED_OUT + "注近" + SANMA_LOOK + " " + highRule(pl3).text();
+            return game + ":三码" + ISSUED_OUT + "注按近" + SHORT_LOOK + "期直选、组选现选";
         }
-        return game + ":三码" + ISSUED_OUT + "注近" + SANMA_LOOK + " " + note;
+        return game + ":三码" + ISSUED_OUT + "注 " + note;
     }
 
     public static String csv(int[] ids) {
@@ -511,38 +517,69 @@ public final class Flow1000Ranker {
     }
 
     /**
-     * 高胜率规则先出原来的 15 注，再按这套规则近期怎么失手补 5 注。
-     * 上期整组跟偏差会掉直选，不搬到原来的 15 注上。
+     * 用最近 30 期的走势选出规则，再出下一期。
+     * 直选期数多的留下；直选相同再留组选更多的。组选含直选。
+     * 前 15 注是选出的规则，后 5 注仍按这套规则近期怎么失手来补。
      */
     private static int[] nearSanma(int[][] digits, int end, boolean pl3) {
         if (end < 40) {
             return clipSanma(base20(digits, end, pl3));
         }
-        TenRule rule = highRule(pl3);
-        int[] now = publishTickets(digits, end, pl3, rule);
-        int from = Math.max(40, end - SANMA_LOOK);
-        int z = 0;
-        int g = 0;
-        for (int t = from; t < end; t++) {
-            int[] bets = publishTickets(digits, t, pl3, rule);
-            int id = code(digits[t]);
-            if (has(bets, id)) {
-                z++;
-            }
-            if (groupHit(bets, id)) {
-                g++;
-            }
+        int mark = shortMark(digits, end);
+        ShortPick cache = pl3 ? plShort : sdShort;
+        if (cache != null && cache.n == end && cache.mark == mark && cache.bets != null) {
+            rememberShort(pl3, cache.note);
+            return cache.bets;
         }
-        rule.zx = z;
-        rule.grp = g;
-        String note = rule.text() + " " + (pl3 ? supplementName(pl3, rule)
-                : "动态调整 " + modeLabel(dynamicExtraMode(digits, end, pl3, rule)));
-        if (pl3) {
-            plCoverNote = note;
-        } else {
-            sdCoverNote = note;
+        Object lock = pl3 ? PL_SHORT_LOCK : SD_SHORT_LOCK;
+        synchronized (lock) {
+            cache = pl3 ? plShort : sdShort;
+            if (cache != null && cache.n == end && cache.mark == mark && cache.bets != null) {
+                rememberShort(pl3, cache.note);
+                return cache.bets;
+            }
+            SHORT_TICKETS.set(new HashMap<>());
+            TenRule rule = highRule(pl3);
+            int[] now = new int[0];
+            String note = "";
+            try {
+                rule = pickShort(digits, end, pl3);
+                now = publishTickets(digits, end, pl3, rule);
+                int from = Math.max(40, end - SHORT_LOOK);
+                int z = 0;
+                int g = 0;
+                for (int t = from; t < end; t++) {
+                    int[] bets = publishTickets(digits, t, pl3, rule);
+                    int id = code(digits[t]);
+                    if (has(bets, id)) {
+                        z++;
+                    }
+                    if (groupHit(bets, id)) {
+                        g++;
+                    }
+                }
+                rule.zx = z;
+                rule.grp = g;
+                note = "近" + (end - from) + " " + z + "直" + g + "组 " + trendBody(rule) + " "
+                        + (pl3 ? supplementName(pl3, rule)
+                        : "动态调整 " + modeLabel(dynamicExtraMode(digits, end, pl3, rule)));
+            } finally {
+                SHORT_TICKETS.remove();
+            }
+            rememberShort(pl3, note);
+            ShortPick picked = new ShortPick();
+            picked.n = end;
+            picked.mark = mark;
+            picked.rule = rule;
+            picked.note = note;
+            picked.bets = now;
+            if (pl3) {
+                plShort = picked;
+            } else {
+                sdShort = picked;
+            }
+            return now;
         }
-        return now;
     }
 
     /**
@@ -657,6 +694,302 @@ public final class Flow1000Ranker {
         rule.cut = 8;
         rule.keep = 8;
         return rule;
+    }
+
+    /** 短周期选规则用的期数。只看开奖前这 30 期，再预测下一期。 */
+    private static final int SHORT_LOOK = 30;
+
+    private static final class ShortPick {
+        int n;
+        int mark;
+        TenRule rule;
+        String note;
+        int[] bets;
+    }
+
+    private static final class ShortCand {
+        TenRule rule;
+        int zx;
+        int grp;
+    }
+
+    /** 某一套冷热窗口在近 30 期每个出票点上的定位分。 */
+    private static final class HotPack {
+        int len;
+        int[] draw;
+        int[] prev;
+        double[][][] pos;
+        int[][][] ord;
+    }
+
+    private static void rememberShort(boolean pl3, String note) {
+        if (pl3) {
+            plCoverNote = note;
+        } else {
+            sdCoverNote = note;
+        }
+    }
+
+    private static int shortMark(int[][] digits, int end) {
+        int mark = end;
+        int from = Math.max(0, end - SHORT_LOOK);
+        for (int t = from; t < end; t++) {
+            mark = mark * 1009 + code(digits[t]);
+        }
+        return mark;
+    }
+
+    /**
+     * 在最近 30 期上留下直选更多的规则；直选相同再留组选更多的。
+     * 候选都是近 10、20、30 期的冷热走势。现行规则一直留在比较里，直选不会因此变少。
+     */
+    private static TenRule pickShort(int[][] digits, int end, boolean pl3) {
+        long t0 = System.currentTimeMillis();
+        String name = pl3 ? "排列三" : "福彩3D";
+        int from = Math.max(40, end - SHORT_LOOK);
+        TenRule current = highRule(pl3);
+        if (from >= end) {
+            return current;
+        }
+        HotPack cold = packHot(digits, from, end, 0, 1, true);
+        Map<String, HotPack> hots = new HashMap<>();
+        List<TenRule> bases = shortBases();
+        List<TenRule> seeds = new ArrayList<>();
+        seeds.add(current);
+        TrendBoard board = new TrendBoard();
+        int bi = 0;
+        for (TenRule base : bases) {
+            if ((bi++ % 600) == 0) {
+                System.out.println(name + " 短周期快扫 " + bi + "/" + bases.size());
+            }
+            HotPack hot = cold;
+            if (base.kind != 3) {
+                String key = base.window + ":" + Math.round(base.decay * 100);
+                hot = hots.get(key);
+                if (hot == null) {
+                    hot = packHot(digits, from, end, base.window, base.decay, false);
+                    hots.put(key, hot);
+                }
+            }
+            seeds.add(fastShort(hot, cold, base, board).rule);
+        }
+        List<Hit30> exact = new ArrayList<>();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (TenRule seed : seeds) {
+            if (!seen.add(trendKey(seed))) {
+                continue;
+            }
+            exact.add(scoreLookN(digits, from, end, pl3, seed, SANMA_OUT));
+        }
+        exact.sort(Flow1000Ranker::countOrder);
+        int bestCore = exact.isEmpty() ? 0 : exact.get(0).zx;
+        int[] oldHit = countIssued(digits, from, end, pl3, current);
+        TenRule chosen = current;
+        int chosenZ = oldHit[0];
+        int chosenG = oldHit[1];
+        int checked = 0;
+        for (Hit30 hit : exact) {
+            if (hit.zx < bestCore - 1) {
+                break;
+            }
+            if (hit.zx < bestCore && checked >= 12) {
+                break;
+            }
+            checked++;
+            if (sameRule(hit.rule, current)) {
+                continue;
+            }
+            int[] zg = countIssued(digits, from, end, pl3, hit.rule);
+            if (zg[0] > chosenZ || (zg[0] == chosenZ && zg[1] > chosenG)) {
+                chosen = hit.rule;
+                chosenZ = zg[0];
+                chosenG = zg[1];
+            }
+        }
+        chosen.zx = chosenZ;
+        chosen.grp = chosenG;
+        System.out.println(name + " 短周期近" + (end - from) + " 现行 " + oldHit[0] + "直" + oldHit[1]
+                + "组，留下 " + chosenZ + "直" + chosenG + "组 " + trendBody(chosen)
+                + " 耗时" + (System.currentTimeMillis() - t0) + "ms");
+        return chosen;
+    }
+
+    private static boolean sameRule(TenRule a, TenRule b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        return trendKey(a).equals(trendKey(b));
+    }
+
+    private static int[] countIssued(int[][] digits, int from, int end, boolean pl3, TenRule rule) {
+        int z = 0;
+        int g = 0;
+        for (int t = from; t < end; t++) {
+            int[] bets = publishTickets(digits, t, pl3, rule);
+            int id = code(digits[t]);
+            if (has(bets, id)) {
+                z++;
+            }
+            if (groupHit(bets, id)) {
+                g++;
+            }
+        }
+        return new int[]{z, g};
+    }
+
+    /** 热位、冷位、热冷各半。窗口只用近 10、20、30 期，越近的开奖权重越大。 */
+    private static List<TenRule> shortBases() {
+        List<TenRule> out = new ArrayList<>();
+        int[] windows = {10, 20, 30};
+        double[] decays = {1, 0.92, 0.85};
+        for (int w : windows) {
+            for (int a = 2; a <= 6; a++) {
+                for (int b = 2; b <= 6; b++) {
+                    for (int c = 2; c <= 6; c++) {
+                        int prod = a * b * c;
+                        if (prod < 12 || prod > 48) {
+                            continue;
+                        }
+                        for (double decay : decays) {
+                            addShort(out, 2, w, a, b, c, decay, 2, 0);
+                            addShort(out, 3, w, a, b, c, decay, 2, 0);
+                            addShort(out, 9, w, a, b, c, decay, 8, 8);
+                            addShort(out, 9, w, a, b, c, decay, 12, 8);
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void addShort(List<TenRule> out, int kind, int window, int a, int b, int c,
+                                 double decay, int cut, int keep) {
+        TenRule rule = new TenRule(kind, window, a, b, c);
+        rule.decay = decay;
+        rule.cut = cut;
+        rule.keep = keep;
+        out.add(rule);
+    }
+
+    private static HotPack packHot(int[][] digits, int from, int end, int window, double decay, boolean cold) {
+        int len = Math.max(0, end - from);
+        HotPack pack = new HotPack();
+        pack.len = len;
+        pack.draw = new int[len];
+        pack.prev = new int[len];
+        pack.pos = new double[len][][];
+        pack.ord = new int[len][3][10];
+        for (int i = 0; i < len; i++) {
+            int t = from + i;
+            pack.draw[i] = code(digits[t]);
+            pack.prev[i] = t > 0 ? code(digits[t - 1]) : 0;
+            pack.pos[i] = cold ? coldPos(digits, t) : hotPos(digits, t, window, decay);
+            for (int p = 0; p < 3; p++) {
+                orderDigits(pack.pos[i][p], pack.ord[i][p]);
+            }
+        }
+        return pack;
+    }
+
+    private static double[][] hotPos(int[][] digits, int end, int window, double decay) {
+        double[][] pos = new double[3][10];
+        int from = Math.max(0, end - Math.max(1, window));
+        int len = end - from;
+        for (int i = 0; i < len; i++) {
+            double wgt = decay >= 0.999 ? 1.0 : Math.pow(decay, len - 1 - i);
+            int t = from + i;
+            for (int p = 0; p < 3; p++) {
+                pos[p][digits[t][p]] += wgt;
+            }
+        }
+        return pos;
+    }
+
+    private static double[][] coldPos(int[][] digits, int end) {
+        double[][] pos = new double[3][10];
+        for (int p = 0; p < 3; p++) {
+            int[] om = omission(digits, end, p);
+            for (int x = 0; x < 10; x++) {
+                pos[p][x] = om[x];
+            }
+        }
+        return pos;
+    }
+
+    /** 快扫只用来缩短名单。平移后直选更多的那一档留下，直选相同再留组选。 */
+    private static ShortCand fastShort(HotPack hot, HotPack cold, TenRule rule, TrendBoard board) {
+        int aN = Math.min(10, Math.max(1, rule.a));
+        int bN = Math.min(10, Math.max(1, rule.b));
+        int cN = Math.min(10, Math.max(1, rule.c));
+        int len = hot.len;
+        int[][] kept = new int[len][];
+        for (int i = 0; i < len; i++) {
+            int n;
+            if (rule.kind == 9) {
+                int hotCut = (rule.cut == 8 || rule.cut == 12) ? 2 : rule.cut;
+                int coldCut = (rule.cut == 8 || rule.cut == 12) ? 1 : rule.cut;
+                int keep = rule.keep > 0 ? rule.keep : 10;
+                int hotN = fillBox(hot.ord[i], hot.pos[i], aN, bN, cN, hot.prev[i], hotCut, board.ids, board.scores);
+                int coldN = fillBox(cold.ord[i], cold.pos[i], aN, bN, cN, hot.prev[i], coldCut, board.idsB, board.scoresB);
+                n = merge15(board, board.ids, hotN, board.idsB, coldN, keep);
+            } else {
+                int got = fillBox(hot.ord[i], hot.pos[i], aN, bN, cN, hot.prev[i], rule.cut, board.ids, board.scores);
+                n = Math.min(SANMA_OUT, got);
+                System.arraycopy(board.ids, 0, board.merged, 0, n);
+            }
+            kept[i] = Arrays.copyOf(board.merged, n);
+        }
+        int bestZ = -1;
+        int bestG = -1;
+        int bestPos = -1;
+        int bestDelta = 0;
+        for (int pos = -1; pos <= 2; pos++) {
+            int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
+            for (int delta : deltas) {
+                int dh = pos == 0 ? delta : 0;
+                int dt = pos == 1 ? delta : 0;
+                int du = pos == 2 ? delta : 0;
+                int sz = 0;
+                int sg = 0;
+                for (int i = 0; i < len; i++) {
+                    int id = hot.draw[i];
+                    int g = groupKey(id);
+                    boolean direct = false;
+                    boolean group = false;
+                    int[] row = kept[i];
+                    for (int k = 0; k < row.length; k++) {
+                        int sid = pos < 0 ? row[k] : shiftId(row[k], dh, dt, du, true);
+                        if (sid == id) {
+                            direct = true;
+                        }
+                        if (groupKey(sid) == g) {
+                            group = true;
+                        }
+                    }
+                    if (direct) {
+                        sz++;
+                    }
+                    if (group) {
+                        sg++;
+                    }
+                }
+                if (sz > bestZ || (sz == bestZ && sg > bestG)) {
+                    bestZ = sz;
+                    bestG = sg;
+                    bestPos = pos;
+                    bestDelta = pos < 0 ? 0 : delta;
+                }
+            }
+        }
+        ShortCand cand = new ShortCand();
+        cand.rule = copyRule(rule, bestPos, bestDelta, 0);
+        cand.zx = Math.max(0, bestZ);
+        cand.grp = Math.max(0, bestG);
+        return cand;
     }
 
     private static final int TEN_LOOK = 10;
@@ -852,7 +1185,27 @@ public final class Flow1000Ranker {
     }
 
     private static int[] tenTickets(int[][] digits, int end, boolean pl3, TenRule rule) {
-        return compose(digits, end, tenBase(digits, end, pl3, rule), rule);
+        Map<String, int[][]> cache = SHORT_TICKETS.get();
+        String key = null;
+        int[][] row = null;
+        if (cache != null && end >= 0) {
+            key = trendKey(rule);
+            row = cache.get(key);
+            if (row != null && end < row.length && row[end] != null) {
+                return row[end];
+            }
+        }
+        int[] tickets = compose(digits, end, tenBase(digits, end, pl3, rule), rule);
+        if (cache != null && end >= 0) {
+            if (row == null) {
+                row = new int[digits.length + 1][];
+                cache.put(key, row);
+            }
+            if (end < row.length) {
+                row[end] = tickets;
+            }
+        }
+        return tickets;
     }
 
     private static int[] tenBase(int[][] digits, int end, boolean pl3, TenRule rule) {
@@ -4874,15 +5227,25 @@ public final class Flow1000Ranker {
 
     public static void main(String[] args) throws Exception {
         boolean localOnly = false;
+        boolean short30 = false;
         if (args != null) {
             for (String arg : args) {
                 if ("local".equals(arg)) {
                     localOnly = true;
+                } else if ("short30".equals(arg)) {
+                    short30 = true;
                 }
             }
         }
         int[][] sd = loadGame(true, localOnly);
         int[][] pl = loadGame(false, localOnly);
+        if (short30) {
+            System.out.println("福彩3D下一期 " + csv(sanma(sd, false)));
+            System.out.println(sdCoverNote);
+            System.out.println("排列三下一期 " + csv(sanma(pl, true)));
+            System.out.println(plCoverNote);
+            return;
+        }
         if (args != null && args.length > 0 && "keep500".equals(args[0])) {
             StringBuilder sb = new StringBuilder();
             regenTrend(sb, "福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
