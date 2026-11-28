@@ -46,9 +46,21 @@ public final class RegenExisting {
             if (args.length > 1) {
                 last = Integer.parseInt(args[1]);
             }
-            regenSanma("福彩3D", SD_COMPARE, sd, false, last);
-            regenSanma("排列三", PL_COMPARE, pl, true, last);
+            regenSanma("福彩3D", SD_COMPARE, sd, false, last, last > 0);
+            regenSanma("排列三", PL_COMPARE, pl, true, last, last > 0);
             System.out.println("三码写回完成。重启应用后页面会读到新表。");
+            return;
+        }
+        if (args != null && args.length > 0 && "trend".equals(args[0])) {
+            Flow1000Ranker.rewriteLatestTrend();
+            System.out.println("大趋势历史写回完成。重启应用后页面会读到新表。");
+            return;
+        }
+        if (args != null && args.length > 0 && "history".equals(args[0])) {
+            regenSanma("福彩3D", SD_COMPARE, sd, false, 0, true);
+            regenSanma("排列三", PL_COMPARE, pl, true, 0, true);
+            Flow1000Ranker.rewriteLatestTrend();
+            System.out.println("短周期和大趋势历史写回完成。重启应用后页面会读到新表。");
             return;
         }
         regenCompare("福彩3D", SD_COMPARE, sd, false);
@@ -97,8 +109,8 @@ public final class RegenExisting {
                 bets(back.get("C")), bets(back.get("E")), back.get("I"), back.get("G"), back.get("F"));
     }
 
-    /** 只重写三码预测和推荐号码，其它列原样保留。lastN>0 时只改表尾 lastN 期。 */
-    private static void regenSanma(String name, Path file, Hist hist, boolean pl3, int lastN) throws Exception {
+    /** 只重写三码预测和推荐号码，其它列原样保留。lastN>0 时只改表尾 lastN 期。lockLatest 用全历史上留下的一条规则回放。 */
+    private static void regenSanma(String name, Path file, Hist hist, boolean pl3, int lastN, boolean lockLatest) throws Exception {
         Sheet sheet = readSheet(file);
         List<Map<String, String>> before = new ArrayList<>();
         for (Map<String, String> row : sheet.rows) {
@@ -118,7 +130,7 @@ public final class RegenExisting {
         for (int i = start; i < sheet.rows.size(); i++) {
             Map<String, String> row = sheet.rows.get(i);
             String qh = row.getOrDefault("A", "").trim();
-            Pack pack = predictSanma(hist, qh, pl3, lastN > 0);
+            Pack pack = predictSanma(hist, qh, pl3, lockLatest);
             if (pack == null) {
                 kept++;
                 System.out.println(name + " 三码 " + qh + " 历史不足或对不上，原值保留");

@@ -154,7 +154,30 @@ public final class Flow1000Ranker {
         if (train == null || train.length < 40) {
             return sanma(prefix, pl3);
         }
-        return nearSanma(prefix, prefix.length, pl3);
+        TenRule rule = ensureShortRule(train, pl3);
+        return publishTickets(prefix, prefix.length, pl3, rule);
+    }
+
+    /** 在全部已开奖上留下短周期规则，同一条规则回放各期。 */
+    private static TenRule ensureShortRule(int[][] digits, boolean pl3) {
+        int end = digits.length;
+        int mark = shortMark(digits, end);
+        ShortPick cache = pl3 ? plShort : sdShort;
+        if (cache != null && cache.n == end && cache.mark == mark && cache.rule != null) {
+            return cache.rule;
+        }
+        sanma(digits, pl3);
+        cache = pl3 ? plShort : sdShort;
+        if (cache != null && cache.rule != null) {
+            return cache.rule;
+        }
+        return highRule(pl3);
+    }
+
+    /** 按最新大趋势规则重写两边最近 500 期。 */
+    public static void rewriteLatestTrend() {
+        writeTrendHistory("福彩3D", false, "D:/彩票/3D.xlsx", "D:/彩票/3D大趋势.txt");
+        writeTrendHistory("排列三", true, "D:/彩票/排列三.xlsx", "D:/彩票/排列三大趋势.txt");
     }
 
     /** 大趋势三码：规则仍按 15 注在最近 200 期上留下，发出去时再动态补到 20 注。 */
@@ -518,6 +541,7 @@ public final class Flow1000Ranker {
 
     /**
      * 用最近 30 期的走势选出规则，再出下一期。
+     * 最近 8 期的直选、组选优先；更早的期只在最近打平时再比，比重低于这 8 期。
      * 直选期数多的留下；直选相同再留组选更多的。组选含直选。
      * 前 15 注是选出的规则，后 5 注仍按这套规则近期怎么失手来补。
      */
@@ -546,21 +570,35 @@ public final class Flow1000Ranker {
                 rule = pickShort(digits, end, pl3);
                 now = publishTickets(digits, end, pl3, rule);
                 int from = Math.max(40, end - SHORT_LOOK);
+                int recentFrom = Math.max(from, end - SHORT_RECENT);
                 int z = 0;
                 int g = 0;
+                int rz = 0;
+                int rg = 0;
                 for (int t = from; t < end; t++) {
                     int[] bets = publishTickets(digits, t, pl3, rule);
                     int id = code(digits[t]);
-                    if (has(bets, id)) {
+                    boolean direct = has(bets, id);
+                    boolean group = groupHit(bets, id);
+                    if (direct) {
                         z++;
                     }
-                    if (groupHit(bets, id)) {
+                    if (group) {
                         g++;
+                    }
+                    if (t >= recentFrom) {
+                        if (direct) {
+                            rz++;
+                        }
+                        if (group) {
+                            rg++;
+                        }
                     }
                 }
                 rule.zx = z;
                 rule.grp = g;
-                note = "近" + (end - from) + " " + z + "直" + g + "组 " + trendBody(rule) + " "
+                note = "近" + (end - recentFrom) + " " + rz + "直" + rg + "组 近" + (end - from)
+                        + " " + z + "直" + g + "组 " + trendBody(rule) + " "
                         + (pl3 ? supplementName(pl3, rule)
                         : "动态调整 " + modeLabel(dynamicExtraMode(digits, end, pl3, rule)));
             } finally {
@@ -698,6 +736,8 @@ public final class Flow1000Ranker {
 
     /** 短周期选规则用的期数。只看开奖前这 30 期，再预测下一期。 */
     private static final int SHORT_LOOK = 30;
+    /** 这几期的直选、组选排在整窗前面。更早的期只用来拆平。 */
+    private static final int SHORT_RECENT = 8;
 
     private static final class ShortPick {
         int n;
@@ -740,8 +780,9 @@ public final class Flow1000Ranker {
     }
 
     /**
-     * 在最近 30 期上留下直选更多的规则；直选相同再留组选更多的。
-     * 候选都是近 10、20、30 期的冷热走势。现行规则一直留在比较里，直选不会因此变少。
+     * 在最近 30 期上留下规则。最近 8 期直选多的优先，直选相同再留组选更多的。
+     * 更早的期只在最近这 8 期打平时再比。候选都是近 10、20、30 期的冷热走势。
+     * 现行规则一直留在比较里。
      */
     private static TenRule pickShort(int[][] digits, int end, boolean pl3) {
         long t0 = System.currentTimeMillis();
@@ -781,18 +822,20 @@ public final class Flow1000Ranker {
             }
             exact.add(scoreLookN(digits, from, end, pl3, seed, SANMA_OUT));
         }
-        exact.sort(Flow1000Ranker::countOrder);
-        int bestCore = exact.isEmpty() ? 0 : exact.get(0).zx;
+        exact.sort(Flow1000Ranker::shortHitOrder);
+        int bestTail = exact.isEmpty() ? 0 : exact.get(0).tail;
         int[] oldHit = countIssued(digits, from, end, pl3, current);
         TenRule chosen = current;
         int chosenZ = oldHit[0];
         int chosenG = oldHit[1];
+        int chosenRz = oldHit[2];
+        int chosenRg = oldHit[3];
         int checked = 0;
         for (Hit30 hit : exact) {
-            if (hit.zx < bestCore - 1) {
+            if (checked >= 24) {
                 break;
             }
-            if (hit.zx < bestCore && checked >= 12) {
+            if (hit.tail < bestTail - 1 && checked >= 8) {
                 break;
             }
             checked++;
@@ -800,18 +843,41 @@ public final class Flow1000Ranker {
                 continue;
             }
             int[] zg = countIssued(digits, from, end, pl3, hit.rule);
-            if (zg[0] > chosenZ || (zg[0] == chosenZ && zg[1] > chosenG)) {
+            if (zg[2] > chosenRz || (zg[2] == chosenRz && zg[3] > chosenRg)
+                    || (zg[2] == chosenRz && zg[3] == chosenRg && zg[0] > chosenZ)
+                    || (zg[2] == chosenRz && zg[3] == chosenRg && zg[0] == chosenZ && zg[1] > chosenG)) {
                 chosen = hit.rule;
                 chosenZ = zg[0];
                 chosenG = zg[1];
+                chosenRz = zg[2];
+                chosenRg = zg[3];
             }
         }
         chosen.zx = chosenZ;
         chosen.grp = chosenG;
-        System.out.println(name + " 短周期近" + (end - from) + " 现行 " + oldHit[0] + "直" + oldHit[1]
-                + "组，留下 " + chosenZ + "直" + chosenG + "组 " + trendBody(chosen)
+        System.out.println(name + " 短周期近" + (end - from) + " 现行近" + SHORT_RECENT + " "
+                + oldHit[2] + "直" + oldHit[3] + "组、全窗 " + oldHit[0] + "直" + oldHit[1]
+                + "组，留下近" + SHORT_RECENT + " " + chosenRz + "直" + chosenRg + "组、全窗 "
+                + chosenZ + "直" + chosenG + "组 " + trendBody(chosen)
                 + " 耗时" + (System.currentTimeMillis() - t0) + "ms");
         return chosen;
+    }
+
+    /** 最近 8 期直选、组选在前，全窗直选、组选只在最近打平时再比。 */
+    private static int shortHitOrder(Hit30 a, Hit30 b) {
+        if (a.tail != b.tail) {
+            return Integer.compare(b.tail, a.tail);
+        }
+        if (a.tailGrp != b.tailGrp) {
+            return Integer.compare(b.tailGrp, a.tailGrp);
+        }
+        if (a.zx != b.zx) {
+            return Integer.compare(b.zx, a.zx);
+        }
+        if (a.grp != b.grp) {
+            return Integer.compare(b.grp, a.grp);
+        }
+        return Double.compare(a.overlap(), b.overlap());
     }
 
     private static boolean sameRule(TenRule a, TenRule b) {
@@ -824,20 +890,34 @@ public final class Flow1000Ranker {
         return trendKey(a).equals(trendKey(b));
     }
 
+    /** 返回全窗直选、全窗组选、最近 8 期直选、最近 8 期组选。组选含直选。 */
     private static int[] countIssued(int[][] digits, int from, int end, boolean pl3, TenRule rule) {
+        int recentFrom = Math.max(from, end - SHORT_RECENT);
         int z = 0;
         int g = 0;
+        int rz = 0;
+        int rg = 0;
         for (int t = from; t < end; t++) {
             int[] bets = publishTickets(digits, t, pl3, rule);
             int id = code(digits[t]);
-            if (has(bets, id)) {
+            boolean direct = has(bets, id);
+            boolean group = groupHit(bets, id);
+            if (direct) {
                 z++;
             }
-            if (groupHit(bets, id)) {
+            if (group) {
                 g++;
             }
+            if (t >= recentFrom) {
+                if (direct) {
+                    rz++;
+                }
+                if (group) {
+                    rg++;
+                }
+            }
         }
-        return new int[]{z, g};
+        return new int[]{z, g, rz, rg};
     }
 
     /** 热位、冷位、热冷各半。窗口只用近 10、20、30 期，越近的开奖权重越大。 */
@@ -920,7 +1000,7 @@ public final class Flow1000Ranker {
         return pos;
     }
 
-    /** 快扫只用来缩短名单。平移后直选更多的那一档留下，直选相同再留组选。 */
+    /** 快扫只用来缩短名单。平移后最近 8 期直选更多的留下，再比组选，更早的期只拆平。 */
     private static ShortCand fastShort(HotPack hot, HotPack cold, TenRule rule, TrendBoard board) {
         int aN = Math.min(10, Math.max(1, rule.a));
         int bN = Math.min(10, Math.max(1, rule.b));
@@ -943,18 +1023,23 @@ public final class Flow1000Ranker {
             }
             kept[i] = Arrays.copyOf(board.merged, n);
         }
-        int bestZ = -1;
-        int bestG = -1;
+        int bestRz = -1;
+        int bestRg = -1;
+        int bestOz = -1;
+        int bestOg = -1;
         int bestPos = -1;
         int bestDelta = 0;
+        int recentCut = Math.max(0, len - SHORT_RECENT);
         for (int pos = -1; pos <= 2; pos++) {
             int[] deltas = pos < 0 ? new int[]{0} : new int[]{-1, 1};
             for (int delta : deltas) {
                 int dh = pos == 0 ? delta : 0;
                 int dt = pos == 1 ? delta : 0;
                 int du = pos == 2 ? delta : 0;
-                int sz = 0;
-                int sg = 0;
+                int rz = 0;
+                int rg = 0;
+                int oz = 0;
+                int og = 0;
                 for (int i = 0; i < len; i++) {
                     int id = hot.draw[i];
                     int g = groupKey(id);
@@ -970,16 +1055,29 @@ public final class Flow1000Ranker {
                             group = true;
                         }
                     }
-                    if (direct) {
-                        sz++;
-                    }
-                    if (group) {
-                        sg++;
+                    if (i >= recentCut) {
+                        if (direct) {
+                            rz++;
+                        }
+                        if (group) {
+                            rg++;
+                        }
+                    } else {
+                        if (direct) {
+                            oz++;
+                        }
+                        if (group) {
+                            og++;
+                        }
                     }
                 }
-                if (sz > bestZ || (sz == bestZ && sg > bestG)) {
-                    bestZ = sz;
-                    bestG = sg;
+                if (rz > bestRz || (rz == bestRz && rg > bestRg)
+                        || (rz == bestRz && rg == bestRg && oz > bestOz)
+                        || (rz == bestRz && rg == bestRg && oz == bestOz && og > bestOg)) {
+                    bestRz = rz;
+                    bestRg = rg;
+                    bestOz = oz;
+                    bestOg = og;
                     bestPos = pos;
                     bestDelta = pos < 0 ? 0 : delta;
                 }
@@ -987,8 +1085,8 @@ public final class Flow1000Ranker {
         }
         ShortCand cand = new ShortCand();
         cand.rule = copyRule(rule, bestPos, bestDelta, 0);
-        cand.zx = Math.max(0, bestZ);
-        cand.grp = Math.max(0, bestG);
+        cand.zx = Math.max(0, bestRz + Math.max(0, bestOz));
+        cand.grp = Math.max(0, bestRg + Math.max(0, bestOg));
         return cand;
     }
 
@@ -7213,10 +7311,12 @@ public final class Flow1000Ranker {
                 trendGrp++;
             }
         }
+        String extra = pl3 ? supplementName(pl3, cache.rule) : "动态调整";
+        cache.note = "近" + cache.draws.size() + "期 " + extra + " " + trendZx + "直" + trendGrp + "组 "
+                + trendBody(cache.rule);
         saveTrend(trendFile, pl3);
         System.out.println(name + " 大趋势写下 " + cache.draws.size() + " 期。"
-                + trendNote(pl3) + "。这 " + cache.draws.size() + " 期里 "
-                + trendZx + " 个直选，" + trendGrp + " 个直选+组选");
+                + cache.note);
         System.out.println(name + " 近12" + marksN(digits, Math.max(from, digits.length - 12), digits.length, pl3, cache.rule, TREND_OUT));
     }
 
@@ -9041,6 +9141,9 @@ public final class Flow1000Ranker {
             }
             if (group) {
                 hit.grp++;
+                if (i >= times.length - 8) {
+                    hit.tailGrp++;
+                }
             }
             if (i >= times.length - SANMA_RECENT) {
                 if (direct) {
@@ -9482,6 +9585,8 @@ public final class Flow1000Ranker {
         int last;
         /** 窗口末尾 8 期的直选次数，用来看最近是不是连着没中。 */
         int tail;
+        /** 窗口末尾 8 期的组选次数，含直选。 */
+        int tailGrp;
         /** 这组票实际比较的注数，用来算重合。20 注扫描保持 20。 */
         int slots = 20;
         /** 窗口最后两期里，直选或组选命中的期数。 */
@@ -9616,7 +9721,9 @@ public final class Flow1000Ranker {
         for (int i = 0; i < times.length; i++) {
             int[] bets = compose(digits, times[i], cache[i], rule);
             int id = code(digits[times[i]]);
-            if (has(bets, id)) {
+            boolean direct = has(bets, id);
+            boolean group = groupHit(bets, id);
+            if (direct) {
                 hit.zx++;
                 if (i >= times.length - 8) {
                     hit.tail++;
@@ -9624,11 +9731,14 @@ public final class Flow1000Ranker {
                 if (i == times.length - 1) {
                     hit.last = 2;
                 }
-            } else if (i == times.length - 1 && groupHit(bets, id)) {
+            } else if (i == times.length - 1 && group) {
                 hit.last = 1;
             }
-            if (groupHit(bets, id)) {
+            if (group) {
                 hit.grp++;
+                if (i >= times.length - 8) {
+                    hit.tailGrp++;
+                }
             }
             if (prev != null) {
                 int share = intersect(prev, bets);
